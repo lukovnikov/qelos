@@ -96,7 +96,7 @@ def train(epoch):
             tt.live('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.data[0]))
-        tt.stoplive()
+    tt.stoplive()
     tt.tock("trained epoch")
 
 def test():
