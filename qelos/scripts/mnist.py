@@ -85,6 +85,7 @@ optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
 def train(epoch):
     model.train()
+    msg = ""
     for batch_idx, (data, target) in enumerate(train_loader):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -95,10 +96,12 @@ def train(epoch):
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            tt.live('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            msg = 'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.data[0]))
+                100. * batch_idx / len(train_loader), loss.data[0])
+            tt.live(msg)
     tt.stoplive()
+    tt.msg(msg)
 
 def test():
     model.eval()
