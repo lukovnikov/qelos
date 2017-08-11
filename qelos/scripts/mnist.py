@@ -53,6 +53,7 @@ test_loader = torch.utils.data.DataLoader(
                    ])),
     batch_size=args.batch_size, shuffle=True, **kwargs)
 tt.tock("data")
+tt.tick("preparing")
 
 class Net(nn.Module):
     def __init__(self):
@@ -121,7 +122,7 @@ def test():
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
 
-
+tt.tock("prepared")
 tt.tick("training")
 for epoch in range(1, args.epochs + 1):
     tt.tick("epoch {}".format(epoch))
