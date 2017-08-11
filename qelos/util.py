@@ -1,6 +1,6 @@
-import collections, inspect, argparse, numpy as np, sys
+import collections, inspect, argparse, numpy as np, sys, re, unidecode, nltk, signal
 from datetime import datetime as dt
-import re, unidecode, nltk
+from IPython import embed
 
 class ticktock(object):
     def __init__(self, prefix="-", verbose=True):
@@ -316,3 +316,15 @@ def tokenize(s, preserve_patterns=None):
     s = re.sub("`", "'", s)
     return tokens
 
+
+from torch.nn import functional as F
+
+
+def name2fn(x):
+    mapping = {"tanh": F.tanh,
+               "sigmoid": F.sigmoid,
+               "relu": F.relu,
+               "linear": F.linear,}
+    if x not in mapping:
+        raise Exception("unknown activation function name")
+    return mapping[x]
