@@ -8,6 +8,8 @@ from torchvision import datasets, transforms
 from torch.autograd import Variable
 from qelos.util import ticktock
 
+
+
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
@@ -34,6 +36,8 @@ if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
 
+tt = ticktock("script")
+tt.tick("data")
 kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 train_loader = torch.utils.data.DataLoader(
     datasets.MNIST('../data', train=True, download=True,
@@ -48,7 +52,7 @@ test_loader = torch.utils.data.DataLoader(
                        transforms.Normalize((0.1307,), (0.3081,))
                    ])),
     batch_size=args.batch_size, shuffle=True, **kwargs)
-
+tt.tock("data")
 
 class Net(nn.Module):
     def __init__(self):
@@ -78,11 +82,9 @@ if args.cuda:
 
 optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
-tt = ticktock("script")
 
 def train(epoch):
     model.train()
-    tt.tick("training epoch {}".format(epoch))
     for batch_idx, (data, target) in enumerate(train_loader):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -97,7 +99,6 @@ def train(epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.data[0]))
     tt.stoplive()
-    tt.tock("trained epoch")
 
 def test():
     model.eval()
@@ -113,11 +114,14 @@ def test():
         correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
     test_loss /= len(test_loader.dataset)
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+    tt.msg('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
 
 
+tt.tick("training")
 for epoch in range(1, args.epochs + 1):
+    tt.tick("epoch {}".format(epoch))
     train(epoch)
     test()
+    tt.tock("epoch {} trained".format(epoch))
