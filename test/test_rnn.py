@@ -1,5 +1,5 @@
 from unittest import TestCase
-from qelos.rnn import GRU, LSTM, BiRNNLayer
+import qelos.rnn as rnn
 from torch.autograd import Variable
 import torch
 import numpy as np
@@ -8,8 +8,8 @@ import numpy as np
 class TestGRU(TestCase):
     def test_gru_shapes(self):
         batsize = 5
-        GRU.debug = True
-        gru = GRU(9, 10)
+        rnn.GRU.debug = True
+        gru = rnn.GRU(9, 10)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_t, rg, ug = gru(x_t, h_tm1)
@@ -28,7 +28,7 @@ class TestGRU(TestCase):
         print(rg)
 
     def test_params_collected(self):
-        gru = GRU(9, 10)
+        gru = rnn.GRU(9, 10)
         param_gen = gru.parameters()
         params = []
         exp_params = set([gru.reset_gate.W, gru.reset_gate.U, gru.update_gate.W, gru.update_gate.U, gru.main_gate.W, gru.main_gate.U])
@@ -41,8 +41,8 @@ class TestGRU(TestCase):
 
     def test_zoneout(self):
         batsize = 5
-        GRU.debug = False
-        gru = GRU(9, 10, zoneout=0.5)
+        rnn.GRU.debug = False
+        gru = rnn.GRU(9, 10, zoneout=0.5)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_t, y_t = gru(x_t, h_tm1)
@@ -65,8 +65,8 @@ class TestGRU(TestCase):
 class TestLSTM(TestCase):
     def test_lstm_shapes(self):
         batsize = 5
-        LSTM.debug = True
-        lstm = LSTM(9, 10)
+        rnn.LSTM.debug = True
+        lstm = rnn.LSTM(9, 10)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
@@ -75,8 +75,8 @@ class TestLSTM(TestCase):
 
     def test_zoneout(self):
         batsize = 5
-        LSTM.debug = False
-        lstm = LSTM(9, 10, zoneout=0.5)
+        rnn.LSTM.debug = False
+        lstm = rnn.LSTM(9, 10, zoneout=0.5)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
@@ -101,8 +101,8 @@ class Test_RNNLayer(TestCase):
     def test_lstm_layer_shapes(self):
         batsize = 5
         seqlen = 7
-        LSTM.debug = False
-        lstm = LSTM(9, 10)
+        rnn.LSTM.debug = False
+        lstm = rnn.LSTM(9, 10)
         lstm = lstm.to_layer().return_all()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         y = lstm(x)
@@ -111,8 +111,8 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru(self):
         batsize = 3
         seqlen = 4
-        GRU.debug = False
-        gru = GRU(9, 10)
+        rnn.GRU.debug = False
+        gru = rnn.GRU(9, 10)
         gru = gru.to_layer().return_all()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
@@ -124,8 +124,8 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru_reverse(self):
         batsize = 3
         seqlen = 4
-        GRU.debug = False
-        gru = GRU(9, 10)
+        rnn.GRU.debug = False
+        gru = rnn.GRU(9, 10)
         gru = gru.to_layer().return_all().return_final()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
@@ -137,10 +137,10 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru_bidir(self):
         batsize = 3
         seqlen = 4
-        GRU.debug = False
-        gru = GRU(9, 5)
-        gru2 = GRU(9, 5)
-        layer = BiRNNLayer(gru, gru2, mode="cat").return_final().return_all()
+        rnn.GRU.debug = False
+        gru = rnn.GRU(9, 5)
+        gru2 = rnn.GRU(9, 5)
+        layer = rnn.BiRNNLayer(gru, gru2, mode="cat").return_final().return_all()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
         m = Variable(torch.FloatTensor(m_val))

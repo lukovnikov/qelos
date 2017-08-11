@@ -371,8 +371,4 @@ class RecStack(Reccable):
         return RNNLayer(self)
 
 
-class RNN(object):
-    """
-    main builder object, convenience methods
-    """
-    pass        # TODO
+# TODO port attention, decoder, seq2seq, ptrnet
