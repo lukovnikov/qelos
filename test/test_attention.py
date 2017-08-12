@@ -1,5 +1,5 @@
 from unittest import TestCase
-from qelos.encdec import Attention
+from qelos.seq import Attention
 import torch
 from torch import nn
 from torch.autograd import Variable

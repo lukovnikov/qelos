@@ -4,6 +4,22 @@ from torch.nn import functional as F
 from qelos.util import name2fn
 
 
+class Stack(nn.Module):
+    def __init__(self, *layers):
+        super(Stack, self).__init__()
+        self.layers = nn.ModuleList(list(layers))
+
+    def add(self, *layers):
+        self.layers.extend(list(layers))
+
+    def forward(self, *x, **kw):
+        for layer in self.layers:
+            x = layer(*x, **kw)
+        return x
+
+    # TODO: stack generator
+
+
 class Softmax(nn.Module):
     def __init__(self, temperature=1.):
         super(Softmax, self).__init__()

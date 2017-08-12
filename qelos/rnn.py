@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 from qelos.util import name2fn, issequence, isnumber
+from qelos.basic import Stack
 
 
 # region I. RNN cells
@@ -47,7 +48,7 @@ class Reccable(nn.Module):
         return len(self.state_spec)
 
 
-class RNUBase(nn.Module):
+class RNUBase(Reccable):
     def to_layer(self):
         return RNNLayer(self)
 
@@ -324,30 +325,29 @@ class BiRNNLayer(nn.Module):
 
 
 # region II. RNN stacks
-class RecStack(Reccable):
+class RecStack(Reccable, Stack):
     """
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
-    def __init__(self):
-        super(RecStack, self).__init__()
-        self.layers = []
-
-    def add_layer(self, x):
-        self.layers.append(x)
-
-    def forward(self, x_t, *states, **kwargs):
+    def forward(self, *args, **kwargs):
+        x_t = args[:self.numstates]
+        states = args[self.numstates:]
         y_t = x_t
-        newstates = []
+        newstates = tuple()
         for layer in self.layers:
             if isinstance(layer, Reccable) and layer.numstates > 0:
                 layerstates = states[:layer.numstates]
                 states = states[layer.numstates:]
-                layer_ret = layer(y_t, *layerstates, **kwargs)
+                layer_ret = layer(*(y_t + layerstates), **kwargs)
                 if not issequence(layer_ret):
                     layer_ret = [layer_ret]
-                y_t = layer_ret[0]
-                newstates += list(layer_ret[1:])
-        return tuple([y_t] + newstates)
+                y_t = layer_ret[:layer.numstates]
+                newstates += layer_ret[layer.numstates:]
+            else:
+                y_t = layer(*y_t)
+                if not issequence(y_t):
+                    y_t = tuple([y_t])
+        return y_t + newstates
 
     @property
     def state_spec(self):
@@ -370,5 +370,8 @@ class RecStack(Reccable):
     def to_layer(self):
         return RNNLayer(self)
 
+    # TODO: test for visibility of modules and their params
 
-# TODO port attention, decoder, seq2seq, ptrnet,
+    # TODO RecStack with named layers to subclass for easier custom forward logic without the init state stuff
+    # TODO: support random layer-temporal connection patterns -> "future" matrix    (also states?)
+    #       this normal RecStack is one instantiation
