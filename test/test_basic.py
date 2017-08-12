@@ -1,6 +1,6 @@
 from __future__ import print_function
 from unittest import TestCase
-from qelos.basic import Softmax, LogSoftmax, SoftmaxLog, DotDistance, ForwardDistance, BilinearDistance, TrilinearDistance
+from qelos.basic import Softmax, LogSoftmax, SoftmaxLog, DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance
 import torch
 from torch.autograd import Variable
 import numpy as np
@@ -165,6 +165,14 @@ class TestDistance(TestCase):
         d = m(a, b).data.numpy()
         self.assertTrue(np.allclose(d[0], np.dot(a.data.numpy()[0], b.data.numpy()[0])))
         print(d)
+
+    def test_cosine_dist_shape(self):
+        m = CosineDistance()
+        a = Variable(torch.FloatTensor(np.random.random((5,3,4))))
+        b = Variable(torch.FloatTensor(np.random.random((5,4))))
+        d = m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5, 3))
+        #self.assertTrue(np.allclose(d[0], np.dot(a.data.numpy()[0], b.data.numpy()[0])))   # TODO
 
     def test_fwd_distance_shape(self):
         m = ForwardDistance(4, 4, 8)

@@ -123,6 +123,20 @@ class DotDistance(Distance):
         return dist.squeeze()
 
 
+class CosineDistance(DotDistance):
+    def forward(self, data, crit):
+        dots = super(CosineDistance, self).forward(data, crit)
+        lnorms = data.norm(2, -1)
+        rnorms = crit.norm(2, -1)
+        if data.dim() == 3:
+            rnorms = rnorms.unsqueeze(1)
+        dots = dots.div(lnorms)
+        dots = dots.div(rnorms)
+        return dots
+
+# TODO: Euclidean and LNorm distances, Cosine distance
+
+
 class ForwardDistance(Distance):
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=True):
         super(ForwardDistance, self).__init__()
