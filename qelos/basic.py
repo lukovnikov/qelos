@@ -134,7 +134,7 @@ class CosineDistance(DotDistance):
         dots = dots.div(rnorms)
         return dots
 
-# TODO: Euclidean and LNorm distances, Cosine distance
+# TODO: Euclidean and LNorm distances
 
 
 class ForwardDistance(Distance):
