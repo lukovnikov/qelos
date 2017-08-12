@@ -55,7 +55,7 @@ class ModuleList(nn.Module):
         Arguments:
             module (nn.Module): module to append
         """
-        newhash = str(random.getrandbits(32))
+        newhash = self._make_new_hash()
         self._ordering.append(newhash)
         self.add_module(newhash, module)
         return self
@@ -66,7 +66,7 @@ class ModuleList(nn.Module):
             i (int): position where to insert
             module (nn.Module): module to insert
         """
-        newhash = str(random.getrandbits(32))
+        newhash = self._make_new_hash()
         self._ordering.insert(i, newhash)
         self.add_module(newhash, module)
         return self
@@ -80,7 +80,13 @@ class ModuleList(nn.Module):
             raise TypeError("ModuleList.extend should be called with a "
                             "list, but got " + type(modules).__name__)
         for i, module in enumerate(modules):
-            newhash = str(random.getrandbits(32))
+            newhash = self._make_new_hash()
             self._ordering.append(newhash)
             self.add_module(newhash, module)
         return self
+
+    def _make_new_hash(self):
+        newhash = str(random.getrandbits(32))
+        while newhash in self._modules:
+            newhash = str(random.getrandbits(32))
+        return newhash

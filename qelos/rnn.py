@@ -330,8 +330,8 @@ class RecStack(Reccable, Stack):
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
     def forward(self, *args, **kwargs):
-        x_t = args[:self.numstates]
-        states = args[self.numstates:]
+        x_t = args[:-self.numstates]
+        states = args[-self.numstates:]
         y_t = x_t
         newstates = tuple()
         for layer in self.layers:
@@ -341,8 +341,8 @@ class RecStack(Reccable, Stack):
                 layer_ret = layer(*(y_t + layerstates), **kwargs)
                 if not issequence(layer_ret):
                     layer_ret = [layer_ret]
-                y_t = layer_ret[:layer.numstates]
-                newstates += layer_ret[layer.numstates:]
+                y_t = layer_ret[:-layer.numstates]
+                newstates += layer_ret[-layer.numstates:]
             else:
                 y_t = layer(*y_t)
                 if not issequence(y_t):

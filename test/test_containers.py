@@ -13,12 +13,11 @@ class TestModuleList(TestCase):
             for m1, m2 in zip(modules, module_list):
                 self.assertIs(m1, m2)
             children = list(module_list.children())
+            # children don't have to be ordered in the order of module_list
             for m1 in modules:      # every module is a child of module_list
                 self.assertIn(m1, children)
             for m2 in children:     # every child is in modules
                 self.assertIn(m2, modules)
-            #for m1, m2 in zip(modules, module_list.children()):     # do the children also have to be ordered?
-            #    self.assertIs(m1, m2)
             for i in range(len(modules)):
                 self.assertIs(module_list[i], modules[i])
 

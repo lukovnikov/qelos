@@ -198,25 +198,33 @@ class SimpleDecoderCell(ADecoderCell):
         return x[0][:, t]
 
 
-class ContextDecoderCell(SimpleDecoderCell):
+class ContextDecoderCell(ADecoderCell):
     """
     Decoder based on static context. First layer in used stack must be embedder
     """
-    def forward(self, x_t, ctx, *states, **kw):
+    def __init__(self, *layers):
+        layers = list(layers)
+        if isinstance(layers[0], nn.Embedding):
+            embedder = layers[0]
+            def inner(x, ctx):
+                emb = embedder(x)
+                y = torch.cat([emb, ctx], 1)
+                return y
+            layers[0] = Lambda(inner, register_modules=embedder)
+        else:
+            lbd = Lambda(lambda x, ctx: torch.cat([x, ctx], 1))
+            layers += [lbd] + layers
+        super(ContextDecoderCell, self).__init__(*layers)
+
+    def get_inputs_t(self, t, x, y_t):
         """
-        :param x_t: (batsize, ...), input for current timestep
-        :param ctx: (batsize, ...), static context vector for all timesteps
-        :param states: list of (batsize, ...) states
-        :param kw:
-        :return: (batsize, ...), output for current timestep, and list of new states
+        :param t: timestep
+        :param x: (batsize, seqlen, ...) input sequence
+        :param y_t: (batsize, ...) output
+        :return: x_t, (batsize, ...), sliced from x using t
         """
-        assert(isinstance(self.layers[0], nn.Embedding))
-        
-        embedder = self.layers[0]
-        embedding = embedder(x_t)
-        stack_inp = torch.cat([embedding, ctx], 1)
-        ret = rest_of_stack(stack_inp, *states)
-        return ret
+        return x[0][:, t], x[1]
+
 
 class AttentionDecoderCell(ADecoderCell):
     """

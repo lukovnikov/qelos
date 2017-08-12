@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from qelos.util import name2fn
+from qelos.util import name2fn, issequence
+from qelos.containers import ModuleList
 
 
 class Lambda(nn.Module):
@@ -11,8 +12,12 @@ class Lambda(nn.Module):
         self.fn = fn
         # optionally registers passed modules and params
         if register_modules is not None:
-            self.extra_modules = nn.ModuleList(register_modules)
+            if not issequence(register_modules):
+                register_modules = [register_modules]
+            self.extra_modules = ModuleList(register_modules)
         if register_params is not None:
+            if not issequence(register_params):
+                register_params = [register_params]
             self.extra_params = nn.ParameterList(register_params)
 
     def forward(self, *x, **kwargs):
@@ -22,7 +27,7 @@ class Lambda(nn.Module):
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
-        self.layers = nn.ModuleList(list(layers))
+        self.layers = ModuleList(list(layers))
 
     def add(self, *layers):
         self.layers.extend(list(layers))
