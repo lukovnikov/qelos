@@ -18,13 +18,13 @@ class RNUGate(nn.Module):
             self.b = nn.Parameter(torch.FloatTensor(1, self.outdim))
         else:
             self.register_parameter("b", None)
-        self.reset_params()
+        self.reset_parameters()
 
-    def reset_params(self):
+    def reset_parameters(self):
         nn.init.xavier_uniform(self.W, gain=nn.init.calculate_gain(self.activation))
         nn.init.xavier_uniform(self.U, gain=nn.init.calculate_gain(self.activation))
         if self.use_bias:
-            nn.init.uniform(self.b, -1, 1)
+            nn.init.uniform(self.b, -0.01, 0.01)
 
     def forward(self, x, h, debug=False):
         ret = torch.mm(x, self.W)
@@ -80,10 +80,10 @@ class RNU(RNUBase):
         if self.zoneout:
             self.zoneout = nn.Dropout(p=self.zoneout)
 
-        self.reset_params()
+        self.reset_parameters()
 
-    def reset_params(self):
-        self.main_gate.reset_params()
+    def reset_parameters(self):
+        self.main_gate.reset_parameters()
 
     @property
     def state_spec(self):
@@ -123,12 +123,12 @@ class GRU(RNUBase):
         if self.zoneout:
             self.zoneout = nn.Dropout(p=self.zoneout)
 
-        self.reset_params()
+        self.reset_parameters()
 
-    def reset_params(self):
-        self.update_gate.reset_params()
-        self.reset_gate.reset_params()
-        self.main_gate.reset_params()
+    def reset_parameters(self):
+        self.update_gate.reset_parameters()
+        self.reset_gate.reset_parameters()
+        self.main_gate.reset_parameters()
 
     @property
     def state_spec(self):
@@ -177,13 +177,13 @@ class LSTM(RNUBase):
             self.zoneout = nn.Dropout(p=self.zoneout)
         # endregion
 
-        self.reset_params()
+        self.reset_parameters()
 
-    def reset_params(self):
-        self.forget_gate.reset_params()
-        self.input_gate.reset_params()
-        self.output_gate.reset_params()
-        self.main_gate.reset_params()
+    def reset_parameters(self):
+        self.forget_gate.reset_parameters()
+        self.input_gate.reset_parameters()
+        self.output_gate.reset_parameters()
+        self.main_gate.reset_parameters()
 
     @property
     def state_spec(self):

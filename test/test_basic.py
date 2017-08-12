@@ -1,6 +1,6 @@
 from __future__ import print_function
 from unittest import TestCase
-from qelos.basic import Softmax, LogSoftmax, SoftmaxLog
+from qelos.basic import Softmax, LogSoftmax, SoftmaxLog, DotDistance, ForwardDistance, BilinearDistance
 import torch
 from torch.autograd import Variable
 import numpy as np
@@ -155,6 +155,30 @@ class TestLogsoftmax(TestCase):
         print(pred2)
         self.assertTrue(np.allclose(pred[:, 1], np.log(np.zeros_like(pred[:, 1]))))
         self.assertTrue(np.allclose(pred[:, [0, 2]], pred2, rtol=1e-3))
+
+
+class TestDistance(TestCase):
+    def test_dot_dist(self):
+        m = DotDistance()
+        a = Variable(torch.FloatTensor(np.random.random((5,3,4))))
+        b = Variable(torch.FloatTensor(np.random.random((5,4))))
+        d = m(a, b).data.numpy()
+        self.assertTrue(np.allclose(d[0], np.dot(a.data.numpy()[0], b.data.numpy()[0])))
+        print(d)
+
+    def test_fwd_distance(self):
+        m = ForwardDistance(4, 4, 8)
+        a = Variable(torch.FloatTensor(np.random.random((5, 3, 4))))
+        b = Variable(torch.FloatTensor(np.random.random((5, 4))))
+        d = m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5, 3))
+
+    def test_bilin_distance(self):
+        m = BilinearDistance(4, 4, 8)
+        a = Variable(torch.FloatTensor(np.random.random((5, 3, 4))))
+        b = Variable(torch.FloatTensor(np.random.random((5, 4))))
+        d = m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5, 3))
 
 
 
