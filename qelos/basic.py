@@ -4,6 +4,21 @@ from torch.nn import functional as F
 from qelos.util import name2fn
 
 
+class Lambda(nn.Module):
+    """ Lambda layer. Don't use for any operations introducing parameters (won't get registered maybe). """
+    def __init__(self, fn, register_params=None, register_modules=None):
+        super(Lambda, self).__init__()
+        self.fn = fn
+        # optionally registers passed modules and params
+        if register_modules is not None:
+            self.extra_modules = nn.ModuleList(register_modules)
+        if register_params is not None:
+            self.extra_params = nn.ParameterList(register_params)
+
+    def forward(self, *x, **kwargs):
+        return self.fn(*x, **kwargs)
+
+
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()

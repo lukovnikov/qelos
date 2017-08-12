@@ -9,20 +9,23 @@ from torch.autograd import Variable
 
 
 class TestDecoder(TestCase):
-    def test_simple_decoder(self):
+    def test_simple_decoder_shape(self):
         batsize, seqlen, vocsize = 5, 4, 7
         embdim, encdim, outdim = 10, 16, 10
-        recstack = RecStack(
+        # model def
+        decoder_cell = SimpleDecoderCell(
             nn.Embedding(vocsize, embdim, padding_idx=0),
             GRU(embdim, encdim),
             Forward(encdim, vocsize),
             Softmax()
         )
-        decoder_cell = SimpleDecoderCell(recstack)
         decoder = decoder_cell.to_decoder()
+        # end model def
         data = np.random.randint(0, vocsize, (batsize, seqlen))
         data = Variable(torch.LongTensor(data))
 
         decoded = decoder(data)[0].data.numpy()
-        self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))
-        self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))
+        self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))     # shape check
+        self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
+
+

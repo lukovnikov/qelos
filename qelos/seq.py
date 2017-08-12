@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax
+from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable
 from qelos.util import issequence
 from torch.autograd import Variable
@@ -127,15 +127,14 @@ class Decoder(nn.Module):
 
 # implementing a new decoder just needs subclassing ADecoderCell and calling .to_decoder() on it
 
-class ADecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
+class ADecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
     """
     The recurrence of the decoder. Subclass this and then call .to_decoder() to get decoder
     """
     _teacher_unforcing_support = False                  # OVERRIDE THIS  to enable teacher unforcing args
 
-    def __init__(self, reccable=None):
-        super(ADecoderCell, self).__init__()
-        self.block = reccable
+    def __init__(self, *layers):
+        super(ADecoderCell, self).__init__(*layers)
         self.teacher_force = 1
 
     def teacher_force(self, frac=1):        # set teacher forcing
@@ -152,17 +151,18 @@ class ADecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
         :param kw: more arguments, might include time step as t=
         :return: outputs of one decoding timestep (list of tensors)
         """
-        raise NotImplementedError("use subclass")
+        return super(ADecoderCell, self).forward(*x, **kw)      # calls RecStack's .forward()
 
     def get_init_states(self, batsize, *x):             # OVERRIDE THIS
         """
         Must return initial states for all stateful submodules. Lower layers are first, more internal states are first
         Must be implemented in all real decoder cells.
+        Overrides RecStack's get_init_states(arg)
         :param batsize: batch size (integer)
         :param x: original inputs to decoder (list of tensors)
         :return: initial states for all stateful submodules (list of tensors)
         """
-        raise NotImplementedError("use subclass")
+        return super(ADecoderCell, self).get_init_states(batsize)   # calls RecStack's .get_init_states() with batch size to get zero states
 
     def get_inputs_t(self, t, x, y_t):                  # OVERRIDE THIS
         """
@@ -179,11 +179,6 @@ class ADecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
         """
         raise NotImplementedError("use subclass")
 
-    @property
-    def state_spec(self):
-        """ Reuse internal block. Override if introducing additional stateful components """
-        return self.block.state_spec
-
     def to_decoder(self):
         """ Makes a decoder from this decoder cell """
         return Decoder(self)
@@ -193,15 +188,6 @@ class SimpleDecoderCell(ADecoderCell):
     """
     Simple decoder not relying on any context.
     """
-    def forward(self, x_t, *states, **kw):
-        """
-        :param x_t: (batsize, ...), input for current timestep
-        :param t: (possible) timestep
-        :param kw:
-        :return: (batsize, ...), output for current timestep
-        """
-        return self.block(x_t, *states)
-
     def get_inputs_t(self, t, x, y_t):
         """
         :param t: timestep
@@ -211,15 +197,26 @@ class SimpleDecoderCell(ADecoderCell):
         """
         return x[0][:, t]
 
-    def get_init_states(self, batsize, *x):
-        return self.block.get_init_states(batsize)  # blank initial states, no context
 
-
-class ContextDecoderCell(ADecoderCell):
+class ContextDecoderCell(SimpleDecoderCell):
     """
-    Decoder based on static context     # TODO
+    Decoder based on static context. First layer in used stack must be embedder
     """
-
+    def forward(self, x_t, ctx, *states, **kw):
+        """
+        :param x_t: (batsize, ...), input for current timestep
+        :param ctx: (batsize, ...), static context vector for all timesteps
+        :param states: list of (batsize, ...) states
+        :param kw:
+        :return: (batsize, ...), output for current timestep, and list of new states
+        """
+        assert(isinstance(self.layers[0], nn.Embedding))
+        
+        embedder = self.layers[0]
+        embedding = embedder(x_t)
+        stack_inp = torch.cat([embedding, ctx], 1)
+        ret = rest_of_stack(stack_inp, *states)
+        return ret
 
 class AttentionDecoderCell(ADecoderCell):
     """
