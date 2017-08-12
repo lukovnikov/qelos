@@ -148,8 +148,26 @@ class ForwardDistance(Distance):
 
 
 class BilinearDistance(Distance):
-    def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=True):
+    def __init__(self, ldim, rdim):
         super(BilinearDistance, self).__init__()
+        self.block = nn.Bilinear(ldim, rdim, 1, bias=False)
+
+    def forward(self, data, crit):
+        datadim = data.dim()
+        datashape = data.size()
+        if datadim == 3:
+            crit = crit.unsqueeze(1).expand_as(data)
+            data = data.view(-1, data.size(-1))
+            crit = crit.contiguous().view(-1, crit.size(-1))
+        bilinsum = self.block(data, crit)
+        dists = bilinsum.squeeze()
+        dists = dists.view(*datashape[:-1])
+        return dists
+
+
+class TrilinearDistance(Distance):
+    def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=True):
+        super(TrilinearDistance, self).__init__()
         self.block = nn.Bilinear(ldim, rdim, aggdim, bias=use_bias)
         self.activation = name2fn(activation)
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
