@@ -1,6 +1,6 @@
 from __future__ import print_function
 from unittest import TestCase
-from qelos.seq import Decoder, SimpleDecoderCell, ContextDecoderCell
+from qelos.seq import Decoder, DecoderCell, ContextDecoderCell
 from qelos.rnn import RecStack, GRU
 from qelos.basic import Forward, Softmax
 import torch, numpy as np
@@ -13,7 +13,7 @@ class TestDecoder(TestCase):
         batsize, seqlen, vocsize = 5, 4, 7
         embdim, encdim, outdim = 10, 16, 10
         # model def
-        decoder_cell = SimpleDecoderCell(
+        decoder_cell = DecoderCell(
             nn.Embedding(vocsize, embdim, padding_idx=0),
             GRU(embdim, encdim),
             Forward(encdim, vocsize),

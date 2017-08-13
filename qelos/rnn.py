@@ -39,6 +39,9 @@ class RNUGate(nn.Module):
 
 
 class Reccable(nn.Module):
+    def __init__(self, *x, **kw):
+        super(Reccable, self).__init__(*x, **kw)
+        self._init_states = None
     @property
     def state_spec(self):
         raise NotImplementedError("use subclass")
@@ -47,20 +50,57 @@ class Reccable(nn.Module):
     def numstates(self):
         return len(self.state_spec)
 
+    def get_init_states(self, arg):
+        raise NotImplementedError("use subclass. subclasses must implement this method")
+
+    def set_init_states(self, *states):
+        raise NotImplementedError("use subclass. subclasses must implement this method")
+
 
 class RNUBase(Reccable):
     def to_layer(self):
         return RNNLayer(self)
 
     def get_init_states(self, arg):
-        if isnumber(arg):   # batsize --> generate
-            ret = []
-            for statespec in self.state_spec:
+        """
+        :param arg: batch size
+        :return: initial states, states that have previously been set or newly generated zero states based on given batch size
+        """
+        assert(isnumber(arg))       # is batch size
+        if self._init_states is None:       # no states have been set using .set_init_states()
+            self._init_states = [None] * self.numstates
+        # fill up with zeros and expand where necessary
+        assert(self.numstates == len(self._init_states))
+        for i in range(len(self._init_states)):
+            statespec = self.state_spec[i]
+            initstate = self._init_states[i]
+            if initstate is None:
                 state_0 = Variable(torch.zeros((arg, statespec)))
-                ret.append(state_0)
-        else:
-            raise NotImplementedError("can't handle other args yet")
-        return ret
+                self._init_states[i] = state_0
+            elif initstate.dim() == 2:        # init state set differently for different batches
+                pass
+            elif initstate.dim() == 1:
+                self._init_states[i] = initstate.unsqueeze(0).expand(arg, initstate.size(-1))
+            else:
+                raise Exception("initial states set to wrong dimensional values. Must be 1D (will be repeated) or 2D.")
+        return self._init_states
+
+    def set_init_states(self, *states):
+        """
+        Sets initial states of this RNU element to provided states
+        :param states: list of tensors (batsize, dim) or (dim), can be smaller (will be filled up with zeros)
+        :return:
+        """
+        assert(len(states) <= self.numstates)
+        self._init_states = []
+        i = 0
+        for statespec in self.state_spec:
+            if i < len(states):
+                assert(statespec == states[i].size(-1))
+                self._init_states.append(states[i])
+            else:
+                self._init_states.append(None)
+            i += 1
 
 
 class RNU(RNUBase):
@@ -213,6 +253,7 @@ class LSTM(RNUBase):
 
 # endregion
 
+
 class RNNLayer(nn.Module):
     """
     Unrolling an RNN cell over timesteps of a sequence
@@ -358,17 +399,26 @@ class RecStack(Reccable, Stack):
         return statespec
 
     def get_init_states(self, arg):
+        assert(isnumber(arg))
         initstates = tuple()
-        if isnumber(arg):       # batsize
-            for layer in self.layers:
-                if hasattr(layer, "get_init_states"):
-                    initstates += tuple(layer.get_init_states(arg))
-        else:
-            raise NotImplementedError("other args not supported yet")
+        for layer in self.layers:
+            if hasattr(layer, "get_init_states"):
+                initstates += tuple(layer.get_init_states(arg))
         return initstates
+
+    def set_init_states(self, *states):
+        for layer in self.layers:
+            if hasattr(layer, "set_init_states"):
+                if len(states) == 0:        # no states left to set
+                    break
+                statesforlayer = states[:min(len(states), layer.numstates)]
+                states = states[min(len(states), layer.numstates):]
+                layer.set_init_states(*statesforlayer)
 
     def to_layer(self):
         return RNNLayer(self)
+
+
 
     # TODO: test for visibility of modules and their params
 

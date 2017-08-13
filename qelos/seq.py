@@ -76,12 +76,6 @@ class Attention(nn.Module):
         return self
 # endregion
 
-# TODO rnn/cnn encoders, decoders, encdec, seq2seq, ptrnet, teacher forcing etc
-
-
-class SeqVariable(Variable):
-    sequence = True
-
 
 class Decoder(nn.Module):
     """
@@ -101,7 +95,10 @@ class Decoder(nn.Module):
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
-        init_states = self.block.get_init_states(batsize, *x)
+        new_init_states = self.block.compute_init_states(*x, **kw)
+        if new_init_states is not None:
+            self.block.set_init_states(*new_init_states)
+        init_states = self.block.get_init_states(batsize)
         states_t = init_states
         y_list = []
         y_t = None
@@ -125,16 +122,16 @@ class Decoder(nn.Module):
         return tuple(y)
 
 
-# implementing a new decoder just needs subclassing ADecoderCell and calling .to_decoder() on it
+# implementing a new decoder just needs subclassing DecoderCell and calling .to_decoder() on it
 
-class ADecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
+class DecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
     """
     The recurrence of the decoder. Subclass this and then call .to_decoder() to get decoder
     """
     _teacher_unforcing_support = False                  # OVERRIDE THIS  to enable teacher unforcing args
 
     def __init__(self, *layers):
-        super(ADecoderCell, self).__init__(*layers)
+        super(DecoderCell, self).__init__(*layers)
         self.teacher_force = 1
 
     def teacher_force(self, frac=1):        # set teacher forcing
@@ -151,18 +148,7 @@ class ADecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
         :param kw: more arguments, might include time step as t=
         :return: outputs of one decoding timestep (list of tensors)
         """
-        return super(ADecoderCell, self).forward(*x, **kw)      # calls RecStack's .forward()
-
-    def get_init_states(self, batsize, *x):             # OVERRIDE THIS
-        """
-        Must return initial states for all stateful submodules. Lower layers are first, more internal states are first
-        Must be implemented in all real decoder cells.
-        Overrides RecStack's get_init_states(arg)
-        :param batsize: batch size (integer)
-        :param x: original inputs to decoder (list of tensors)
-        :return: initial states for all stateful submodules (list of tensors)
-        """
-        return super(ADecoderCell, self).get_init_states(batsize)   # calls RecStack's .get_init_states() with batch size to get zero states
+        return super(DecoderCell, self).forward(*x, **kw)      # calls RecStack's .forward()
 
     def get_inputs_t(self, t, x, y_t):                  # OVERRIDE THIS
         """
@@ -177,30 +163,24 @@ class ADecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
         :param y_t: previous outputs of this cell (list of tensors or None). If None, no previous outputs have been output yet
         :return: actual inputs to .forward() of this decoder cell (list of tensors)
         """
-        raise NotImplementedError("use subclass")
+        return x[0][:, t]
+
+    def compute_init_states(self, *x, **kw):            # OVERRIDE THIS
+        """
+        Compute new initial states for the reccable elements in the decoder's rec stack
+        :param x: the original inputs
+        :return: possibly incomplete list of initial states to set, or None
+        """
+        return None
 
     def to_decoder(self):
         """ Makes a decoder from this decoder cell """
         return Decoder(self)
 
 
-class SimpleDecoderCell(ADecoderCell):
+class ContextDecoderCell(DecoderCell):
     """
-    Simple decoder not relying on any context.
-    """
-    def get_inputs_t(self, t, x, y_t):
-        """
-        :param t: timestep
-        :param x: (batsize, seqlen, ...) input sequence
-        :param y_t: (batsize, ...) output
-        :return: x_t, (batsize, ...), sliced from x using t
-        """
-        return x[0][:, t]
-
-
-class ContextDecoderCell(ADecoderCell):
-    """
-    Decoder based on static context. First layer in used stack must be embedder
+    Decoder based on static context. Feeds context to every time step, concat to input/embedding vector
     """
     def __init__(self, *layers):
         layers = list(layers)
@@ -226,7 +206,7 @@ class ContextDecoderCell(ADecoderCell):
         return x[0][:, t], x[1]
 
 
-class AttentionDecoderCell(ADecoderCell):
+class AttentionDecoderCell(DecoderCell):
     """
     Recurrence of decoder with attention    # TODO
     """
