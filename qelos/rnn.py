@@ -39,9 +39,19 @@ class RNUGate(nn.Module):
 
 
 class Reccable(nn.Module):
+    """
+    Accepts mask_t and t in its forward kwargs.
+    """
+
+
+class RecStateful(Reccable):
+    """
+    Stores recurrent state.
+    """
     def __init__(self, *x, **kw):
-        super(Reccable, self).__init__(*x, **kw)
+        super(RecStateful, self).__init__(*x, **kw)
         self._init_states = None
+        self._states = None
 
     @property
     def state_spec(self):
@@ -51,16 +61,38 @@ class Reccable(nn.Module):
     def numstates(self):
         return len(self.state_spec)
 
-    def get_init_states(self, arg):
+    def get_states(self, arg):
         raise NotImplementedError("use subclass. subclasses must implement this method")
+
+    def set_states(self, *states):
+        raise NotImplementedError("use subclass. subclasses must implement this method")
+
+    def reset_state(self):
+        self._states = None
 
     def set_init_states(self, *states):
         raise NotImplementedError("use subclass. subclasses must implement this method")
 
+    def get_init_states(self, arg):
+        raise NotImplementedError("use subclass. subclasses must implement this method")
 
-class RNUBase(Reccable):
+
+class RNUBase(RecStateful):
     def to_layer(self):
         return RNNLayer(self)
+
+    def get_states(self, arg):
+        if self._states is None:    # states don't exist yet
+            self._states = []
+            for initstate in self.get_init_states(arg):
+                self._states.append(initstate)
+        return self._states
+
+    def set_states(self, *states):
+        assert(len(states) == len(self._states))
+        for i, state in enumerate(states):
+            assert(state.size() == self._states[i].size())
+            self._states[i] = state
 
     def get_init_states(self, arg):
         """
@@ -103,6 +135,26 @@ class RNUBase(Reccable):
                 self._init_states.append(None)
             i += 1
 
+    def forward(self, *x_t, **kw):
+        mask_t = kw["mask_t"] if "mask_t" in kw else None
+        t = kw["t"] if "t" in kw else None
+        batsize = x_t[0].size(0)
+        states = self.get_states(batsize)
+        ret = self._forward(*(list(x_t) + states), t=t)
+        y_t = ret[:-self.numstates]
+        newstates = ret[-self.numstates:]
+        st = []
+        if mask_t is not None:
+            for newstate, oldstate in zip(newstates, states):
+                newstate = newstate * mask_t + oldstate * (1 - mask_t)
+                st.append(newstate)
+        else:
+            st = newstates
+        self.set_states(*st)
+        if len(y_t) == 1:
+            y_t = y_t[0]
+        return y_t
+
 
 class RNU(RNUBase):
     debug = False
@@ -131,7 +183,7 @@ class RNU(RNUBase):
     def state_spec(self):
         return self.outdim,
 
-    def forward(self, x_t, h_tm1, t=None):
+    def _forward(self, x_t, h_tm1, t=None):
         if self.dropout_in:
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
@@ -176,7 +228,7 @@ class GRU(RNUBase):
     def state_spec(self):
         return self.outdim,
 
-    def forward(self, x_t, h_tm1, t=None):      # (batsize, indim), (batsize, outdim)
+    def _forward(self, x_t, h_tm1, t=None):      # (batsize, indim), (batsize, outdim)
         if self.dropout_in:
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
@@ -231,7 +283,7 @@ class LSTM(RNUBase):
     def state_spec(self):
         return self.outdim, self.outdim
 
-    def forward(self, x_t, c_tm1, y_tm1, t=None):
+    def _forward(self, x_t, c_tm1, y_tm1, t=None):
         # region apply dropouts
         if self.dropout_in:
             x_t = self.dropout_in(x_t)
@@ -274,7 +326,9 @@ class RNNLayer(nn.Module):
 
     def forward(self, x, mask=None, init_states=None, reverse=False):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
         batsize = x.size(0)
-        states = init_states if init_states is not None else self.cell.get_init_states(batsize)
+        if init_states is not None:
+            self.cell.set_init_states(*init_states)
+        self.cell.reset_state()
         mask = mask if mask is not None else x.mask if hasattr(x, "mask") else None
         y_list = []
         y_tm1 = None
@@ -282,22 +336,17 @@ class RNNLayer(nn.Module):
         i = x.size(1)
         while i > 0:
             t = i-1 if reverse else x.size(1) - i
+            mask_t = mask[:, t].unsqueeze(1) if mask is not None else None
             x_t = x[:, t]
-            cellout = self.cell(x_t, *states, **{"t":t})
-            y_t = cellout[0]
-            if y_tm1 is None and mask is not None:
-                y_tm1 = Variable(torch.zeros(y_t.size()))
-                if x.is_cuda: y_tm1 = y_tm1.cuda()
-            newstates = cellout[1:]
+            cellout = self.cell(x_t, mask_t=mask_t, t=t)
+            y_t = cellout
             # mask
-            if mask is not None:
-                mask_t = mask[:, t].unsqueeze(1)
+            if mask_t is not None:
+                if y_tm1 is None:
+                    y_tm1 = Variable(torch.zeros(y_t.size()))
+                    if x.is_cuda: y_tm1 = y_tm1.cuda()
                 y_t = y_t * mask_t + y_tm1 * (1 - mask_t)
                 y_tm1 = y_t
-                st = []
-                for newstate, oldstate in zip(newstates, states):
-                    newstate = newstate * mask_t + oldstate * (1 - mask_t)
-                    st.append(newstate)
             if "all" in self.result:
                 y_list.append(y_t)
             i -= 1
@@ -367,29 +416,21 @@ class BiRNNLayer(nn.Module):
 
 
 # region II. RNN stacks
-class RecStack(Reccable, Stack):
+class RecStack(Reccable, Stack):        # contains rec statefuls, not rec stateful itself
     """
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
-    def forward(self, *args, **kwargs):
-        x_t = args[:-self.numstates]
-        states = args[-self.numstates:]
+    def forward(self, *x_t, **kw):
         y_t = x_t
-        newstates = tuple()
         for layer in self.layers:
-            if isinstance(layer, Reccable) and layer.numstates > 0:
-                layerstates = states[:layer.numstates]
-                states = states[layer.numstates:]
-                layer_ret = layer(*(y_t + layerstates), **kwargs)
-                if not issequence(layer_ret):
-                    layer_ret = [layer_ret]
-                y_t = layer_ret[:-layer.numstates]
-                newstates += layer_ret[-layer.numstates:]
-            else:
-                y_t = layer(*y_t)
-                if not issequence(y_t):
-                    y_t = tuple([y_t])
-        return y_t + newstates
+            layerkw = {k: v for k, v in kw.items() if k not in "mask_t t".split()}\
+                if not isinstance(layer, Reccable) else kw
+            y_t = layer(*y_t, **layerkw)
+            if not issequence(y_t):
+                y_t = tuple([y_t])
+        if len(y_t) == 1:
+            y_t = y_t[0]
+        return y_t
 
     @property
     def state_spec(self):
@@ -399,13 +440,10 @@ class RecStack(Reccable, Stack):
                 statespec += tuple(layer.state_spec)
         return statespec
 
-    def get_init_states(self, arg):
-        assert(isnumber(arg))
-        initstates = tuple()
+    def reset_state(self):
         for layer in self.layers:
-            if hasattr(layer, "get_init_states"):
-                initstates += tuple(layer.get_init_states(arg))
-        return initstates
+            if isinstance(layer, Reccable):
+                layer.reset_state()
 
     def set_init_states(self, *states):
         for layer in self.layers:
@@ -419,12 +457,4 @@ class RecStack(Reccable, Stack):
     def to_layer(self):
         return RNNLayer(self)
 
-
-
     # TODO: test for visibility of modules and their params
-
-    # TODO RecStack with named layers to subclass for easier custom forward logic without the init state stuff
-    # TODO: support random layer-temporal connection patterns -> "future" matrix    (also states?)
-    #       this normal RecStack is one instantiation
-
-# TODO: can we store states locally to not to pass them around everywhere?

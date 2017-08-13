@@ -1,3 +1,5 @@
+from __future__ import print_function
+from __future__ import print_function
 from unittest import TestCase
 import qelos.rnn as rnn
 from torch.autograd import Variable
@@ -12,7 +14,8 @@ class TestGRU(TestCase):
         gru = rnn.GRU(9, 10)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
-        h_t, rg, ug = gru(x_t, h_tm1)
+        gru.set_init_states(h_tm1)
+        h_t, rg, ug = gru._forward(x_t, h_tm1)
         # simulate reset gate
         nprg = np.dot(x_t.data.numpy(), gru.reset_gate.W.data.numpy())
         nprg += np.dot(h_tm1.data.numpy(), gru.reset_gate.U.data.numpy())
@@ -45,19 +48,26 @@ class TestGRU(TestCase):
         gru = rnn.GRU(9, 10, zoneout=0.5)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
-        h_t, y_t = gru(x_t, h_tm1)
+        gru.set_init_states(h_tm1)
+        h_t = gru(x_t)
         self.assertEqual((5, 10), h_t.data.numpy().shape)
         self.assertEqual(gru.training, True)
         gru.train(mode=False)
         self.assertEqual(gru.training, False)
-        pred1, _ = gru(x_t, h_tm1)
-        pred2, _ = gru(x_t, h_tm1)
+        gru.reset_state()
+        pred1 = gru(x_t)
+        gru.reset_state()
+        pred2 = gru(x_t)
         # must be equal in prediction mode
+        print(pred1)
+        print(pred2)
         self.assertTrue(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
         gru.train(mode=True)
         self.assertEqual(gru.training, True)
-        pred1, _ = gru(x_t, h_tm1)
-        pred2, _ = gru(x_t, h_tm1)
+        gru.reset_state()
+        pred1 = gru(x_t)
+        gru.reset_state()
+        pred2 = gru(x_t)
         # must not be equal in prediction mode
         self.assertFalse(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
 
@@ -70,8 +80,9 @@ class TestLSTM(TestCase):
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
-        y_t, c_t, h_t = lstm(x_t, h_tm1, c_tm1)
-        self.assertEqual((5, 10), h_t.data.numpy().shape)
+        lstm.set_init_states(c_tm1, h_tm1)
+        y_t = lstm(x_t)
+        self.assertEqual((5, 10), y_t.data.numpy().shape)
 
     def test_zoneout(self):
         batsize = 5
@@ -80,19 +91,24 @@ class TestLSTM(TestCase):
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
-        y_t, c_t, h_t = lstm(x_t, h_tm1, c_tm1)
-        self.assertEqual((5, 10), h_t.data.numpy().shape)
+        lstm.set_init_states(c_tm1, h_tm1)
+        y_t = lstm(x_t)
+        self.assertEqual((5, 10), y_t.data.numpy().shape)
         self.assertEqual(lstm.training, True)
         lstm.train(mode=False)
         self.assertEqual(lstm.training, False)
-        pred1, pred1e, _ = lstm(x_t, h_tm1, c_tm1)
-        pred2, pred2e, _ = lstm(x_t, h_tm1, c_tm1)
+        lstm.reset_state()
+        pred1 = lstm(x_t)
+        lstm.reset_state()
+        pred2 = lstm(x_t)
         # must be equal in prediction mode
         self.assertTrue(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
         lstm.train(mode=True)
         self.assertEqual(lstm.training, True)
-        pred1, pred1e, _ = lstm(x_t, h_tm1, c_tm1)
-        pred2, pred2e, _ = lstm(x_t, h_tm1, c_tm1)
+        lstm.reset_state()
+        pred1 = lstm(x_t)
+        lstm.reset_state()
+        pred2 = lstm(x_t)
         # must not be equal in prediction mode
         self.assertFalse(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
 
@@ -113,12 +129,13 @@ class Test_RNNLayer(TestCase):
         seqlen = 4
         rnn.GRU.debug = False
         gru = rnn.GRU(9, 10)
-        gru = gru.to_layer().return_all()
+        gru = gru.to_layer().return_all().return_final()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
         m = Variable(torch.FloatTensor(m_val))
-        y = gru(x, mask=m)
+        y_t, y = gru(x, mask=m)
         pred = y.data.numpy()
+        self.assertTrue(np.allclose(y_t.data.numpy(), y.data.numpy()[:, -1]))
         # TODO write assertions
 
     def test_masked_gru_reverse(self):
@@ -132,6 +149,7 @@ class Test_RNNLayer(TestCase):
         m = Variable(torch.FloatTensor(m_val))
         y_t, y = gru(x, mask=m, reverse=True)
         pred = y.data.numpy()
+        self.assertTrue(np.allclose(y_t.data.numpy(), y.data.numpy()[:, 0]))
         # TODO write assertions
 
     def test_masked_gru_bidir(self):
@@ -146,5 +164,35 @@ class Test_RNNLayer(TestCase):
         m = Variable(torch.FloatTensor(m_val))
         y_t, y = layer(x, mask=m)
         pred = y.data.numpy()
+        # TODO write assertions
+
+
+class TestRecStack(TestCase):
+    def test_shapes(self):
+        batsize = 5
+        m = rnn.RecStack(rnn.GRU(9, 10), rnn.GRU(10, 11))
+        x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
+        h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))
+        m.set_init_states(h_tm1_a, h_tm1_b)
+        y_t = m(x_t)
+        self.assertEqual((batsize, 11), y_t.data.numpy().shape)
+
+    def test_masked_gru_stack(self):
+        batsize = 3
+        seqlen = 4
+
+        m = rnn.RecStack(rnn.GRU(9, 10), rnn.GRU(10, 11))
+        x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
+        h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))
+        m.set_init_states(h_tm1_a, h_tm1_b)
+        m = m.to_layer().return_final().return_all()
+
+        mask_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
+        mask = Variable(torch.FloatTensor(mask_val))
+
+        y_t, y = m(x, mask=mask)
+        self.assertTrue(np.allclose(y_t.data.numpy(), y.data.numpy()[:, -1]))
         # TODO write assertions
 

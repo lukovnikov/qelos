@@ -91,13 +91,12 @@ class Decoder(nn.Module):
         self.block = decodercell
 
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
+        self.block.reset_state()
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
         new_init_states = self.block._compute_init_states(*x, **kw)
         if new_init_states is not None:
             self.block.set_init_states(*new_init_states)
-        init_states = self.block.get_init_states(batsize)
-        states_t = init_states
         y_list = []
         y_t = None
         for t in range(maxtime):
@@ -106,13 +105,12 @@ class Decoder(nn.Module):
             if not issequence(x_t):
                 x_t = [x_t]
             x_t = tuple(x_t)
-            blockret = self.block(*(x_t + states_t), t=t)
+            blockret = self.block(*x_t, t=t)
             if not issequence(blockret):
                 blockret = [blockret]
-            y_t = blockret[:self.block.numstates]
+            y_t = blockret
             #y_t = [y_t_e.unsqueeze(1) for y_t_e in blockret[:self.block.numstates]]
             y_list.append(y_t)
-            states_t = blockret[self.block.numstates:]
         y = []
         for i in range(len(y_list[0])):
             yl_e = [y_list[j][i] for j in range(len(y_list))]
@@ -120,7 +118,7 @@ class Decoder(nn.Module):
         return tuple(y)
 
 
-class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
+class DecoderCell(Reccable):
     """
     Decoder logic.
     Call .to_decoder() to get decoder.
@@ -143,12 +141,8 @@ class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
         self._inputs_t_getter = None
 
     # region forward reccable calls to forwarder
-    @property
-    def state_spec(self):
-        return self._core.state_spec
-
-    def get_init_states(self, arg):
-        return self._core.get_init_states(arg)
+    def reset_state(self):
+        self._core.reset_state()
 
     def set_init_states(self, *states):
         self._core.set_init_states(*states)
@@ -225,13 +219,13 @@ class ContextDecoderCell(DecoderCell):
         super(ContextDecoderCell, self).__init__(*layers)
         self.embedder = embedder
 
-    def forward(self, x, ctx, *states, **kw):
+    def forward(self, x, ctx, **kw):
         if self.embedder is not None:
             emb = self.embedder(x)
         else:
             emb = x
         inp = torch.cat([emb, ctx], 1)
-        ret = self._core(inp, *states)
+        ret = self._core(inp)
         return ret
 
     def get_inputs_t(self, t, x, y_t):
@@ -260,14 +254,8 @@ class AttentionDecoderCell(DecoderCell):
 
     def compute_init_states(self, *x, **kw):
         pass
-    # endregion
 
-    # region implement Reccable signature
-    @property
-    def state_spec(self):
-        pass
-
-    def get_init_states(self, arg):
+    def reset_state(self):
         pass
 
     def set_init_states(self, *states):
