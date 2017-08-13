@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
-from qelos.rnn import RecStack, Reccable
+from qelos.rnn import RecStack, Reccable, RecStatefulContainer
 from qelos.util import issequence
 from torch.autograd import Variable
 
@@ -118,7 +118,7 @@ class Decoder(nn.Module):
         return tuple(y)
 
 
-class DecoderCell(Reccable):
+class DecoderCell(RecStatefulContainer):
     """
     Decoder logic.
     Call .to_decoder() to get decoder.
@@ -140,7 +140,7 @@ class DecoderCell(Reccable):
         self._init_state_computer = None
         self._inputs_t_getter = None
 
-    # region forward reccable calls to forwarder
+    # region RecStatefulContainer signature
     def reset_state(self):
         self._core.reset_state()
 
@@ -254,7 +254,9 @@ class AttentionDecoderCell(DecoderCell):
 
     def compute_init_states(self, *x, **kw):
         pass
+    # endregion
 
+    # region RecStatefulContainer signature
     def reset_state(self):
         pass
 

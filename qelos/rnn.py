@@ -77,6 +77,14 @@ class RecStateful(Reccable):
         raise NotImplementedError("use subclass. subclasses must implement this method")
 
 
+class RecStatefulContainer(Reccable):
+    def reset_state(self):
+        raise NotImplementedError("sublcasses must implement")
+
+    def set_init_states(self, *x, **kw):
+        raise NotImplementedError("subclasses must implement")
+
+
 class RNUBase(RecStateful):
     def to_layer(self):
         return RNNLayer(self)
@@ -416,7 +424,7 @@ class BiRNNLayer(nn.Module):
 
 
 # region II. RNN stacks
-class RecStack(Reccable, Stack):        # contains rec statefuls, not rec stateful itself
+class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, not rec stateful itself
     """
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
