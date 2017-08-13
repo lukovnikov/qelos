@@ -426,3 +426,5 @@ class RecStack(Reccable, Stack):
     # TODO RecStack with named layers to subclass for easier custom forward logic without the init state stuff
     # TODO: support random layer-temporal connection patterns -> "future" matrix    (also states?)
     #       this normal RecStack is one instantiation
+
+# TODO: can we store states locally to not to pass them around everywhere?

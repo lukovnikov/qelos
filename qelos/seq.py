@@ -126,7 +126,7 @@ class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
     Call .to_decoder() to get decoder.
     Two ways to make a new decoder architecture:
         * subclass this and override forward(), get_inputs_t() and compute_init_states()
-        * set modules/functions for the three pieces by using the provided setters
+        * set modules/functions for the three pieces by using the provided setters (overrides subclassing)
     """
     _teacher_unforcing_support = False                  # OVERRIDE THIS  to enable teacher unforcing args
 
@@ -164,7 +164,7 @@ class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
     def forward(self, *x, **kw):                        # OVERRIDE THIS
         """
         Must be implemented in all real decoder cells.
-        :param x: inputs to this timestep (list of tensors)
+        :param x: inputs to this timestep (list of tensors) and states
         :param kw: more arguments, might include time step as t=
         :return: outputs of one decoding timestep (list of tensors)
         """
@@ -221,22 +221,18 @@ class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
 
 
 class ContextDecoderCell(DecoderCell):
-    """
-    Decoder based on static context. Feeds context to every time step, concat to input/embedding vector
-    """
-    def __init__(self, *layers):
-        layers = list(layers)
-        if isinstance(layers[0], nn.Embedding):
-            embedder = layers[0]
-            def inner(x, ctx):
-                emb = embedder(x)
-                y = torch.cat([emb, ctx], 1)
-                return y
-            layers[0] = Lambda(inner, register_modules=embedder)
-        else:
-            lbd = Lambda(lambda x, ctx: torch.cat([x, ctx], 1))
-            layers += [lbd] + layers
+    def __init__(self, embedder=None, *layers):
         super(ContextDecoderCell, self).__init__(*layers)
+        self.embedder = embedder
+
+    def forward(self, x, ctx, *states, **kw):
+        if self.embedder is not None:
+            emb = self.embedder(x)
+        else:
+            emb = x
+        inp = torch.cat([emb, ctx], 1)
+        ret = self._core(inp, *states)
+        return ret
 
     def get_inputs_t(self, t, x, y_t):
         return x[0][:, t], x[1]
@@ -246,4 +242,35 @@ class AttentionDecoderCell(DecoderCell):
     """
     Recurrence of decoder with attention    # TODO
     """
+    def __init__(self, attention,
+                 embedder=None,
+                 core=None,
+                 ):
+        super(AttentionDecoderCell, self).__init__()
+        self.attention = attention
+        self.embedder = embedder
+        self.innercore = core
+
+    # region implement DecoderCell signature
+    def forward(self, x, ctx, ctxmask, **kw):
+        pass
+
+    def get_inputs_t(self, t, x, y_t):
+        pass
+
+    def compute_init_states(self, *x, **kw):
+        pass
+    # endregion
+
+    # region implement Reccable signature
+    @property
+    def state_spec(self):
+        pass
+
+    def get_init_states(self, arg):
+        pass
+
+    def set_init_states(self, *states):
+        pass
+    # endregion
 
