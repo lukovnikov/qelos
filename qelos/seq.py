@@ -82,20 +82,18 @@ class Decoder(nn.Module):
     Takes some context and decodes a sequence
     Should support (partial) teacher forcing
     """
-    def __init__(self, reccable):
+    def __init__(self, decodercell):
         """
-        :param reccable: main block that generates. must include everything
-        :param init_state_gen: optional block to generate initial states
-        :param teacher_force: fraction of teacher forcing
+        :param decodercell: main block that generates. must include everything
         """
         super(Decoder, self).__init__()
-        assert(isinstance(reccable, Reccable))
-        self.block = reccable
+        assert(isinstance(decodercell, DecoderCell))
+        self.block = decodercell
 
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
-        new_init_states = self.block.compute_init_states(*x, **kw)
+        new_init_states = self.block._compute_init_states(*x, **kw)
         if new_init_states is not None:
             self.block.set_init_states(*new_init_states)
         init_states = self.block.get_init_states(batsize)
@@ -104,7 +102,7 @@ class Decoder(nn.Module):
         y_t = None
         for t in range(maxtime):
             #x_t = [x_e[:, t] if x_e.sequence else x_e for x_e in x]
-            x_t = self.block.get_inputs_t(t=t, x=x, y_t=y_t)        # let the Rec definition decide what to input
+            x_t = self.block._get_inputs_t(t=t, x=x, y_t=y_t)        # let the Rec definition decide what to input
             if not issequence(x_t):
                 x_t = [x_t]
             x_t = tuple(x_t)
@@ -122,17 +120,39 @@ class Decoder(nn.Module):
         return tuple(y)
 
 
-# implementing a new decoder just needs subclassing DecoderCell and calling .to_decoder() on it
-
-class DecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
+class DecoderCell(Reccable):           # SUBCLASS THIS FOR A NEW DECODER
     """
-    The recurrence of the decoder. Subclass this and then call .to_decoder() to get decoder
+    Decoder logic.
+    Call .to_decoder() to get decoder.
+    Two ways to make a new decoder architecture:
+        * subclass this and override forward(), get_inputs_t() and compute_init_states()
+        * set modules/functions for the three pieces by using the provided setters
     """
     _teacher_unforcing_support = False                  # OVERRIDE THIS  to enable teacher unforcing args
 
     def __init__(self, *layers):
-        super(DecoderCell, self).__init__(*layers)
+        super(DecoderCell, self).__init__()
+        if len(layers) == 1:
+            self.set_core(layers[0])
+        elif len(layers) > 1:
+            self._core = RecStack(*layers)
+        else:
+            self._core = None
         self.teacher_force = 1
+        self._init_state_computer = None
+        self._inputs_t_getter = None
+
+    # region forward reccable calls to forwarder
+    @property
+    def state_spec(self):
+        return self._core.state_spec
+
+    def get_init_states(self, arg):
+        return self._core.get_init_states(arg)
+
+    def set_init_states(self, *states):
+        self._core.set_init_states(*states)
+    # endregion
 
     def teacher_force(self, frac=1):        # set teacher forcing
         if not self._teacher_unforcing_support and frac < 1:
@@ -148,9 +168,19 @@ class DecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
         :param kw: more arguments, might include time step as t=
         :return: outputs of one decoding timestep (list of tensors)
         """
-        return super(DecoderCell, self).forward(*x, **kw)      # calls RecStack's .forward()
+        return self._core(*x, **kw)
 
-    def get_inputs_t(self, t, x, y_t):                  # OVERRIDE THIS
+    def set_core(self, reccable):
+        assert(isinstance(reccable, Reccable))
+        self._core = reccable
+
+    def _get_inputs_t(self, t, x, y_t):
+        if self._inputs_t_getter is None:
+            return self.get_inputs_t(t, x, y_t)
+        else:
+            return self._inputs_t_getter(t, x, y_t)
+
+    def get_inputs_t(self, t, x, y_t):
         """
         Make the inputs to cell from timestep, inputs to decoder and previous outputs of cell.
         Called before every call to .forward() and must compute all arguments for .forward() for given timestep.
@@ -165,13 +195,25 @@ class DecoderCell(RecStack):           # SUBCLASS THIS FOR A NEW DECODER
         """
         return x[0][:, t]
 
-    def compute_init_states(self, *x, **kw):            # OVERRIDE THIS
+    def set_inputs_t_getter(self, callabla):
+        self._inputs_t_getter = callabla
+
+    def _compute_init_states(self, *x, **kw):
+        if self._init_state_computer is None:
+            return self.compute_init_states(*x, **kw)
+        else:
+            return self._init_state_computer(*x, **kw)
+
+    def compute_init_states(self, *x, **kw):
         """
         Compute new initial states for the reccable elements in the decoder's rec stack
         :param x: the original inputs
         :return: possibly incomplete list of initial states to set, or None
         """
         return None
+
+    def set_init_states_computer(self, callabla):
+        self._init_state_computer = callabla
 
     def to_decoder(self):
         """ Makes a decoder from this decoder cell """
@@ -197,12 +239,6 @@ class ContextDecoderCell(DecoderCell):
         super(ContextDecoderCell, self).__init__(*layers)
 
     def get_inputs_t(self, t, x, y_t):
-        """
-        :param t: timestep
-        :param x: (batsize, seqlen, ...) input sequence
-        :param y_t: (batsize, ...) output
-        :return: x_t, (batsize, ...), sliced from x using t
-        """
         return x[0][:, t], x[1]
 
 

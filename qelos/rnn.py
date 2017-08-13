@@ -42,6 +42,7 @@ class Reccable(nn.Module):
     def __init__(self, *x, **kw):
         super(Reccable, self).__init__(*x, **kw)
         self._init_states = None
+
     @property
     def state_spec(self):
         raise NotImplementedError("use subclass")
