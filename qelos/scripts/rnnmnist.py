@@ -84,6 +84,8 @@ def main(
 
     # Loss and Optimizer
     criterion = nn.CrossEntropyLoss()
+    if gpu:
+        criterion.cuda()
     optimizer = torch.optim.Adam(rnn.parameters(), lr=learning_rate)
 
     tt.msg("training")
