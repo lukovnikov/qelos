@@ -48,11 +48,6 @@ class RecStateful(Reccable):
     """
     Stores recurrent state.
     """
-    def __init__(self, *x, **kw):
-        super(RecStateful, self).__init__(*x, **kw)
-        self._init_states = None
-        self._states = None
-
     @property
     def state_spec(self):
         raise NotImplementedError("use subclass")
@@ -68,7 +63,7 @@ class RecStateful(Reccable):
         raise NotImplementedError("use subclass. subclasses must implement this method")
 
     def reset_state(self):
-        self._states = None
+        raise NotImplementedError("use subclass. subclasses must implement")
 
     def set_init_states(self, *states):
         raise NotImplementedError("use subclass. subclasses must implement this method")
@@ -77,17 +72,25 @@ class RecStateful(Reccable):
         raise NotImplementedError("use subclass. subclasses must implement this method")
 
 
-class RecStatefulContainer(Reccable):
+class RecStatefulContainer(RecStateful):
     def reset_state(self):
-        raise NotImplementedError("sublcasses must implement")
+        raise NotImplementedError("use subclass. subclasses must implement")
 
-    def set_init_states(self, *x, **kw):
-        raise NotImplementedError("subclasses must implement")
+    def set_init_states(self, *states):
+        raise NotImplementedError("use subclass. subclasses must implement this method")
 
 
 class RNUBase(RecStateful):
+    def __init__(self, *x, **kw):
+        super(RecStateful, self).__init__(*x, **kw)
+        self._init_states = None
+        self._states = None
+
     def to_layer(self):
         return RNNLayer(self)
+
+    def reset_state(self):
+        self._states = None
 
     def get_states(self, arg):
         if self._states is None:    # states don't exist yet
@@ -444,23 +447,46 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
     def state_spec(self):
         statespec = tuple()
         for layer in self.layers:
-            if hasattr(layer, "state_spec"):
+            if isinstance(layer, RecStateful):
                 statespec += tuple(layer.state_spec)
         return statespec
 
     def reset_state(self):
         for layer in self.layers:
-            if isinstance(layer, Reccable):
+            if isinstance(layer, RecStateful):
                 layer.reset_state()
 
-    def set_init_states(self, *states):
+    def set_init_states(self, *states):     # bottom layers first
         for layer in self.layers:
-            if hasattr(layer, "set_init_states"):
+            if isinstance(layer, RecStateful):
                 if len(states) == 0:        # no states left to set
                     break
                 statesforlayer = states[:min(len(states), layer.numstates)]
                 states = states[min(len(states), layer.numstates):]
                 layer.set_init_states(*statesforlayer)
+
+    def get_init_states(self, batsize):     # bottom layers first
+        initstates = []
+        for layer in self.layers:
+            if isinstance(layer, RecStateful):
+                layerinitstates = layer.get_init_states(batsize)
+                initstates += layerinitstates
+        return initstates
+
+    def set_states(self, *states):
+        assert(len(states) == len(self.numstates))
+        for layer in self.layers:
+            if isinstance(layer, RecStateful):
+                statesforlayer = states[:layer.numstates]
+                states = states[layer.numstates:]
+                layer.set_states(*statesforlayer)
+
+    def get_states(self, batsize):
+        states = []
+        for layer in self.layers:
+            if isinstance(layer, RecStateful):
+                states += layer.get_states(batsize)
+        return states
 
     def to_layer(self):
         return RNNLayer(self)

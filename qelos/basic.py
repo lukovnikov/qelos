@@ -35,6 +35,10 @@ class Stack(nn.Module):
     def forward(self, *x, **kw):
         for layer in self.layers:
             x = layer(*x, **kw)
+            if not issequence(x):
+                x = (x,)
+        if len(x) == 1:
+            x = x[0]
         return x
 
     # TODO: stack generator
