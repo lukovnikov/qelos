@@ -163,10 +163,8 @@ def main(
     encoder = Encoder(input_size, hidden_size, num_layers, mode=mode)
     decoder = q.ContextDecoderCell(*[
         nn.Embedding(256, 20),
-        q.GRUCell(20+hidden_size, 40),
-        q.GRUCell(40, 40),
-        q.Forward(40, 100),
-        q.Forward(100, 256),
+        q.GRUCell(20+hidden_size, 256),
+        q.Forward(256, 256),
         q.LogSoftmax()
     ]).to_decoder()
 
