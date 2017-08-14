@@ -8,6 +8,18 @@ from qelos.rnn import GRU, RecStack
 from qelos.util import ticktock
 
 
+class RNNStack(nn.Module):
+    def __init__(self, *layers):
+        super(RNNStack, self).__init__()
+        self.layers = layers
+
+    def forward(self, x, h0):
+        y = x
+        for i, layer in enumerate(self.layers):
+            y, s = layer(y, h0[i].unsqueeze(0))
+        return y, s
+
+
 def main(
     # Hyper Parameters
         sequence_length = 28,
@@ -20,12 +32,12 @@ def main(
         learning_rate = 0.01,
 
         gpu = False,
-        useq = False,
+        mode = "stack"     # "nn" or "qrnn" or "stack"
     ):
 
 
     tt = ticktock("script")
-    tt.msg("using q: {}".format(useq))
+    tt.msg("using q: {}".format(mode))
     # MNIST Dataset
     train_dataset = dsets.MNIST(root='../../../data/mnist/',
                                 train=True,
@@ -51,14 +63,20 @@ def main(
             super(RNN, self).__init__()
             self.hidden_size = hidden_size
             self.num_layers = num_layers
-            if useq:
+            if mode == "qrnn":
                 tt.msg("using q.RNN")
                 self.rnn = RecStack(*[GRU(input_size, hidden_size)]+
                                      [GRU(hidden_size, hidden_size) for i in range(num_layers-1)])\
                             .to_layer().return_all()
-            else:
+            elif mode == "nn":
                 tt.msg("using nn.RNN")
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
+            elif mode == "stack":
+                self.rnn = RNNStack(
+                    *([nn.GRU(input_size, hidden_size, batch_first=True)] +
+                        [nn.GRU(hidden_size, hidden_size, batch_first=True) for i in range(num_layers - 1)]
+                    )
+                )
             self.fc = nn.Linear(hidden_size, num_classes)
 
         def forward(self, x):
@@ -67,7 +85,7 @@ def main(
             #c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
 
             # Forward propagate RNN
-            if useq:
+            if mode == "qrnn":
                 out = self.rnn(x)
             else:
                 out, _ = self.rnn(x, h0)
