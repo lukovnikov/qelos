@@ -39,18 +39,18 @@ class TestGRU(TestCase):
     #     # output shape
     #     self.assertEqual((5, 10), h_t.data.numpy().shape)
     #     print(rg)
-
-    def test_params_collected(self):
-        gru = rnn.GRU(9, 10)
-        param_gen = gru.parameters()
-        params = []
-        exp_params = set([gru.reset_gate.W, gru.reset_gate.U, gru.update_gate.W, gru.update_gate.U, gru.main_gate.W, gru.main_gate.U])
-        for param in param_gen:
-            for exp_param in exp_params:
-                if param is exp_param:
-                    exp_params = exp_params.difference(set([param]))
-                    break
-        self.assertTrue(len(exp_params) == 0)
+    #
+    # def test_params_collected(self):
+    #     gru = rnn.GRU(9, 10)
+    #     param_gen = gru.parameters()
+    #     params = []
+    #     exp_params = set([gru.reset_gate.W, gru.reset_gate.U, gru.update_gate.W, gru.update_gate.U, gru.main_gate.W, gru.main_gate.U])
+    #     for param in param_gen:
+    #         for exp_param in exp_params:
+    #             if param is exp_param:
+    #                 exp_params = exp_params.difference(set([param]))
+    #                 break
+    #     self.assertTrue(len(exp_params) == 0)
 
     def test_zoneout(self):
         batsize = 5

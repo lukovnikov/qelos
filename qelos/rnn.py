@@ -312,7 +312,7 @@ class GRU(RNUBase):
             if self.zoner is None:
                 self.zoner = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
             zoner = self.zoneout(self.zoner)
-            c_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
+            h_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
         return h_t, h_t
 
 
@@ -325,13 +325,14 @@ class LSTM(RNUBase):
         self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout = \
             indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
 
-        self.gate_activation, self.activation = gate_activation, activation  # sigm, tanh
-        self.activation_fn = name2fn(activation)
-
-        self.forget_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.input_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.output_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.main_gate = RNUGate(self.indim, self.outdim, activation=activation, use_bias=use_bias)
+        self.nnlstm = nn.LSTMCell(self.indim, self.outdim, bias=self.use_bias)
+        # self.gate_activation, self.activation = gate_activation, activation  # sigm, tanh
+        # self.activation_fn = name2fn(activation)
+        #
+        # self.forget_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
+        # self.input_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
+        # self.output_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
+        # self.main_gate = RNUGate(self.indim, self.outdim, activation=activation, use_bias=use_bias)
 
         # region dropouts
         if self.dropout_in:
@@ -339,16 +340,18 @@ class LSTM(RNUBase):
         if self.dropout_rec:
             self.dropout_rec = nn.Dropout(p=self.dropout_rec)
         if self.zoneout:
+            self.zoner = None
             self.zoneout = nn.Dropout(p=self.zoneout)
         # endregion
 
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.forget_gate.reset_parameters()
-        self.input_gate.reset_parameters()
-        self.output_gate.reset_parameters()
-        self.main_gate.reset_parameters()
+        # self.forget_gate.reset_parameters()
+        # self.input_gate.reset_parameters()
+        # self.output_gate.reset_parameters()
+        # self.main_gate.reset_parameters()
+        self.nnlstm.reset_parameters()
 
     @property
     def state_spec(self):
@@ -362,15 +365,17 @@ class LSTM(RNUBase):
             y_tm1 = self.dropout_rec(y_tm1)
             c_tm1 = self.dropout_rec(c_tm1)
         # endregion
-        input_gate = self.input_gate(x_t, y_tm1)
-        output_gate = self.output_gate(x_t, y_tm1)
-        forget_gate = self.forget_gate(x_t, y_tm1)
-        main_gate = self.main_gate(x_t, y_tm1)
-        c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
-        y_t = torch.mul(self.activation_fn(c_t), output_gate)
+        y_t, c_t = self.nnlstm(x_t, (y_tm1, c_tm1))
+        # input_gate = self.input_gate(x_t, y_tm1)
+        # output_gate = self.output_gate(x_t, y_tm1)
+        # forget_gate = self.forget_gate(x_t, y_tm1)
+        # main_gate = self.main_gate(x_t, y_tm1)
+        # c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
+        # y_t = torch.mul(self.activation_fn(c_t), output_gate)
         if self.zoneout:
-            zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
-            zoner = self.zoneout(zoner)
+            if self.zoner is None:
+                self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
+            zoner = self.zoneout(self.zoner)
             c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
             y_t = torch.mul(1 - zoner, y_tm1) + torch.mul(zoner, y_t)
         return y_t, c_t, y_t
