@@ -283,13 +283,12 @@ class GRU(RNUBase):
             self.zoner = None
             self.zoneout = nn.Dropout(p=self.zoneout)
 
-        self.reset_parameters()
-
     def reset_parameters(self):
-        self.gates.reset_parameters()
+        # self.gates.reset_parameters()
         # self.update_gate.reset_parameters()
         # self.reset_gate.reset_parameters()
-        self.main_gate.reset_parameters()
+        # self.main_gate.reset_parameters()
+        self.nngru.reset_parameters()
 
     @property
     def state_spec(self):
