@@ -3,6 +3,7 @@ from torch.autograd import Variable
 from torch import nn
 from qelos.util import name2fn, issequence, isnumber
 from qelos.basic import Stack
+import qelos as q
 
 
 # region I. RNN cells
@@ -73,6 +74,9 @@ class RecStateful(Reccable):
 
 
 class RecStatefulContainer(RecStateful):
+    """
+    Doesn't have own stored states
+    """
     def reset_state(self):
         raise NotImplementedError("use subclass. subclasses must implement")
 
@@ -119,7 +123,7 @@ class RNUBase(RecStateful):
             statespec = self.state_spec[i]
             initstate = self._init_states[i]
             if initstate is None:
-                state_0 = Variable(torch.zeros((arg, statespec)))
+                state_0 = q.var(torch.zeros((arg, statespec))).cuda().v
                 self._init_states[i] = state_0
             elif initstate.dim() == 2:        # init state set differently for different batches
                 pass
@@ -201,7 +205,7 @@ class RNU(RNUBase):
             h_tm1 = self.dropout_rec(h_tm1)
         h_t = self.main_gate(x_t, h_tm1)
         if self.zoneout:
-            zoner = Variable(torch.ones(h_t.size()))
+            zoner = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
             zoner = self.zoneout(zoner)
             h_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
         return h_t, h_t
@@ -309,7 +313,7 @@ class LSTM(RNUBase):
         c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
         y_t = torch.mul(self.activation_fn(c_t), output_gate)
         if self.zoneout:
-            zoner = Variable(torch.ones(c_t.size()))
+            zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
             zoner = self.zoneout(zoner)
             c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
             y_t = torch.mul(1 - zoner, y_tm1) + torch.mul(zoner, y_t)
@@ -338,6 +342,8 @@ class RNNLayer(nn.Module):
     def forward(self, x, mask=None, init_states=None, reverse=False):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
         batsize = x.size(0)
         if init_states is not None:
+            if not issequence(init_states):
+                init_states = (init_states,)
             self.cell.set_init_states(*init_states)
         self.cell.reset_state()
         mask = mask if mask is not None else x.mask if hasattr(x, "mask") else None
@@ -354,7 +360,7 @@ class RNNLayer(nn.Module):
             # mask
             if mask_t is not None:
                 if y_tm1 is None:
-                    y_tm1 = Variable(torch.zeros(y_t.size()))
+                    y_tm1 = q.var(torch.zeros(y_t.size())).cuda(crit=y_t).v
                     if x.is_cuda: y_tm1 = y_tm1.cuda()
                 y_t = y_t * mask_t + y_tm1 * (1 - mask_t)
                 y_tm1 = y_t

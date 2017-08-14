@@ -3,7 +3,6 @@ from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful
 from qelos.util import issequence
-from torch.autograd import Variable
 
 
 # region attention
