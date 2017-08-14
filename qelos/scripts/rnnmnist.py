@@ -11,7 +11,7 @@ from qelos.util import ticktock
 class RNNStack(nn.Module):
     def __init__(self, *layers):
         super(RNNStack, self).__init__()
-        self.layers = nn.ModuleList(modules=layers)
+        self.layers = nn.ModuleList(modules=list(layers))
 
     def forward(self, x, h0):
         y = x
