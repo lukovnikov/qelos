@@ -11,7 +11,7 @@ from qelos.util import ticktock
 class RNNStack(nn.Module):
     def __init__(self, *layers):
         super(RNNStack, self).__init__()
-        self.layers = layers
+        self.layers = nn.ModuleList(modules=layers)
 
     def forward(self, x, h0):
         y = x
@@ -73,8 +73,8 @@ def main(
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
             elif mode == "stack":
                 self.rnn = RNNStack(
-                    *([nn.GRU(input_size, hidden_size, num_layers=1, batch_first=True)] +
-                        [nn.GRU(hidden_size, hidden_size, num_layers=1, batch_first=True) for i in range(num_layers - 1)]
+                    *([nn.GRU(input_size, hidden_size, 1, batch_first=True)] +
+                      [nn.GRU(hidden_size, hidden_size, 1, batch_first=True) for i in range(num_layers - 1)]
                     )
                 )
             self.fc = nn.Linear(hidden_size, num_classes)
