@@ -178,7 +178,7 @@ def main(
     criterion = DecoderLoss()
     if gpu:
         criterion.cuda()
-    optimizer = torch.optim.Adam(encdec.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adadelta(encdec.parameters(), lr=learning_rate)
 
     tt.msg("training")
     # Train the Model
