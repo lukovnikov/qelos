@@ -122,7 +122,7 @@ def main(
         outputs = rnn(images)
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
-        correct += (predicted == labels).sum()
+        correct += (predicted == labels.data).sum()
 
     print('Test Accuracy of the model on the 10000 test images: %d %%' % (100 * correct / total))
 
