@@ -1,5 +1,5 @@
 from qelos.core import var
-from qelos.rnn import GRU, LSTM, RNU, RecStack, RNNLayer, BiRNNLayer
+from qelos.rnn import GRUCell, LSTMCell, RNU, RecStack, RNNLayer, BiRNNLayer
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, CosineDistance, DotDistance, Forward, ForwardDistance, \
     Distance, Lambda, Stack, TrilinearDistance

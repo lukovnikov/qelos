@@ -1,7 +1,7 @@
 from __future__ import print_function
 from unittest import TestCase
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention
-from qelos.rnn import RecStack, GRU
+from qelos.rnn import RecStack, GRUCell
 from qelos.basic import Forward, Softmax, Stack, Lambda
 import torch, numpy as np
 from torch import nn
@@ -15,7 +15,7 @@ class TestDecoder(TestCase):
         # model def
         decoder_cell = DecoderCell(
             nn.Embedding(vocsize, embdim, padding_idx=0),
-            GRU(embdim, encdim),
+            GRUCell(embdim, encdim),
             Forward(encdim, vocsize),
             Softmax()
         )
@@ -24,7 +24,7 @@ class TestDecoder(TestCase):
         data = np.random.randint(0, vocsize, (batsize, seqlen))
         data = Variable(torch.LongTensor(data))
 
-        decoded = decoder(data)[0].data.numpy()
+        decoded = decoder(data).data.numpy()
         self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))     # shape check
         self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
 
@@ -34,7 +34,7 @@ class TestDecoder(TestCase):
         # model def
         decoder_cell = ContextDecoderCell(
             nn.Embedding(vocsize, embdim, padding_idx=0),
-            GRU(embdim+ctxdim, encdim),
+            GRUCell(embdim + ctxdim, encdim),
             Forward(encdim, vocsize),
             Softmax()
         )
@@ -44,7 +44,7 @@ class TestDecoder(TestCase):
         data = Variable(torch.LongTensor(data))
         ctx = Variable(torch.FloatTensor(np.random.random((batsize, ctxdim))))
 
-        decoded = decoder(data, ctx)[0].data.numpy()
+        decoded = decoder(data, ctx).data.numpy()
         self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))     # shape check
         self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
 
@@ -61,8 +61,8 @@ class TestAttentionDecoder(TestCase):
             attention=Attention().forward_gen(inpdim, encdim+embdim, encdim),
             embedder=nn.Embedding(vocsize, embdim),
             core=RecStack(
-                GRU(embdim+inpdim, encdim),
-                GRU(encdim, encdim),
+                GRUCell(embdim + inpdim, encdim),
+                GRUCell(encdim, encdim),
                 coreff
             ),
             smo=Stack(

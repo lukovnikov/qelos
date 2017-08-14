@@ -10,8 +10,8 @@ import numpy as np
 class TestGRU(TestCase):
     def test_gru_shapes(self):
         batsize = 5
-        rnn.GRU.debug = True
-        gru = rnn.GRU(9, 10)
+        rnn.GRUCell.debug = True
+        gru = rnn.GRUCell(9, 10)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         gru.set_init_states(h_tm1)
@@ -54,8 +54,8 @@ class TestGRU(TestCase):
 
     def test_zoneout(self):
         batsize = 5
-        rnn.GRU.debug = False
-        gru = rnn.GRU(9, 10, zoneout=0.5)
+        rnn.GRUCell.debug = False
+        gru = rnn.GRUCell(9, 10, zoneout=0.5)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         gru.set_init_states(h_tm1)
@@ -78,15 +78,53 @@ class TestGRU(TestCase):
         pred1 = gru(x_t)
         gru.reset_state()
         pred2 = gru(x_t)
-        # must not be equal in prediction mode
+        # must not be equal in training mode
         self.assertFalse(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
+
+    def test_shared_dropout_rec(self):
+        batsize = 5
+        rnn.GRUCell.debug = False
+        gru = rnn.GRUCell(9, 10, shared_dropout_rec=0.5)
+        x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
+        h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        gru.set_init_states(h_tm1)
+        h_t = gru(x_t)
+        self.assertEqual((5, 10), h_t.data.numpy().shape)
+        self.assertEqual(gru.training, True)
+        gru.train(mode=False)
+        self.assertEqual(gru.training, False)
+        gru.reset_state()
+        pred1 = gru(x_t)
+        gru.reset_state()
+        pred2 = gru(x_t)
+        # must be equal in prediction mode
+        print(pred1)
+        print(pred2)
+        self.assertTrue(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
+        gru.train(mode=True)
+        self.assertEqual(gru.training, True)
+        gru.reset_state()
+        pred1 = gru(x_t)
+        gru.reset_state()
+        pred2 = gru(x_t)
+        # must not be equal in training mode
+        self.assertFalse(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
+        gru.reset_state()
+        pred1 = gru(x_t)
+        pred2 = gru(x_t)
+        pred3 = gru(x_t)
+        gru.train(mode=False)
+        gru.reset_state()
+        pred1 = gru(x_t)
+        pred2 = gru(x_t)
+        pred3 = gru(x_t)
 
 
 class TestLSTM(TestCase):
     def test_lstm_shapes(self):
         batsize = 5
-        rnn.LSTM.debug = True
-        lstm = rnn.LSTM(9, 10)
+        rnn.LSTMCell.debug = True
+        lstm = rnn.LSTMCell(9, 10)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
@@ -96,8 +134,8 @@ class TestLSTM(TestCase):
 
     def test_zoneout(self):
         batsize = 5
-        rnn.LSTM.debug = False
-        lstm = rnn.LSTM(9, 10, zoneout=0.5)
+        rnn.LSTMCell.debug = False
+        lstm = rnn.LSTMCell(9, 10, zoneout=0.5)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
@@ -127,8 +165,8 @@ class Test_RNNLayer(TestCase):
     def test_lstm_layer_shapes(self):
         batsize = 5
         seqlen = 7
-        rnn.LSTM.debug = False
-        lstm = rnn.LSTM(9, 10)
+        rnn.LSTMCell.debug = False
+        lstm = rnn.LSTMCell(9, 10)
         lstm = lstm.to_layer().return_all()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         y = lstm(x)
@@ -137,8 +175,8 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru(self):
         batsize = 3
         seqlen = 4
-        rnn.GRU.debug = False
-        gru = rnn.GRU(9, 10)
+        rnn.GRUCell.debug = False
+        gru = rnn.GRUCell(9, 10)
         gru = gru.to_layer().return_all().return_final()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
@@ -151,8 +189,8 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru_reverse(self):
         batsize = 3
         seqlen = 4
-        rnn.GRU.debug = False
-        gru = rnn.GRU(9, 10)
+        rnn.GRUCell.debug = False
+        gru = rnn.GRUCell(9, 10)
         gru = gru.to_layer().return_all().return_final()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
@@ -165,9 +203,9 @@ class Test_RNNLayer(TestCase):
     def test_masked_gru_bidir(self):
         batsize = 3
         seqlen = 4
-        rnn.GRU.debug = False
-        gru = rnn.GRU(9, 5)
-        gru2 = rnn.GRU(9, 5)
+        rnn.GRUCell.debug = False
+        gru = rnn.GRUCell(9, 5)
+        gru2 = rnn.GRUCell(9, 5)
         layer = rnn.BiRNNLayer(gru, gru2, mode="cat").return_final().return_all()
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
@@ -180,7 +218,7 @@ class Test_RNNLayer(TestCase):
 class TestRecStack(TestCase):
     def test_shapes(self):
         batsize = 5
-        m = rnn.RecStack(rnn.GRU(9, 10), rnn.GRU(10, 11))
+        m = rnn.RecStack(rnn.GRUCell(9, 10), rnn.GRUCell(10, 11))
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))
@@ -192,7 +230,7 @@ class TestRecStack(TestCase):
         batsize = 3
         seqlen = 4
 
-        m = rnn.RecStack(rnn.GRU(9, 10), rnn.GRU(10, 11))
+        m = rnn.RecStack(rnn.GRUCell(9, 10), rnn.GRUCell(10, 11))
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))

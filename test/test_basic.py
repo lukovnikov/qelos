@@ -150,11 +150,15 @@ class TestLogsoftmax(TestCase):
         d2 = d[:, [0, 2]]
         o = LogSoftmax()(d, m)
         pred = o.data.numpy()
-        pred2 = LogSoftmax()(d2).data.numpy()
+        pred2 = LogSoftmax()(d2).data.numpy().astype("float64")
+        pred3 = Softmax()(d2).data.numpy().astype("float64")
         print(pred)
         print(pred2)
+        print(np.log(pred3))
+        onetotwo = np.isclose(pred[:, [0, 2]], pred2)
+        onetothree = np.isclose(pred[:, [0, 2]], np.log(pred3))
+        self.assertTrue(np.all(onetothree | onetotwo))
         self.assertTrue(np.allclose(pred[:, 1], np.log(np.zeros_like(pred[:, 1]))))
-        self.assertTrue(np.allclose(pred[:, [0, 2]], pred2, rtol=1e-3))
 
 
 class TestDistance(TestCase):

@@ -4,7 +4,7 @@ import torchvision.datasets as dsets
 import torchvision.transforms as transforms
 
 import qelos as q
-from qelos.rnn import GRU, RecStack
+from qelos.rnn import GRUCell, RecStack
 from qelos.util import ticktock
 
 
@@ -65,8 +65,8 @@ def main(
             self.num_layers = num_layers
             if mode == "qrnn":
                 tt.msg("using q.RNN")
-                self.rnn = RecStack(*[GRU(input_size, hidden_size)]+
-                                     [GRU(hidden_size, hidden_size) for i in range(num_layers-1)])\
+                self.rnn = RecStack(*[GRUCell(input_size, hidden_size)] +
+                                     [GRUCell(hidden_size, hidden_size) for i in range(num_layers - 1)])\
                             .to_layer().return_all()
             elif mode == "nn":
                 tt.msg("using nn.RNN")

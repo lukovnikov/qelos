@@ -100,12 +100,6 @@ class RecStateful(Reccable):
     def numstates(self):
         return len(self.state_spec)
 
-    def get_states(self, arg):
-        raise NotImplementedError("use subclass. subclasses must implement this method")
-
-    def set_states(self, *states):
-        raise NotImplementedError("use subclass. subclasses must implement this method")
-
     def reset_state(self):
         raise NotImplementedError("use subclass. subclasses must implement")
 
@@ -137,6 +131,9 @@ class RNUBase(RecStateful):
         return RNNLayer(self)
 
     def reset_state(self):
+        """ should be called before every rollout.
+        resets states and shared dropout masks.
+        """
         self._states = None
 
     def get_states(self, arg):
@@ -193,14 +190,12 @@ class RNUBase(RecStateful):
                 self._init_states.append(None)
             i += 1
 
-    def forward(self, *x_t, **kw):
-        mask_t = kw["mask_t"] if "mask_t" in kw else None
-        t = kw["t"] if "t" in kw else None
-        batsize = x_t[0].size(0)
+    def forward(self, x_t, t=None, mask_t=None):
+        batsize = x_t.size(0)
         states = self.get_states(batsize)
-        ret = self._forward(*(list(x_t) + states), t=t)
-        y_t = ret[:-self.numstates]
-        newstates = ret[-self.numstates:]
+        ret = self._forward(x_t, *states, t=t)
+        y_t = ret[0]
+        newstates = ret[1:]
         st = []
         if mask_t is not None:
             for newstate, oldstate in zip(newstates, states):
@@ -209,8 +204,6 @@ class RNUBase(RecStateful):
         else:
             st = newstates
         self.set_states(*st)
-        if len(y_t) == 1:
-            y_t = y_t[0]
         return y_t
 
 
@@ -254,16 +247,18 @@ class RNU(RNUBase):
         return h_t, h_t
 
 
-class GRU(RNUBase):
+class GRUCell(RNUBase):
     debug = False
 
-    def __init__(self, indim, outdim, use_bias=True, activation="tanh", gate_activation="sigmoid",
-                 dropout_in=None, dropout_rec=None, zoneout=None):
-        super(GRU, self).__init__()
-        self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout = \
-            indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
+    def __init__(self, indim, outdim, use_bias=True,
+                 dropout_in=None, dropout_rec=None, zoneout=None,
+                 shared_dropout_rec=None, shared_zoneout=None):
+        super(GRUCell, self).__init__()
+        self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout, self.shared_dropout_rec, self.shared_zoneout = \
+            indim, outdim, use_bias, dropout_in, dropout_rec, zoneout, shared_dropout_rec, shared_zoneout
 
-        self.nngru = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
+        self.nncell = None
+        self.setcell()
 
         # self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
         #
@@ -279,16 +274,30 @@ class GRU(RNUBase):
             self.dropout_in = nn.Dropout(p=self.dropout_in)
         if self.dropout_rec:
             self.dropout_rec = nn.Dropout(p=self.dropout_rec)
+        if self.shared_dropout_rec:
+            self.shared_dropout_rec = nn.Dropout(p=self.shared_dropout_rec)
+            self.shared_dropout_reccer = None
         if self.zoneout:
             self.zoner = None
             self.zoneout = nn.Dropout(p=self.zoneout)
+        if self.shared_zoneout:
+            self.shared_zoneout = nn.Dropout(p=self.shared_zoneout)
+            self.shared_zoneouter = None
+
+    def setcell(self):
+        self.nncell = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
 
     def reset_parameters(self):
         # self.gates.reset_parameters()
         # self.update_gate.reset_parameters()
         # self.reset_gate.reset_parameters()
         # self.main_gate.reset_parameters()
-        self.nngru.reset_parameters()
+        self.nncell.reset_parameters()
+
+    def reset_state(self):
+        super(GRUCell, self).reset_state()
+        self.shared_dropout_reccer = None
+        self.shared_zoneouter = None
 
     @property
     def state_spec(self):
@@ -299,59 +308,30 @@ class GRU(RNUBase):
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             h_tm1 = self.dropout_rec(h_tm1)
-        h_t = self.nngru(x_t, h_tm1)
-        # reset_gate, update_gate = self.gates(x_t, h_tm1)
-        # reset_gate = self.reset_gate(x_t, h_tm1, debug=self.debug)
-        # update_gate = self.update_gate(x_t, h_tm1, debug=self.debug)
-        # if self.debug:  rg = reset_gate; ug = update_gate
-        # canh = torch.mul(h_tm1, reset_gate)
-        # canh = self.main_gate(x_t, canh)
-        # h_t = (1 - update_gate) * h_tm1 + update_gate * canh
-        # if self.debug: return h_t, rg, ug
+        if self.shared_dropout_rec:
+            if self.shared_dropout_reccer is None:
+                ones = q.var(torch.ones(h_tm1.size())).cuda(crit=h_tm1).v
+                self.shared_dropout_reccer = [self.shared_dropout_rec(ones)]
+            h_tm1 = torch.mul(h_tm1, self.shared_dropout_reccer[0])
+
+        h_t = self.nncell(x_t, h_tm1)
+
         if self.zoneout:
             if self.zoner is None:
                 self.zoner = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
             zoner = self.zoneout(self.zoner)
             h_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
+        if self.shared_zoneout:
+            if self.shared_zoneouter is None:
+                ones = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
+                self.shared_zoneouter = [self.shared_zoneout(ones)]
+            h_t = torch.mul(1 - self.shared_zoneouter[0], h_tm1) + torch.mul(self.shared_zoneouter[0], h_t)
         return h_t, h_t
 
 
-class LSTM(RNUBase):
-    debug = False
-
-    def __init__(self, indim, outdim, use_bias=True, activation="tanh", gate_activation="sigmoid",
-                 dropout_in=None, dropout_rec=None, zoneout=None):
-        super(LSTM, self).__init__()
-        self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout = \
-            indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
-
-        self.nnlstm = nn.LSTMCell(self.indim, self.outdim, bias=self.use_bias)
-        # self.gate_activation, self.activation = gate_activation, activation  # sigm, tanh
-        # self.activation_fn = name2fn(activation)
-        #
-        # self.forget_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        # self.input_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        # self.output_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        # self.main_gate = RNUGate(self.indim, self.outdim, activation=activation, use_bias=use_bias)
-
-        # region dropouts
-        if self.dropout_in:
-            self.dropout_in = nn.Dropout(p=self.dropout_in)
-        if self.dropout_rec:
-            self.dropout_rec = nn.Dropout(p=self.dropout_rec)
-        if self.zoneout:
-            self.zoner = None
-            self.zoneout = nn.Dropout(p=self.zoneout)
-        # endregion
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        # self.forget_gate.reset_parameters()
-        # self.input_gate.reset_parameters()
-        # self.output_gate.reset_parameters()
-        # self.main_gate.reset_parameters()
-        self.nnlstm.reset_parameters()
+class LSTMCell(GRUCell):
+    def setcell(self):
+        self.nncell = nn.LSTMCell(self.indim, self.outdim, bias=self.use_bias)
 
     @property
     def state_spec(self):
@@ -364,8 +344,14 @@ class LSTM(RNUBase):
         if self.dropout_rec:
             y_tm1 = self.dropout_rec(y_tm1)
             c_tm1 = self.dropout_rec(c_tm1)
+        if self.shared_dropout_rec:
+            if self.shared_dropout_reccer is None:
+                ones = q.var(torch.ones(c_tm1.size())).cuda(crit=c_tm1).v
+                self.shared_dropout_reccer = [self.shared_dropout_rec(ones), self.shared_dropout_rec(ones)]
+            y_tm1 = torch.mul(c_tm1, self.shared_dropout_reccer[0])
+            c_tm1 = torch.mul(y_tm1, self.shared_dropout_reccer[1])
         # endregion
-        y_t, c_t = self.nnlstm(x_t, (y_tm1, c_tm1))
+        y_t, c_t = self.nncell(x_t, (y_tm1, c_tm1))
         # input_gate = self.input_gate(x_t, y_tm1)
         # output_gate = self.output_gate(x_t, y_tm1)
         # forget_gate = self.forget_gate(x_t, y_tm1)
@@ -378,6 +364,12 @@ class LSTM(RNUBase):
             zoner = self.zoneout(self.zoner)
             c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
             y_t = torch.mul(1 - zoner, y_tm1) + torch.mul(zoner, y_t)
+        if self.shared_zoneout:
+            if self.shared_zoneouter is None:
+                ones = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
+                self.shared_zoneouter = [self.shared_zoneout(ones), self.shared_zoneout(ones)]
+            c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
+            y_t = torch.mul(1 - self.shared_zoneouter[1], y_tm1) + torch.mul(self.shared_zoneouter[1], y_t)
         return y_t, c_t, y_t
 
 # endregion

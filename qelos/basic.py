@@ -45,11 +45,12 @@ class Stack(nn.Module):
 
 
 class Softmax(nn.Module):
-    def __init__(self, temperature=1.):
+    def __init__(self, temperature=1., _log_in_train=False):
         super(Softmax, self).__init__()
         self.temperature = temperature
         self._log = False
         self._logafter = False
+        self._log_in_train = _log_in_train
 
     def logsumexp(self, x, mask=None):
         #x = torch.add(x, torch.log(mask))
