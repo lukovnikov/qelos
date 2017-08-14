@@ -111,6 +111,8 @@ def number2charseq(x):
            8: "_eight ",
            9: "_nine  "}
     acc = []
+    if x.is_cuda:
+        x = x.cpu()
     for i in range(x.size(0)):
         word = x[i].data.numpy()[0]
         word = dic[word]
