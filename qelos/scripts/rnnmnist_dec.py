@@ -111,15 +111,17 @@ def number2charseq(x):
            8: "_eight ",
            9: "_nine  "}
     acc = []
+    tocuda = False
     if x.is_cuda:
         x = x.cpu()
+        tocuda = True
     for i in range(x.size(0)):
         word = x[i].data.numpy()[0]
         word = dic[word]
         word = map(lambda x: ord(x) if x is not " " else 0, word)
         acc.append(word)
     acc = np.asarray(acc)
-    acc = q.var(torch.LongTensor(acc)).cuda(crit=x).v
+    acc = q.var(torch.LongTensor(acc)).cuda(crit=tocuda).v
     return acc
 
 
