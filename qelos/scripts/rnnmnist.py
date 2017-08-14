@@ -16,7 +16,7 @@ class RNNStack(nn.Module):
     def forward(self, x, h0):
         y = x
         for i, layer in enumerate(self.layers):
-            y, s = layer(y, h0[i].unsqueeze(0))
+            y, s = layer(y, h0[i].unsqueeze(0).contiguous())
         return y, s
 
 
