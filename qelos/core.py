@@ -18,7 +18,7 @@ class var(object):
         elif crit is True:
             if not self.v.is_cuda:
                 self.v = self.v.cuda()
-        elif isinstance(crit, torch.Tensor):
+        elif hasattr(crit, "is_cuda"):
             self.cuda(crit=crit.is_cuda)
         elif crit is None:
             self.cuda(crit=var.all_cuda)
