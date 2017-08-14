@@ -262,21 +262,25 @@ class GRU(RNUBase):
         super(GRU, self).__init__()
         self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout = \
             indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
-        self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
 
-        self.gates = PackedRNUGates(self.indim+self.outdim,
-                                   [(self.outdim, gate_activation),
-                                    (self.outdim, gate_activation)],
-                                   use_bias=use_bias)
+        self.nngru = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
+
+        # self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
+        #
+        # self.gates = PackedRNUGates(self.indim+self.outdim,
+        #                            [(self.outdim, gate_activation),
+        #                             (self.outdim, gate_activation)],
+        #                            use_bias=use_bias)
         # self.update_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
         # self.reset_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, activation)], use_bias=use_bias)
+        # self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, activation)], use_bias=use_bias)
 
         if self.dropout_in:
             self.dropout_in = nn.Dropout(p=self.dropout_in)
         if self.dropout_rec:
             self.dropout_rec = nn.Dropout(p=self.dropout_rec)
         if self.zoneout:
+            self.zoner = None
             self.zoneout = nn.Dropout(p=self.zoneout)
 
         self.reset_parameters()
@@ -296,16 +300,20 @@ class GRU(RNUBase):
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             h_tm1 = self.dropout_rec(h_tm1)
-        reset_gate, update_gate = self.gates(x_t, h_tm1)
+        h_t = self.nngru(x_t, h_tm1)
+        # reset_gate, update_gate = self.gates(x_t, h_tm1)
         # reset_gate = self.reset_gate(x_t, h_tm1, debug=self.debug)
         # update_gate = self.update_gate(x_t, h_tm1, debug=self.debug)
         # if self.debug:  rg = reset_gate; ug = update_gate
-        canh = torch.mul(h_tm1, reset_gate)
-        canh = self.main_gate(x_t, canh)
-        if self.zoneout:
-            update_gate = self.zoneout(update_gate)
-        h_t = (1 - update_gate) * h_tm1 + update_gate * canh
+        # canh = torch.mul(h_tm1, reset_gate)
+        # canh = self.main_gate(x_t, canh)
+        # h_t = (1 - update_gate) * h_tm1 + update_gate * canh
         # if self.debug: return h_t, rg, ug
+        if self.zoneout:
+            if self.zoner is None:
+                self.zoner = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
+            zoner = self.zoneout(self.zoner)
+            c_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
         return h_t, h_t
 
 
