@@ -118,6 +118,7 @@ def main(
     total = 0
     for images, labels in test_loader:
         images = q.var(images.view(-1, sequence_length, input_size)).cuda(crit=gpu).v
+        labels = q.var(labels).cuda(crit=gpu).v
         outputs = rnn(images)
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
