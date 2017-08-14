@@ -15,20 +15,30 @@ class TestGRU(TestCase):
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         gru.set_init_states(h_tm1)
-        h_t, rg, ug = gru._forward(x_t, h_tm1)
-        # simulate reset gate
-        nprg = np.dot(x_t.data.numpy(), gru.reset_gate.W.data.numpy())
-        nprg += np.dot(h_tm1.data.numpy(), gru.reset_gate.U.data.numpy())
-        nprg += gru.reset_gate.b.data.numpy()
-        self.assertTrue(np.allclose(rg, nprg))
-        # simulate update gate
-        npug = np.dot(x_t.data.numpy(), gru.update_gate.W.data.numpy())
-        npug += np.dot(h_tm1.data.numpy(), gru.update_gate.U.data.numpy())
-        npug += gru.update_gate.b.data.numpy()
-        self.assertTrue(np.allclose(ug, npug))
-        # output shape
-        self.assertEqual((5, 10), h_t.data.numpy().shape)
-        print(rg)
+        y_t = gru(x_t)
+        self.assertEqual((5, 10), y_t.data.numpy().shape)
+
+    # def test_gru_shapes(self):
+    #     batsize = 5
+    #     rnn.GRU.debug = True
+    #     gru = rnn.GRU(9, 10)
+    #     x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
+    #     h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+    #     gru.set_init_states(h_tm1)
+    #     h_t, rg, ug = gru._forward(x_t, h_tm1)
+    #     # simulate reset gate
+    #     nprg = np.dot(x_t.data.numpy(), gru.reset_gate.W.data.numpy())
+    #     nprg += np.dot(h_tm1.data.numpy(), gru.reset_gate.U.data.numpy())
+    #     nprg += gru.reset_gate.b.data.numpy()
+    #     self.assertTrue(np.allclose(rg, nprg))
+    #     # simulate update gate
+    #     npug = np.dot(x_t.data.numpy(), gru.update_gate.W.data.numpy())
+    #     npug += np.dot(h_tm1.data.numpy(), gru.update_gate.U.data.numpy())
+    #     npug += gru.update_gate.b.data.numpy()
+    #     self.assertTrue(np.allclose(ug, npug))
+    #     # output shape
+    #     self.assertEqual((5, 10), h_t.data.numpy().shape)
+    #     print(rg)
 
     def test_params_collected(self):
         gru = rnn.GRU(9, 10)

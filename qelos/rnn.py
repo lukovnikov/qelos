@@ -39,6 +39,49 @@ class RNUGate(nn.Module):
         return ret
 
 
+class PackedRNUGates(nn.Module):
+    def __init__(self, indim, outgatespecs, use_bias=True):
+        super(PackedRNUGates, self).__init__()
+        self.indim = indim
+        self.outdim = 0
+        self.outgates = []
+        self.use_bias = use_bias
+        for outgatespec in outgatespecs:
+            gateoutdim = outgatespec[0]
+            gateact = outgatespec[1]
+            gateact_fn = name2fn(gateact)
+            self.outgates.append(((self.outdim, self.outdim+gateoutdim), gateact_fn))
+            self.outdim += gateoutdim
+        self.W = nn.Parameter(torch.FloatTensor(self.indim, self.outdim))
+        if self.use_bias:
+            self.b = nn.Parameter(torch.FloatTensor(1, self.outdim,))
+        else:
+            self.register_parameter("b", None)
+        self.reset_parameters()
+
+    def reset_parameters(self):     # TODO incorporate gain per activation fn
+        nn.init.xavier_uniform(self.W)
+        if self.use_bias:
+            nn.init.uniform(self.b, -0.01, 0.01)
+
+    def forward(self, x, h):
+        x = torch.cat([x, h], 1)
+        v = torch.mm(x, self.W)
+        if self.use_bias:
+            v.add_(self.b)
+        ret = []
+        for outgate in self.outgates:
+            outgateslice = outgate[0]
+            outgateactfn = outgate[1]
+            gateval = v[:, outgateslice[0]:outgateslice[1]]
+            gateval = outgateactfn(gateval)
+            ret.append(gateval)
+        ret = tuple(ret)
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret
+
+
 class Reccable(nn.Module):
     """
     Accepts mask_t and t in its forward kwargs.
@@ -221,9 +264,13 @@ class GRU(RNUBase):
             indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
         self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
 
-        self.update_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.reset_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        self.main_gate = RNUGate(self.indim, self.outdim, activation=activation, use_bias=use_bias)
+        self.gates = PackedRNUGates(self.indim+self.outdim,
+                                   [(self.outdim, gate_activation),
+                                    (self.outdim, gate_activation)],
+                                   use_bias=use_bias)
+        # self.update_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
+        # self.reset_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
+        self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, activation)], use_bias=use_bias)
 
         if self.dropout_in:
             self.dropout_in = nn.Dropout(p=self.dropout_in)
@@ -235,8 +282,9 @@ class GRU(RNUBase):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.update_gate.reset_parameters()
-        self.reset_gate.reset_parameters()
+        self.gates.reset_parameters()
+        # self.update_gate.reset_parameters()
+        # self.reset_gate.reset_parameters()
         self.main_gate.reset_parameters()
 
     @property
@@ -248,15 +296,16 @@ class GRU(RNUBase):
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             h_tm1 = self.dropout_rec(h_tm1)
-        reset_gate = self.reset_gate(x_t, h_tm1, debug=self.debug)
-        update_gate = self.update_gate(x_t, h_tm1, debug=self.debug)
-        if self.debug:  reset_gate, rg = reset_gate; update_gate, ug = update_gate
+        reset_gate, update_gate = self.gates(x_t, h_tm1)
+        # reset_gate = self.reset_gate(x_t, h_tm1, debug=self.debug)
+        # update_gate = self.update_gate(x_t, h_tm1, debug=self.debug)
+        # if self.debug:  rg = reset_gate; ug = update_gate
         canh = torch.mul(h_tm1, reset_gate)
         canh = self.main_gate(x_t, canh)
         if self.zoneout:
             update_gate = self.zoneout(update_gate)
         h_t = (1 - update_gate) * h_tm1 + update_gate * canh
-        if self.debug: return h_t, rg, ug
+        # if self.debug: return h_t, rg, ug
         return h_t, h_t
 
 
