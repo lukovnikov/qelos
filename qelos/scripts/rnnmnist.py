@@ -16,7 +16,7 @@ class RNNStack(nn.Module):
     def forward(self, x, h0):
         y = x
         for i, layer in enumerate(self.layers):
-            y, s = layer(y, h0[i].unsqueeze(0).contiguous())
+            y, s = layer(y, h0[i].unsqueeze(0))
         return y, s
 
 
@@ -73,8 +73,8 @@ def main(
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
             elif mode == "stack":
                 self.rnn = RNNStack(
-                    *([nn.GRU(input_size, hidden_size, batch_first=True)] +
-                        [nn.GRU(hidden_size, hidden_size, batch_first=True) for i in range(num_layers - 1)]
+                    *([nn.GRU(input_size, hidden_size, num_layers=1, batch_first=True)] +
+                        [nn.GRU(hidden_size, hidden_size, num_layers=1, batch_first=True) for i in range(num_layers - 1)]
                     )
                 )
             self.fc = nn.Linear(hidden_size, num_classes)
