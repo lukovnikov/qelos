@@ -179,9 +179,11 @@ def main(
     initstate = nn.Linear(hidden_size, decdim)
     decoder = q.ContextDecoder(*[
         nn.Embedding(256, embdim),
-        q.GRULayer((embdim + hidden_size if ctx_to_decinp else embdim), decdim),
-        nn.Linear(decdim, 256),
-        nn.LogSoftmax()
+        q.RecurrentStack(
+            q.GRULayer((embdim + hidden_size if ctx_to_decinp else embdim), decdim),
+            nn.Linear(decdim, 256),
+            nn.LogSoftmax()
+        )
     ], ctx_to_h0=initstate, ctx_to_decinp=ctx_to_decinp)
 
 

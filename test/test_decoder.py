@@ -1,7 +1,7 @@
 from __future__ import print_function
 from unittest import TestCase
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder
-from qelos.rnn import RecStack, GRUCell, GRULayer
+from qelos.rnn import RecStack, GRUCell, GRULayer, RecurrentStack
 from qelos.basic import Forward, Softmax, Stack, Lambda
 import torch, numpy as np
 from torch import nn
@@ -54,9 +54,11 @@ class TestDecoder(TestCase):
         # model def
         decoder = ContextDecoder(
             nn.Embedding(vocsize, embdim, padding_idx=0),
-            GRULayer(embdim + ctxdim, encdim),
-            Forward(encdim, vocsize),
-            Softmax()
+            RecurrentStack(
+                GRULayer(embdim + ctxdim, encdim),
+                Forward(encdim, vocsize),
+                Softmax()
+            )
         )
         # end model def
         data = np.random.randint(0, vocsize, (batsize, seqlen))

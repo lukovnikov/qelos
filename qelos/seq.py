@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
-from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack
+from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
 from qelos.util import issequence
 
 
@@ -134,12 +134,12 @@ class ContextDecoder(Decoder):
     """
     Allows to use efficient cudnn RNN unrolled over time
     """
-    def __init__(self, embedder=None, *layers, **kw):
-        stack = RecurrentStack(*layers)
-        super(ContextDecoder, self).__init__(stack)
+    def __init__(self, embedder=None, core=None, **kw):
+        assert(core is not None)
+        super(ContextDecoder, self).__init__(core)
         self.embedder = embedder
         self.ctx_to_decinp = kw["ctx_to_decinp"] if "ctx_to_decinp" in kw else True
-        self.ctx_to_h0 = kw["ctx_to_h0"] if "ctx_to_h0" in kw else None
+        self.init_state_gen = kw["ctx_to_h0"] if "ctx_to_h0" in kw else None
 
     def forward(self, x, ctx):
         """
@@ -162,11 +162,85 @@ class ContextDecoder(Decoder):
         return y
 
     def _compute_init_states(self, x, ctx):
-        if self.ctx_to_h0 is not None:
-            h_0 = self.ctx_to_h0(ctx)
+        if self.init_state_gen is not None:
+            h_0 = self.init_state_gen(ctx)
             return h_0
         else:
             return None
+
+
+class AttentionDecoder(ContextDecoder):
+    def __init__(self, attention=None,
+                 embedder=None,
+                 core=None,                 # RecurrentStack
+                 smo=None,                  # non-rec
+                 att_transform=None,
+                 init_state_gen=None,
+                 ctx_to_smo=True,
+                 state_to_smo=True,
+                 decinp_to_att=False,
+                 decinp_to_smo=False,
+                 return_out=True,
+                 return_att=False):
+        super(AttentionDecoder, self).__init__(embedder=embedder, core=core, init_state_gen)
+        self.attention = attention
+        self.smo = RecurrentWrapper(smo) if smo is not None else None
+        self.att_transform = RecurrentWrapper(att_transform) if att_transform is not None else None
+        # wiring
+        self.att_after_update = True
+        self.ctx_to_smo = ctx_to_smo
+        self.state_to_smo = state_to_smo
+        self.decinp_to_att = decinp_to_att
+        self.decinp_to_smo = decinp_to_smo
+        # returns
+        self.return_out = return_out
+        self.return_att = return_att
+
+    def forward(self, x, ctx, ctxmask):
+        """
+        :param x:   (batsize, seqlen) of integers or (batsize, seqlen, dim) of vectors if embedder is None
+        :param ctx: (batsize, dim) of context vectors
+        :return:
+        """
+        new_init_states = self._compute_init_states(x, ctx)
+        if new_init_states is not None:
+            if not issequence(new_init_states):
+                new_init_states = (new_init_states,)
+            self.set_init_states(*new_init_states)
+        x_emb = self.embedder(x) if self.embedder is not None else x
+        y = self.block(x_emb)
+        toatt = y
+        if self.decinp_to_att:
+            toatt = torch.cat([y, x_emb], 2)
+        dctx, att_weights = self._get_dctx(ctx, ctxmask, toatt)
+        cat_to_smo = []
+        if self.state_to_smo:   cat_to_smo.append(y)
+        if self.ctx_to_smo:     cat_to_smo.append(dctx)
+        if self.decinp_to_smo:  cat_to_smo.append(x_emb)
+        smoinp = torch.cat(cat_to_smo, 2) if len(cat_to_smo) > 1 else cat_to_smo[0]
+        output = self.smo(smoinp) if self.smo is not None else smoinp
+        # returns
+        ret = tuple()
+        if self.return_out:
+            ret += (output,)
+        if self.return_att:
+            ret += (att_weights,)
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret
+
+    def _get_dctx(self, ctx, ctxmask, toatt):
+        """
+        :param ctx:     (batsize, inpseqlen, dim)
+        :param ctxmask: (batsize, inpseqlen)
+        :param toatt:   (batsize, outseqlen, dim)
+        :return:        (batsize, outseqlen, dim) and (batsize, outseqlen, inpseqlen)
+        """
+        if self.att_transform is not None:
+            toatt = self.att_transform(toatt)
+
+
+        pass # TODO
 
 
 class DecoderCell(RecStatefulContainer):
