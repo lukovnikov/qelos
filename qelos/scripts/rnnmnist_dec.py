@@ -242,6 +242,7 @@ def main(
         tgt = number2charseq(labels)
         outputs = encdec(images, tgt[:, :-1])
         _, predicted = torch.max(outputs.data, 2)
+        print(predicted)
         if tgt.is_cuda:
             tgt = tgt.cpu()
         if predicted.is_cuda:
