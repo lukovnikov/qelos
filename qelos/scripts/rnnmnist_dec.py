@@ -217,7 +217,7 @@ def main(
             # Forward + Backward + Optimize
             optimizer.zero_grad()
             outputs = encdec(images, tgt[:, :-1])
-            loss = criterion(outputs, tgt[:, :-1])
+            loss = criterion(outputs, tgt[:, 1:])
             loss.backward()
             optimizer.step()
 
