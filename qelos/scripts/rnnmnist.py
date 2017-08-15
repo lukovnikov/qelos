@@ -72,7 +72,7 @@ def main(
                 tt.msg("using nn.RNN")
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
             elif mode == "stack":
-                self.rnn = RNNStack(
+                self.rnn = q.RecurrentStack(
                     *([nn.GRU(input_size, hidden_size, 1, batch_first=True)] +
                       [nn.GRU(hidden_size, hidden_size, 1, batch_first=True) for i in range(num_layers - 1)]
                     )
@@ -91,7 +91,7 @@ def main(
                 out, _ = self.rnn(x, h0)
 
             # Decode hidden state of last time step
-            out = self.fc(out[:, -1, :])
+            out = nn.LogSoftmax()(self.fc(out[:, -1, :]))
             return out
     if gpu:
         q.var.all_cuda = True
@@ -101,7 +101,7 @@ def main(
 
 
     # Loss and Optimizer
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.NLLLoss()
     if gpu:
         criterion.cuda()
     optimizer = torch.optim.Adam(rnn.parameters(), lr=learning_rate)
