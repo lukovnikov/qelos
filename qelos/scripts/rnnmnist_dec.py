@@ -227,7 +227,7 @@ def main(
                 for param in encdec.parameters():
                     tgn = tgn + torch.norm(param.grad, 2)
                 print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, TGN: %.4f'
-                       %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0], tgn.data.numpy()[0]))
+                       %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0], tgn.cpu().data.numpy()[0]))
                 btt.tick()
             #tt.tock("batch done")
         tt.tock("epoch {} done {}".format(epoch, loss.data[0]))
