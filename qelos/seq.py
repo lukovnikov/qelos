@@ -146,7 +146,7 @@ class ContextDecoder(Decoder):
         :return:
         """
         x_emb = self.embedder(x) if self.embedder is not None else x
-        ctx = ctx.unsqueeze(1).expand(ctx.size(0), x_emb.size(1), ctx.size(-1))
+        ctx = ctx.unsqueeze(1).repeat(1, x_emb.size(1), 1)
         i = torch.cat([x_emb, ctx], 2)
         new_init_states = self._compute_init_states(x, ctx)
         if new_init_states is not None:

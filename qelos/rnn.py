@@ -655,6 +655,7 @@ class RecurrentStack(RecStack):
     def forward(self, *x):
         y_l = x
         for layer in self.layers:
+            print layer
             y_l = layer(*y_l)
             if not issequence(y_l):
                 y_l = [y_l]
