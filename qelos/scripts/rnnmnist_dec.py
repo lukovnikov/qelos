@@ -71,6 +71,18 @@ class ImgToSeq(nn.Module):
         return dec
 
 
+class IdxToSeq(nn.Module):
+    def __init__(self, decoder, vocsize=10, embdim=100):
+        super(IdxToSeq, self).__init__()
+        self.decoder = decoder
+        self.embedder = nn.Embedding(vocsize, embdim)
+
+    def forward(self, idx, seq):
+        enc = self.embedder(idx)
+        dec = self.decoder(seq, enc)
+        return dec
+
+
 class DecoderLoss(nn.Module):
     def __init__(self):
         super(DecoderLoss, self).__init__()
@@ -136,7 +148,8 @@ def main(
         learning_rate = 0.01,
         ctx_to_decinp=False,
         gpu = False,
-        mode = "stack"     # "nn" or "qrnn" or "stack"
+        mode = "stack",     # "nn" or "qrnn" or "stack"
+        trivial=True,
     ):
     tt.msg("using q: {}".format(mode))
     # MNIST Dataset
@@ -172,7 +185,10 @@ def main(
     ], ctx_to_h0=initstate, ctx_to_decinp=ctx_to_decinp)
 
 
-    encdec = ImgToSeq(encoder, decoder)
+    if trivial:
+        encdec = IdxToSeq(decoder, embdim=hidden_size)
+    else:
+        encdec = ImgToSeq(encoder, decoder)
     if gpu:
         encdec.cuda()
 
@@ -195,6 +211,8 @@ def main(
             images = q.var(images.view(-1, sequence_length, input_size)).cuda(crit=gpu).v
             labels = q.var(labels).cuda(crit=gpu).v
             tgt = number2charseq(labels)
+            if trivial:
+                images = labels
 
             # Forward + Backward + Optimize
             optimizer.zero_grad()
@@ -216,6 +234,8 @@ def main(
     for images, labels in test_loader:
         images = q.var(images.view(-1, sequence_length, input_size)).cuda(crit=gpu).v
         labels = q.var(labels).cuda(crit=gpu).v
+        if trivial:
+            images = labels
         tgt = number2charseq(labels)
         outputs = encdec(images, tgt[:, :-1])
         _, predicted = torch.max(outputs.data, 2)
