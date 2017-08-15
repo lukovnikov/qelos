@@ -131,7 +131,7 @@ def main(
         input_size = 28,
         hidden_size = 128,
         num_layers = 2,
-        batch_size = 100,
+        batch_size = 598,
         num_epochs = 2,
         learning_rate = 0.01,
 
@@ -165,7 +165,7 @@ def main(
         nn.Embedding(256, 20),
         q.GRUCell(20+hidden_size, 256),
         q.Forward(256, 256),
-        q.LogSoftmax()
+        nn.LogSoftmax()
     ]).to_decoder()
 
     encdec = ImgToSeq(encoder, decoder)

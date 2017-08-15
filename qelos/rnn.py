@@ -156,22 +156,22 @@ class RNUBase(RecStateful):
         """
         assert(isnumber(arg))       # is batch size
         if self._init_states is None:       # no states have been set using .set_init_states()
-            self._init_states = [None] * self.numstates
+            _init_states = [None] * self.numstates
         # fill up with zeros and expand where necessary
-        assert(self.numstates == len(self._init_states))
-        for i in range(len(self._init_states)):
+        assert(self.numstates == len(_init_states))
+        for i in range(len(_init_states)):
             statespec = self.state_spec[i]
-            initstate = self._init_states[i]
+            initstate = _init_states[i]
             if initstate is None:
                 state_0 = q.var(torch.zeros((arg, statespec))).cuda().v
-                self._init_states[i] = state_0
+                _init_states[i] = state_0
             elif initstate.dim() == 2:        # init state set differently for different batches
                 pass
             elif initstate.dim() == 1:
-                self._init_states[i] = initstate.unsqueeze(0).expand(arg, initstate.size(-1))
+                _init_states[i] = initstate.unsqueeze(0).expand(arg, initstate.size(-1))
             else:
                 raise Exception("initial states set to wrong dimensional values. Must be 1D (will be repeated) or 2D.")
-        return self._init_states
+        return _init_states
 
     def set_init_states(self, *states):
         """
