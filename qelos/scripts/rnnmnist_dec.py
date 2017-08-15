@@ -223,8 +223,11 @@ def main(
 
             if (i+1) % 100 == 0:
                 btt.tock("100 batches done")
-                print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
-                       %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0]))
+                tgn = 0
+                for param in encdec.parameters():
+                    tgn = tgn + torch.norm(param.grad, 2)
+                print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f, TGN: %.4f'
+                       %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0], tgn.data.numpy()[0]))
                 btt.tick()
             #tt.tock("batch done")
         tt.tock("epoch {} done {}".format(epoch, loss.data[0]))
