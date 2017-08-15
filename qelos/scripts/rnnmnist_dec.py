@@ -256,10 +256,10 @@ def main(
         eq = predicted == tgt
         eq = eq | tgtmask
         eq = np.all(eq, axis=1)
-        correct = eq.sum()
+        correct += eq.sum()
         total += labels.size(0)
 
-    print('Test Accuracy of the model on the 10000 test images: %d %%' % (100 * correct / total))
+    print('Test Accuracy of the model on the 10000 test images: %d %%' % (100. * correct / total))
 
     # Save the Model
     torch.save(encdec.state_dict(), 'rnn.pkl')
