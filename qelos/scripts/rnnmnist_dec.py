@@ -220,7 +220,7 @@ def main(
         if predicted.is_cuda:
             predicted = predicted.cpu()
         tgt = tgt[:, 1:].data.numpy()
-        predicted = predicted.data.numpy()
+        predicted = predicted.numpy()
         tgtmask = tgt != 0
         eq = predicted == tgtmask
         eq = eq | (tgtmask == False)
