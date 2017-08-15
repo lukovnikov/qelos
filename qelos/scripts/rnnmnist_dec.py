@@ -161,9 +161,10 @@ def main(
     if gpu:
         q.var.all_cuda = True
     encoder = Encoder(input_size, hidden_size, num_layers, mode=mode)
+    embdim = hidden_size
     decoder = q.ContextDecoder(*[
-        nn.Embedding(256, 20),
-        q.GRULayer(20+hidden_size, 256),
+        nn.Embedding(256, embdim),
+        q.GRULayer(embdim+hidden_size, 256),
         q.Forward(256, 256),
         nn.LogSoftmax()
     ])
