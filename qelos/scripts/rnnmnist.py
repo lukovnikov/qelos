@@ -73,8 +73,8 @@ def main(
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
             elif mode == "stack":
                 self.rnn = q.RecurrentStack(
-                    *([nn.GRU(input_size, hidden_size, 1, batch_first=True)] +
-                      [nn.GRU(hidden_size, hidden_size, 1, batch_first=True) for i in range(num_layers - 1)]
+                    *([q.GRULayer(input_size, hidden_size)] +
+                      [q.GRULayer(hidden_size, hidden_size) for i in range(num_layers - 1)]
                     )
                 )
             self.fc = nn.Linear(hidden_size, num_classes)
