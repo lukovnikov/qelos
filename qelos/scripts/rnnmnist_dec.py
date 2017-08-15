@@ -134,7 +134,7 @@ def main(
         batch_size = 598,
         num_epochs = 2,
         learning_rate = 0.01,
-
+        ctx_to_decinp=False,
         gpu = False,
         mode = "stack"     # "nn" or "qrnn" or "stack"
     ):
@@ -162,12 +162,15 @@ def main(
         q.var.all_cuda = True
     encoder = Encoder(input_size, hidden_size, num_layers, mode=mode)
     embdim = hidden_size
+    decdim = 100
+    initstate = nn.Linear(hidden_size, decdim)
     decoder = q.ContextDecoder(*[
         nn.Embedding(256, embdim),
-        q.GRULayer(embdim+hidden_size, 256),
-        q.Forward(256, 256),
+        q.GRULayer((embdim + hidden_size if ctx_to_decinp else embdim), decdim),
+        q.Forward(decdim, 256),
         nn.LogSoftmax()
-    ])
+    ], ctx_to_h0=initstate, ctx_to_decinp=ctx_to_decinp)
+
 
     encdec = ImgToSeq(encoder, decoder)
     if gpu:

@@ -134,10 +134,12 @@ class ContextDecoder(Decoder):
     """
     Allows to use efficient cudnn RNN unrolled over time
     """
-    def __init__(self, embedder=None, *layers):
+    def __init__(self, embedder=None, *layers, **kw):
         stack = RecurrentStack(*layers)
         super(ContextDecoder, self).__init__(stack)
         self.embedder = embedder
+        self.ctx_to_decinp = kw["ctx_to_decinp"] if "ctx_to_decinp" in kw else True
+        self.ctx_to_h0 = kw["ctx_to_h0"] if "ctx_to_h0" in kw else None
 
     def forward(self, x, ctx):
         """
@@ -145,19 +147,26 @@ class ContextDecoder(Decoder):
         :param ctx: (batsize, dim) of context vectors
         :return:
         """
-        x_emb = self.embedder(x) if self.embedder is not None else x
-        ctx = ctx.unsqueeze(1).repeat(1, x_emb.size(1), 1)
-        i = torch.cat([x_emb, ctx], 2)
         new_init_states = self._compute_init_states(x, ctx)
         if new_init_states is not None:
             if not issequence(new_init_states):
                 new_init_states = (new_init_states,)
             self.set_init_states(*new_init_states)
+        x_emb = self.embedder(x) if self.embedder is not None else x
+        if self.ctx_to_decinp:
+            ctx = ctx.unsqueeze(1).repeat(1, x_emb.size(1), 1)
+            i = torch.cat([x_emb, ctx], 2)
+        else:
+            i = x_emb
         y = self.block(i)
         return y
 
     def _compute_init_states(self, x, ctx):
-        return None
+        if self.ctx_to_h0 is not None:
+            h_0 = self.ctx_to_h0(ctx)
+            return h_0
+        else:
+            return None
 
 
 class DecoderCell(RecStatefulContainer):
