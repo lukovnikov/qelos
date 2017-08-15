@@ -492,7 +492,7 @@ class GRULayer(RNUBase, Recurrent):
 
 class LSTMLayer(GRULayer):
     def _nn_unit(self):
-        return nn.LSTM    \
+        return nn.LSTM
 
     @property
     def state_spec(self):
@@ -635,11 +635,11 @@ class RecurrentWrapper(Recurrent, nn.Module):
         self.block = block
 
     def forward(self, x):       # TODO: multiple inputs and outputs
-        y_list = []
-        for i in range(x.size(1)):
-            y = self.block(x[:, i])
-            y_list.append(y)
-        y = torch.stack(y_list, 1)
+        x = x.contiguous()
+        batsize, seqlen = x.size(0), x.size(1)
+        i = x.view(batsize * seqlen, *x.size()[2:])
+        y = self.block(i)
+        y = y.view(batsize, seqlen, *y.size()[1:])
         return y
 
 

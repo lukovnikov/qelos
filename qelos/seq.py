@@ -160,8 +160,6 @@ class ContextDecoder(Decoder):
         return None
 
 
-
-
 class DecoderCell(RecStatefulContainer):
     """
     Decoder logic.

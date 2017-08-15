@@ -3,6 +3,7 @@ from __future__ import print_function
 from unittest import TestCase
 import qelos.rnn as rnn
 from torch.autograd import Variable
+from torch import nn
 import torch
 import numpy as np
 import qelos as q
@@ -300,3 +301,19 @@ class TestLSTMLayer(TestCase):
         self.assertEqual((batsize, 6), m.get_states(0)[1].size())
         self.assertEqual((batsize, 6), m.get_states(0)[2].size())
         self.assertEqual((batsize, 6), m.get_states(0)[3].size())
+
+
+class TestRecurrentStack(TestCase):
+    def test_shapes(self):
+        batsize, seqlen, vocsize, embdim, encdim = 5, 3, 20, 4, 6
+        m = q.RecurrentStack(
+            nn.Embedding(vocsize, embdim),
+            q.GRULayer(embdim, encdim),
+            q.Forward(encdim, vocsize),
+            q.LogSoftmax()
+        )
+        data = Variable(torch.LongTensor(np.random.randint(0, vocsize, (batsize, seqlen))))
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, vocsize), pred.size())
+        self.assertEqual((batsize, encdim), m.get_states(0)[0].size())
