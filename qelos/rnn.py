@@ -458,6 +458,7 @@ class GRULayer(RNUBase, Recurrent):
         return nn.GRU
 
     def forward(self, x):
+        self.reset_state()
         h_0 = self.get_init_states(x.size(0))
         y, s_t = self.nnlayer(x, h_0)
         self.set_states(s_t)
