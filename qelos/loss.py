@@ -17,7 +17,7 @@ class SeqNLLLoss(nn.NLLLoss):
         """
         batsize, seqlen, vocsize = probs.size()
         x = probs.view(batsize * seqlen, vocsize)
-        y = gold.view(batsize * seqlen)
+        y = gold.contiguous().view(batsize * seqlen)
         mask = torch.ne(y, self.ignore_index)
         mask = mask.type(torch.FloatTensor)
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
