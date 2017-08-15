@@ -242,13 +242,16 @@ def main(
         tgt = number2charseq(labels)
         outputs = encdec(images, tgt[:, :-1])
         _, predicted = torch.max(outputs.data, 2)
-        print(predicted)
         if tgt.is_cuda:
             tgt = tgt.cpu()
         if predicted.is_cuda:
             predicted = predicted.cpu()
         tgt = tgt[:, 1:].data.numpy()
         predicted = predicted.numpy()
+        print(predicted[:50])
+        print(tgt[:50])
+        print(labels[:50])
+
         tgtmask = tgt != 0
         eq = predicted == tgtmask
         eq = eq | (tgtmask == False)
