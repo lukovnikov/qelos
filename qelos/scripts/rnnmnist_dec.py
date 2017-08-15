@@ -143,13 +143,13 @@ def main(
         input_size = 28,
         hidden_size = 128,
         num_layers = 2,
-        batch_size = 598,
+        batch_size = 5,
         num_epochs = 2,
         learning_rate = 0.01,
         ctx_to_decinp=False,
         gpu = False,
         mode = "stack",     # "nn" or "qrnn" or "stack"
-        trivial=True,
+        trivial=False,
     ):
     tt.msg("using q: {}".format(mode))
     # MNIST Dataset
@@ -217,7 +217,7 @@ def main(
             # Forward + Backward + Optimize
             optimizer.zero_grad()
             outputs = encdec(images, tgt[:, :-1])
-            loss = criterion(outputs, tgt[:, 1:])
+            loss = criterion(outputs, tgt[:, :-1])
             loss.backward()
             optimizer.step()
 
