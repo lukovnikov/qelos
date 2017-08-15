@@ -1,4 +1,4 @@
-import torch
+import torch, qelos
 from torch import nn
 import numpy as np
 
@@ -19,6 +19,7 @@ class SeqNLLLoss(nn.NLLLoss):
         x = probs.view(batsize * seqlen, vocsize)
         y = gold.contiguous().view(batsize * seqlen)
         mask = y.ne(self.ignore_index)      # ByteTensor
+        mask = qelos.core.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
         # mask = mask.type(torch.FloatTensor)
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
         logprobs = logprobs * mask
