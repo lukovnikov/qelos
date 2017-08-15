@@ -175,7 +175,7 @@ def main(
 
     # Loss and Optimizer
     criterion = nn.CrossEntropyLoss()
-    criterion = DecoderLoss()
+    criterion = q.SeqNLLLoss(ignore_index=0)
     if gpu:
         criterion.cuda()
     optimizer = torch.optim.Adadelta(encdec.parameters(), lr=learning_rate)
