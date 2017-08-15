@@ -248,13 +248,13 @@ def main(
             predicted = predicted.cpu()
         tgt = tgt[:, 1:].data.numpy()
         predicted = predicted.numpy()
-        print(predicted[:50])
-        print(tgt[:50])
-        print(labels[:50])
+        # print(predicted[:10])
+        # print(tgt[:10])
+        # print(labels[:10])
 
-        tgtmask = tgt != 0
-        eq = predicted == tgtmask
-        eq = eq | (tgtmask == False)
+        tgtmask = tgt == 0
+        eq = predicted == tgt
+        eq = eq | tgtmask
         eq = np.all(eq, axis=1)
         correct = eq.sum()
         total += labels.size(0)
