@@ -217,10 +217,12 @@ def main(
         _, predicted = torch.max(outputs.data, 2)
         if tgt.is_cuda:
             tgt = tgt.cpu()
+        if predicted.is_cuda:
+            predicted = predicted.cpu()
         tgt = tgt[:, 1:].data.numpy()
-        outputs = outputs.data.numpy()
+        predicted = predicted.data.numpy()
         tgtmask = tgt != 0
-        eq = outputs == tgtmask
+        eq = predicted == tgtmask
         eq = eq | (tgtmask == False)
         eq = np.all(eq, axis=1)
         correct = eq.sum()
