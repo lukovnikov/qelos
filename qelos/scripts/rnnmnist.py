@@ -85,7 +85,7 @@ def main(
             #c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
 
             # Forward propagate RNN
-            if mode == "qrnn":
+            if mode == "qrnn" or mode == "stack":
                 out = self.rnn(x)
             else:
                 out, _ = self.rnn(x, h0)
