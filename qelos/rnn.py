@@ -138,16 +138,23 @@ class RNUBase(RecStateful):
 
     def get_states(self, arg):
         if self._states is None:    # states don't exist yet
-            self._states = []
+            _states = []
             for initstate in self.get_init_states(arg):
-                self._states.append(initstate)
-        return self._states
+                _states.append(initstate)
+        else:
+            _states = self._states
+        return _states
 
     def set_states(self, *states):
-        assert(len(states) == len(self._states))
-        for i, state in enumerate(states):
-            assert(state.size() == self._states[i].size())
-            self._states[i] = state
+        if self._states is not None:
+            assert(len(states) == len(self._states))
+            for i, state in enumerate(states):
+                assert(state.size() == self._states[i].size())
+                self._states[i] = state
+        else:
+            self._states = []
+            for state in states:
+                self._states.append(state)
 
     def get_init_states(self, arg):
         """
@@ -157,6 +164,8 @@ class RNUBase(RecStateful):
         assert(isnumber(arg))       # is batch size
         if self._init_states is None:       # no states have been set using .set_init_states()
             _init_states = [None] * self.numstates
+        else:
+            _init_states = self._init_states
         # fill up with zeros and expand where necessary
         assert(self.numstates == len(_init_states))
         for i in range(len(_init_states)):
@@ -374,8 +383,11 @@ class LSTMCell(GRUCell):
 
 # endregion
 
+class Recurrent(object):
+    pass
 
-class RNNLayer(nn.Module):
+
+class RNNLayer(nn.Module, Recurrent):
     """
     Unrolling an RNN cell over timesteps of a sequence
     """
@@ -436,7 +448,70 @@ class RNNLayer(nn.Module):
             return ret
 
 
-class BiRNNLayer(nn.Module):
+class GRULayer(RNUBase, Recurrent):
+    def __init__(self, indim, outdim, use_bias=True, bidirectional=False):
+        super(GRULayer, self).__init__()
+        self.indim, self.outdim, self.use_bias, self.bidirectional = indim, outdim, use_bias, bidirectional
+        self.nnlayer = self._nn_unit()(indim, outdim, bias=use_bias, batch_first=True, bidirectional=bidirectional, num_layers=1)
+
+    def _nn_unit(self):
+        return nn.GRU
+
+    def forward(self, x):
+        h_0 = self.get_init_states(x.size(0))
+        y, s_t = self.nnlayer(x, h_0)
+        self.set_states(s_t)
+        return y
+
+    @property
+    def state_spec(self):
+        if self.bidirectional:
+            return (self.outdim, self.outdim)
+        else:
+            return (self.outdim,)
+
+    def get_init_states(self, arg):
+        initstates = super(GRULayer, self).get_init_states(arg)
+        l = []
+        for initstate in initstates:
+            initstate = initstate.unsqueeze(0)
+            l.append(initstate)
+        if len(l) > 1:
+            initstates = torch.cat(l, 0)
+        else:
+            initstates = l[0]
+        return initstates
+
+    def set_states(self, *states):
+        out = []
+        for i in range(states[0].size(0)):
+            out.append(states[0][i])
+        super(GRULayer, self).set_states(*out)
+
+
+class LSTMLayer(GRULayer):
+    def _nn_unit(self):
+        return nn.LSTM    \
+
+    @property
+    def state_spec(self):
+        statespec = (self.outdim, self.outdim)
+        if self.bidirectional:
+            statespec = statespec + statespec
+        return statespec
+
+    def get_init_states(self, arg):
+        initstate = super(LSTMLayer, self).get_init_states(arg)
+        ret = (initstate[:initstate.size(0)/2],
+               initstate[initstate.size(0)/2:])
+        return ret
+
+    def set_states(self, *states):
+        state = torch.cat(list(states[0]), 0)
+        super(LSTMLayer, self).set_states(state)
+
+
+class BiRNNLayer(nn.Module, Recurrent):
     def __init__(self, cell1, cell2, mode="cat"):       # "cat" or "sum" or ...?
         super(BiRNNLayer, self).__init__()
         self.cell1 = cell1
@@ -551,3 +626,37 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
         return RNNLayer(self)
 
     # TODO: test for visibility of modules and their params
+
+
+class RecurrentWrapper(Recurrent, nn.Module):
+    def __init__(self, block):
+        super(RecurrentWrapper, self).__init__()
+        self.block = block
+
+    def forward(self, x):       # TODO: multiple inputs and outputs
+        y_list = []
+        for i in range(x.size(1)):
+            y = self.block(x[:, i])
+            y_list.append(y)
+        y = torch.stack(y_list, 1)
+        return y
+
+
+class RecurrentStack(RecStack):
+    def __init__(self, *layers):
+        newlayers = []
+        for layer in layers:
+            if not isinstance(layer, Recurrent):
+                layer = RecurrentWrapper(layer)
+            newlayers.append(layer)
+        super(RecurrentStack, self).__init__(*newlayers)
+
+    def forward(self, *x):
+        y_l = x
+        for layer in self.layers:
+            y_l = layer(*y_l)
+            if not issequence(y_l):
+                y_l = [y_l]
+        if len(y_l) == 1:
+            y_l = y_l[0]
+        return y_l

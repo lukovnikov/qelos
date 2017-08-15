@@ -161,12 +161,12 @@ def main(
     if gpu:
         q.var.all_cuda = True
     encoder = Encoder(input_size, hidden_size, num_layers, mode=mode)
-    decoder = q.ContextDecoderCell(*[
+    decoder = q.ContextDecoder(*[
         nn.Embedding(256, 20),
-        q.GRUCell(20+hidden_size, 256),
+        q.GRULayer(20+hidden_size, 256),
         q.Forward(256, 256),
         nn.LogSoftmax()
-    ]).to_decoder()
+    ])
 
     encdec = ImgToSeq(encoder, decoder)
     if gpu:

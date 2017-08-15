@@ -5,6 +5,7 @@ import qelos.rnn as rnn
 from torch.autograd import Variable
 import torch
 import numpy as np
+import qelos as q
 
 
 class TestGRU(TestCase):
@@ -244,3 +245,58 @@ class TestRecStack(TestCase):
         self.assertTrue(np.allclose(y_t.data.numpy(), y.data.numpy()[:, -1]))
         # TODO write assertions
 
+
+class TestGRULayer(TestCase):
+    def test_shapes(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.GRULayer(indim, 6)
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, 6), pred.size())
+        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
+
+    def test_shapes_with_init_state(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.GRULayer(indim, 6)
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        h_0 = Variable(torch.FloatTensor(np.random.random((6,))))
+        m.set_init_states(h_0)
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, 6), pred.size())
+        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
+
+    def test_shapes_bidir(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.GRULayer(indim, 6, bidirectional=True)
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, 6*2), pred.size())
+        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.get_states(0)[1].size())
+
+
+class TestLSTMLayer(TestCase):
+    def test_shapes(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.LSTMLayer(indim, 6)
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, 6), pred.size())
+        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.get_states(0)[1].size())
+
+    def test_shapes_bidir(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.LSTMLayer(indim, 6, bidirectional=True)
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        pred = m(data)
+        print(pred)
+        self.assertEqual((batsize, seqlen, 6*2), pred.size())
+        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.get_states(0)[1].size())
+        self.assertEqual((batsize, 6), m.get_states(0)[2].size())
+        self.assertEqual((batsize, 6), m.get_states(0)[3].size())

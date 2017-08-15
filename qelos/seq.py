@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
-from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful
+from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack
 from qelos.util import issequence
 
 
@@ -86,18 +86,27 @@ class Decoder(nn.Module):
         :param decodercell: main block that generates. must include everything
         """
         super(Decoder, self).__init__()
-        assert(isinstance(decodercell, DecoderCell))
+        #assert(isinstance(decodercell, DecoderCell))
         self.block = decodercell
 
-    def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
+    def reset_state(self):
         self.block.reset_state()
+
+    def _compute_init_states(self, *x, **kw):
+        return self.block._compute_init_states(*x, **kw)
+
+    def set_init_states(self, *x):
+        self.block.set_init_states(*x)
+
+    def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
+        self.reset_state()
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
-        new_init_states = self.block._compute_init_states(*x, **kw)
+        new_init_states = self._compute_init_states(*x, **kw)
         if new_init_states is not None:
             if not issequence(new_init_states):
                 new_init_states = (new_init_states,)
-            self.block.set_init_states(*new_init_states)
+            self.set_init_states(*new_init_states)
         y_list = []
         y_t = None
         for t in range(maxtime):
@@ -119,6 +128,38 @@ class Decoder(nn.Module):
         if len(y) == 1:
             y = y[0]
         return y
+
+
+class ContextDecoder(Decoder):
+    """
+    Allows to use efficient cudnn RNN unrolled over time
+    """
+    def __init__(self, embedder=None, *layers):
+        stack = RecurrentStack(*layers)
+        super(ContextDecoder, self).__init__(stack)
+        self.embedder = embedder
+
+    def forward(self, x, ctx):
+        """
+        :param x:   (batsize, seqlen) of integers or (batsize, seqlen, dim) of vectors if embedder is None
+        :param ctx: (batsize, dim) of context vectors
+        :return:
+        """
+        x_emb = self.embedder(x) if self.embedder is not None else x
+        ctx = ctx.unsqueeze(1).expand(ctx.size(0), x_emb.size(1), ctx.size(-1))
+        i = torch.cat([x_emb, ctx], 2)
+        new_init_states = self._compute_init_states(x, ctx)
+        if new_init_states is not None:
+            if not issequence(new_init_states):
+                new_init_states = (new_init_states,)
+            self.set_init_states(*new_init_states)
+        y = self.block(i)
+        return y
+
+    def _compute_init_states(self, x, ctx):
+        return None
+
+
 
 
 class DecoderCell(RecStatefulContainer):
