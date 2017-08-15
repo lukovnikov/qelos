@@ -18,14 +18,23 @@ class SeqNLLLoss(nn.NLLLoss):
         batsize, seqlen, vocsize = probs.size()
         x = probs.view(batsize * seqlen, vocsize)
         y = gold.contiguous().view(batsize * seqlen)
-        mask = y.ne(self.ignore_index)      # ByteTensor
-        mask = qelos.core.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
+        mask = None
+        if self.ignore_index >= 0:
+            mask = y.ne(self.ignore_index)      # ByteTensor
+            mask = qelos.core.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
         # mask = mask.type(torch.FloatTensor)
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
-        logprobs = logprobs * mask
+        if self.weight is not None:
+            weights = self.weight[y]
+            logprobs = logprobs * weights
+        if mask is not None:
+            logprobs = logprobs * mask
+            mask = mask.view(batsize, seqlen)
         logprobs = logprobs.view(batsize, seqlen)
-        mask = mask.view(batsize, seqlen)
-        totals = mask.sum(1)
+        if mask is not None:
+            totals = mask.sum(1)
+        else:
+            totals = logprobs.size(1)
         logprobsum = logprobs.sum(1)
         if self.time_average:
             logprobsum = logprobsum / (totals + self.EPS)

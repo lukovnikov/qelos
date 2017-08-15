@@ -8,19 +8,44 @@ import numpy as np
 
 class TestSeqNLLLoss(TestCase):
     def test_same_as_numpy(self):
-        EPS = 1e-6
-        batsize = 100
-        seqlen = 120
-        time_avg = True
-        size_avg = True
-        ignore_idx = 0
-        x = Variable(torch.FloatTensor(-np.random.random((batsize, seqlen, 5))), requires_grad=False)
-        y = np.random.randint(0, 1, (batsize, seqlen))
-        y[0, :] = ignore_idx
+        self.EPS = 1e-6
+        self.batsize = 100
+        self.seqlen = 120
+        self.time_avg = True
+        self.size_avg = True
+        self.ignore_idx = 0
+        self.weight = None
+        self.vocsize = 5
+        self.dorun()
+        self.time_avg = False
+        self.dorun()
+        self.size_avg = False
+        self.dorun()
+        self.ignore_idx = -100
+        self.dorun()
+        self.weight = np.asarray([0.1, 1, 1, 0.5, 3])
+        self.dorun()
+
+    def dorun(self):
+        EPS = self.EPS
+        batsize = self.batsize
+        seqlen = self.seqlen
+        time_avg = self.time_avg
+        size_avg = self.size_avg
+        ignore_idx = self.ignore_idx
+        weight = self.weight
+        vocsize = self.vocsize
+        x = Variable(torch.FloatTensor(-np.random.random((batsize, seqlen, vocsize))), requires_grad=False)
+        y = np.random.randint(0, vocsize, (batsize, seqlen))
+        weight = Variable(torch.FloatTensor(weight)) if weight is not None else None
+        if ignore_idx >= 0:
+            y[0, :] = ignore_idx
         y = Variable(torch.LongTensor(y), requires_grad=False)
-        loss = q.SeqNLLLoss(size_average=size_avg, time_average=time_avg, ignore_index=ignore_idx)(x, y)
+        loss = q.SeqNLLLoss(size_average=size_avg, time_average=time_avg, ignore_index=ignore_idx, weight=weight)\
+            (x, y)
         x = x.data.numpy()
         y = y.data.numpy()
+        weight = weight.data.numpy() if weight is not None else None
         mask = y != ignore_idx
         batch_acc = 0
         batch_total = 0
@@ -28,7 +53,7 @@ class TestSeqNLLLoss(TestCase):
             time_acc = 0
             time_total = 0
             for j in range(x.shape[1]):
-                time_acc += -x[i, j, y[i, j]] * mask[i, j]
+                time_acc += -x[i, j, y[i, j]] * mask[i, j] * (weight[y[i, j]] if weight is not None else 1)
                 time_total += 1 * mask[i, j]
             if time_avg:
                 time_acc /= time_total + EPS
