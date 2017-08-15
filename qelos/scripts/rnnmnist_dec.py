@@ -205,7 +205,7 @@ def main(
                        %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0]))
                 btt.tick()
             #tt.tock("batch done")
-        tt.tock("epoch {} done".format(epoch))
+        tt.tock("epoch {} done {}".format(epoch, loss.data[0]))
     # Test the Model
     correct = 0
     total = 0
