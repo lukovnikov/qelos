@@ -180,7 +180,7 @@ def main(
     decoder = q.ContextDecoder(*[
         nn.Embedding(256, embdim),
         q.GRULayer((embdim + hidden_size if ctx_to_decinp else embdim), decdim),
-        q.Forward(decdim, 256),
+        nn.Linear(decdim, 256),
         nn.LogSoftmax()
     ], ctx_to_h0=initstate, ctx_to_decinp=ctx_to_decinp)
 
