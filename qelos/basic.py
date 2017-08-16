@@ -151,26 +151,31 @@ class Forward(nn.Module):
         return x
 
 
-class Distance(nn.Module):
+class Distance(nn.Module):          # TODO: all distances must work with 2D/2D, 3D/2D and 3D/3D
     pass
 
 
 class DotDistance(Distance):
     def forward(self, data, crit):        # (batsize, seqlen, dim), (batsize, dim)
-        if data.dim() == 2:
-            data = data.unsqueeze(1)
-        crit = crit.unsqueeze(-1)
-        dist = torch.bmm(data, crit)
+        if data.dim() == 2:               # if data is (batsize, dim),
+            data = data.unsqueeze(1)      #     make (batsize, 1, dim)
+        if crit.dim() == 2:               # if crit is (batsize, dim)
+            crit = crit.unsqueeze(-1)     #     make crit (batsize, dim, 1)
+        else:                             # else crit must be (batsize, seqlen, dim)
+            crit = crit.permute(0, 2, 1)  #     but we need (batsize, dim, seqlen)
+        dist = torch.bmm(data, crit)      # batched mat dot --> (batsize,1,1) or (batsize, lseqlen,1) or (batsize, lseqlen, rseqlen)
         return dist.squeeze()
 
 
 class CosineDistance(DotDistance):
-    def forward(self, data, crit):
+    def forward(self, data, crit):        # (batsize, [lseqlen,] dim), (batsize, [rseqlen,] dim) 
         dots = super(CosineDistance, self).forward(data, crit)
-        lnorms = data.norm(2, -1)
-        rnorms = crit.norm(2, -1)
-        if data.dim() == 3:
-            rnorms = rnorms.unsqueeze(1)
+        lnorms = data.norm(2, -1)         # (batsize, [lseqlen])
+        rnorms = crit.norm(2, -1)         # (batsize, [rseqlen])
+        if data.dim() == 3:               # if data is (batsize, lseqlen, dim)
+            rnorms = rnorms.unsqueeze(1)  #     make crit norms (batsize, 1) or (batsize, 1, rseqlen)
+            if crit.dim() == 3:                         # (batsize, rseqlen, dim)
+                lnorms = lnorms.unsqueeze(2)  # make data norms (batsize, lseqlen, 1)
         dots = dots.div(lnorms)
         dots = dots.div(rnorms)
         return dots
@@ -179,10 +184,12 @@ class CosineDistance(DotDistance):
 
 
 class ForwardDistance(Distance):
+    memsave = False
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=True):
         super(ForwardDistance, self).__init__()
-        self.lblock = Forward(indim=ldim, outdim=aggdim, activation=activation, use_bias=use_bias)
-        self.rblock = Forward(indim=rdim, outdim=aggdim, activation=activation, use_bias=use_bias)
+        self.lblock = nn.Linear(indim=ldim, outdim=aggdim, use_bias=use_bias)
+        self.rblock = nn.Linear(indim=rdim, outdim=aggdim, use_bias=use_bias)
+        self.activation = name2fn(activation)
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
         self.reset_parameters()
 
@@ -191,32 +198,38 @@ class ForwardDistance(Distance):
         self.lblock.reset_parameters()
         self.rblock.reset_parameters()
 
-    def forward(self, data, crit):      # (batsize, seqlen, dim), (batsize, dim)
-        datadim = data.dim()
+    def forward(self, data, crit):      # (batsize, [lseqlen,] dim), (batsize, [rseqlen,] dim) 
         datalin = self.lblock(data)
         critlin = self.rblock(crit)
-        if datadim == 3:
-            critlin = critlin.unsqueeze(1)
-        linsum = datalin + critlin
-        dists = torch.matmul(linsum, self.agg)
+        if data.dim() == 3:             # (batsize, lseqlen, dim)
+            if crit.dim() == 2:         # (batsize, dim)
+                critlin = critlin.unsqueeze(1)      # --> (batsize, 1, dim)
+            else:                       # (batsize, rseqlen, dim)
+                if not self.memsave:
+                    datalin = datalin.unsqueeze(2)      # --> (batsize, lseqlen, 1, dim)
+                    critlin = critlin.unsqueeze(1)      # --> (batsize, 1, rseqlen, dim)
+                else:
+                    pass
+                    # TODO: memsave --> loop over 2D slices of 3D crit, do we need memsave?
+        linsum = datalin + critlin      # (batsize, dim) or (batsize, lseqlen, dim) or (batsize, lseqlen, rseqlen, dim)
+        linsum = self.activation(linsum)
+        dists = torch.matmul(linsum, self.agg)  # TODO: check if this works for 3D x 1D and 4D x 1D
         return dists
 
 
-class BilinearDistance(Distance):
+class BilinearDistance(Distance):       
     def __init__(self, ldim, rdim):
         super(BilinearDistance, self).__init__()
         self.block = nn.Bilinear(ldim, rdim, 1, bias=False)
 
-    def forward(self, data, crit):
-        datadim = data.dim()
-        datashape = data.size()
-        if datadim == 3:
-            crit = crit.unsqueeze(1).expand_as(data)
-            data = data.view(-1, data.size(-1))
-            crit = crit.contiguous().view(-1, crit.size(-1))
-        bilinsum = self.block(data, crit)
+    def forward(self, data, crit):      # (batsize, [lseqlen,] dim), (batsize, [rseqlen,] dim) 
+        if data.dim() == 3:
+            l = data.view(-1, data.size(-1))        # (batsize * lseqlen, dim)
+            r = crit.unsqueeze(1).expand_as(data).contiguous().view(-1, crit.size(-1))  # (batsize * lseqlen, dim)
+            # TODO: 3D crit and memsave
+        bilinsum = self.block(l, r)
         dists = bilinsum.squeeze()
-        dists = dists.view(*datashape[:-1])
+        dists = dists.view(*data.size()[:-1])
         return dists
 
 
@@ -232,14 +245,11 @@ class TrilinearDistance(Distance):
         nn.init.uniform(self.agg, -0.01, 0.01)
 
     def forward(self, data, crit):
-        datadim = data.dim()
-        datashape = data.size()
-        if datadim == 3:
-            crit = crit.unsqueeze(1).expand_as(data)
-            data = data.view(-1, data.size(-1))
-            crit = crit.contiguous().view(-1, crit.size(-1))
-        bilinsum = self.block(data, crit)
+        if data.dim() == 3:
+            l = data.view(-1, data.size(-1))
+            r = crit.unsqueeze(1).expand_as(data).contiguous().view(-1, crit.size(-1))
+        bilinsum = self.block(l, r)
         bilinsum = self.activation(bilinsum)
         dists = torch.matmul(bilinsum, self.agg)
-        dists = dists.view(*datashape[:-1])
+        dists = dists.view(*data.shape()[:-1])
         return dists
