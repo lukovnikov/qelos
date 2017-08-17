@@ -13,12 +13,16 @@ class AttentionGenerator(nn.Module):
         self.data_selector = data_selector
         self.normalizer = normalizer
 
-    def forward(self, data, crit, mask=None):
+    def forward(self, data, crit, mask=None):   # should work for 3D/2D and 3D/3D
         if self.data_selector is not None:
             data = self.data_selector(data)
         scores = self.dist(data, crit)      # (batsize, seqlen)
-        weights = self.normalizer(scores, mask=mask)
-        return weights
+        if scores.dim() == 3:       # (batsize, dseqlen, cseqlen)
+            assert(crit.dim() == 3)
+            scores = scores.permute(0, 2, 1)
+            mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
+        weights, _ = self.normalizer(scores, mask=mask)
+        return weights      # (batsize, dseqlen) or (batsize, cseqlen, dseqlen)
 
 
 class AttentionConsumer(nn.Module):
@@ -26,12 +30,14 @@ class AttentionConsumer(nn.Module):
         super(AttentionConsumer, self).__init__()
         self.data_selector = data_selector
 
-    def forward(self, data, weights):
+    def forward(self, data, weights):       # weights can (batsize, seqlen) or (batsize, cseqlen, seqlen)
         if self.data_selector is not None:
             data = self.data_selector(data)
-        weights = weights.unsqueeze(2)
+        if weights.dim() == 3:
+            data = data.unsqueeze(1)        # (batsize, 1, seqlen, dim)
+        weights = weights.unsqueeze(-1)     # (batsize, seqlen, 1) or (batsize, cseqlen, seqlen, 1)
         ret = data * weights
-        return torch.sum(ret, 1)
+        return torch.sum(ret, -2)
 
 
 class Attention(nn.Module):
@@ -182,7 +188,7 @@ class AttentionDecoder(ContextDecoder):
                  decinp_to_smo=False,
                  return_out=True,
                  return_att=False):
-        super(AttentionDecoder, self).__init__(embedder=embedder, core=core, init_state_gen)
+        super(AttentionDecoder, self).__init__(embedder=embedder, core=core, ctx_to_h0=init_state_gen)
         self.attention = attention
         self.smo = RecurrentWrapper(smo) if smo is not None else None
         self.att_transform = RecurrentWrapper(att_transform) if att_transform is not None else None
@@ -238,6 +244,9 @@ class AttentionDecoder(ContextDecoder):
         """
         if self.att_transform is not None:
             toatt = self.att_transform(toatt)
+        att_weights = self.attention.attgen(ctx, toatt, mask=ctxmask)
+        res = self.attention.attcon(ctx, att_weights)
+        return res, att_weights
 
 
         pass # TODO

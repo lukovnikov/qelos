@@ -162,42 +162,281 @@ class TestLogsoftmax(TestCase):
 
 
 class TestDistance(TestCase):
-    def test_dot_dist(self):
-        m = DotDistance()
+    def dorun_shape_tst_3D2D(self):
         a = Variable(torch.FloatTensor(np.random.random((5,3,4))))
         b = Variable(torch.FloatTensor(np.random.random((5,4))))
-        d = m(a, b).data.numpy()
-        self.assertTrue(np.allclose(d[0], np.dot(a.data.numpy()[0], b.data.numpy()[0])))
-        print(d)
+        d = self.m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5, 3))
 
-    def test_cosine_dist_shape(self):
-        m = CosineDistance()
-        a = Variable(torch.FloatTensor(np.random.random((5,3,4))))
+    def test_all_dist_shape_3D2D(self):
+        self.m = DotDistance()
+        self.dorun_shape_tst_3D2D()
+        self.m = CosineDistance()
+        self.dorun_shape_tst_3D2D()
+        self.m = ForwardDistance(4, 4, 8)
+        self.dorun_shape_tst_3D2D()
+        self.m = BilinearDistance(4, 4)
+        self.dorun_shape_tst_3D2D()
+        self.m = TrilinearDistance(4, 4, 8)
+        self.dorun_shape_tst_3D2D()
+
+    def dorun_shape_tst_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((5,4))))
         b = Variable(torch.FloatTensor(np.random.random((5,4))))
-        d = m(a, b).data.numpy()
-        self.assertEqual(d.shape, (5, 3))
-        #self.assertTrue(np.allclose(d[0], np.dot(a.data.numpy()[0], b.data.numpy()[0])))   # TODO
+        d = self.m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5,))
 
-    def test_fwd_distance_shape(self):
-        m = ForwardDistance(4, 4, 8)
-        a = Variable(torch.FloatTensor(np.random.random((5, 3, 4))))
-        b = Variable(torch.FloatTensor(np.random.random((5, 4))))
-        d = m(a, b).data.numpy()
-        self.assertEqual(d.shape, (5, 3))
+    def test_all_dist_shape_2D2D(self):
+        self.m = DotDistance()
+        self.dorun_shape_tst_2D2D()
+        self.m = CosineDistance()
+        self.dorun_shape_tst_2D2D()
+        self.m = ForwardDistance(4, 4, 8)
+        self.dorun_shape_tst_2D2D()
+        self.m = BilinearDistance(4, 4)
+        self.dorun_shape_tst_2D2D()
+        self.m = TrilinearDistance(4, 4, 8)
+        self.dorun_shape_tst_2D2D()
 
-    def test_bilin_distance_shape(self):
-        m = BilinearDistance(4, 4)
-        a = Variable(torch.FloatTensor(np.random.random((5, 3, 4))))
-        b = Variable(torch.FloatTensor(np.random.random((5, 4))))
-        d = m(a, b).data.numpy()
-        self.assertEqual(d.shape, (5, 3))
+    def dorun_shape_tst_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((5,3,4))))
+        b = Variable(torch.FloatTensor(np.random.random((5,4,4))))
+        d = self.m(a, b).data.numpy()
+        self.assertEqual(d.shape, (5,3,4))
 
-    def test_trilin_distance_shape(self):
-        m = TrilinearDistance(4, 4, 8)
-        a = Variable(torch.FloatTensor(np.random.random((5, 3, 4))))
-        b = Variable(torch.FloatTensor(np.random.random((5, 4))))
-        d = m(a, b).data.numpy()
-        self.assertEqual(d.shape, (5, 3))
+    def test_all_dist_shape_3D3D(self):
+        self.m = DotDistance()
+        self.dorun_shape_tst_3D3D()
+        self.m = CosineDistance()
+        self.dorun_shape_tst_3D3D()
+        self.m = ForwardDistance(4, 4, 8)
+        self.dorun_shape_tst_3D3D()
+        self.m = BilinearDistance(4, 4)
+        self.dorun_shape_tst_3D3D()
+        self.m = TrilinearDistance(4, 4, 8)
+        self.dorun_shape_tst_3D3D()
 
+    def test_dot_same_as_numpy_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        d = DotDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100,))
+        for i in range(a.shape[0]):
+            ijdist = np.dot(a[i], b[i])
+            npd[i] = ijdist
+        self.assertTrue(np.allclose(d, npd))
 
+    def test_dot_same_as_numpy_3D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        d = DotDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                ijdist = np.dot(a[i, j], b[i])
+                npd[i, j] = ijdist
+        self.assertTrue(np.allclose(d, npd))
 
+    def test_dot_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
+        d = DotDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    ijkdist = np.dot(a[i, j], b[i, k])
+                    npd[i, j, k] = ijkdist
+        self.assertTrue(np.allclose(d, npd))
+
+    def test_cos_same_as_numpy_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        d = CosineDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100,))
+        for i in range(a.shape[0]):
+            ijdist = np.dot(a[i], b[i])
+            npd[i] = ijdist / (np.linalg.norm(a[i], 2) * np.linalg.norm(b[i], 2))
+        self.assertTrue(np.allclose(d, npd))
+
+    def test_cos_same_as_numpy_3D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        d = CosineDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                ijdist = np.dot(a[i, j], b[i])
+                npd[i, j] = ijdist / (np.linalg.norm(a[i, j], 2) * np.linalg.norm(b[i], 2))
+        self.assertTrue(np.allclose(d, npd))
+
+    def test_cos_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
+        d = CosineDistance()(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    ijkdist = np.dot(a[i, j], b[i, k])
+                    npd[i, j, k] = ijkdist / (np.linalg.norm(a[i, j], 2) * np.linalg.norm(b[i, k], 2))
+        self.assertTrue(np.allclose(d, npd))
+
+    def test_fwd_same_as_numpy_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        dist = ForwardDistance(200, 200, 100, activation=None, use_bias=False)
+        d = dist(a, b).data.numpy()
+        lw, rw, aggw = dist.lblock.weight.data.numpy(), dist.rblock.weight.data.numpy(), dist.agg.data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100,))
+        for i in range(a.shape[0]):
+            x = np.dot(np.dot(lw, a[i]) + np.dot(rw, b[i]), aggw)
+            npd[i] = x
+        self.assertTrue(np.allclose(d, npd))
+
+    def test_fwd_same_as_numpy_3D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        dist = ForwardDistance(200, 200, 100, activation=None, use_bias=False)
+        d = dist(a, b).data.numpy()
+        lw, rw, aggw = dist.lblock.weight.data.numpy(), dist.rblock.weight.data.numpy(), dist.agg.data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                x = np.dot(np.dot(lw, a[i, j]) + np.dot(rw, b[i]), aggw)
+                npd[i, j] = x
+        print(np.argwhere(abs(d - npd) > 1e-8))
+        print(d[np.argwhere(abs(d - npd) > 1e-8)])
+        print(npd[np.argwhere(abs(d - npd) > 1e-8)])
+        print(np.argwhere(abs(d - npd) > 1e-7))
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))
+
+    def test_fwd_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((10, 50, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((10, 40, 20))))
+        dist = ForwardDistance(20, 20, 100, activation=None, use_bias=False)
+        d = dist(a, b).data.numpy()
+        lw, rw, aggw = dist.lblock.weight.data.numpy(), dist.rblock.weight.data.numpy(), dist.agg.data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((10, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    x = np.dot(np.dot(lw, a[i, j]) + np.dot(rw, b[i, k]), aggw)
+                    npd[i, j, k] = x
+        print(np.argwhere(abs(d - npd) > 1e-8))
+        #print(d[np.argwhere(abs(d - npd) > 1e-8)])
+        #print(npd[np.argwhere(abs(d - npd) > 1e-8)])
+        print(np.argwhere(abs(d - npd) > 1e-7))
+        print(np.argwhere(abs(d - npd) > 1e-6))
+        print(np.argwhere(abs(d - npd) > 1e-5))
+        print(d[1])
+        print(npd[1])
+        print((d-npd)[1])
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))
+
+    def test_fwd_same_as_numpy_3D3D_memsave(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
+        dist = ForwardDistance(200, 200, 100, activation=None, use_bias=False)
+        dist.memsave = True
+        d = dist(a, b).data.numpy()
+        lw, rw, aggw = dist.lblock.weight.data.numpy(), dist.rblock.weight.data.numpy(), dist.agg.data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    x = np.dot(np.dot(lw, a[i, j]) + np.dot(rw, b[i, k]), aggw)
+                    npd[i, j, k] = x
+        print(np.argwhere(abs(d - npd) > 1e-8))
+        #print(d[np.argwhere(abs(d - npd) > 1e-8)])
+        #print(npd[np.argwhere(abs(d - npd) > 1e-8)])
+        print(np.argwhere(abs(d - npd) > 1e-7))
+        print(np.argwhere(abs(d - npd) > 1e-6))
+        print(np.argwhere(abs(d - npd) > 1e-5))
+        print(d[1])
+        print(npd[1])
+        print((d-npd)[1])
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))
+
+    def test_bilin_same_as_numpy_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        dist = BilinearDistance(200, 200)
+        d = dist(a, b).data.numpy()
+        w = dist.block.weight.squeeze().data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100,))
+        for i in range(a.shape[0]):
+            x = np.dot(np.dot(a[i].T, w), b[i])
+            npd[i] = x
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))
+
+    def test_bilin_same_as_numpy_3D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 200))))
+        dist = BilinearDistance(200, 200)
+        d = dist(a, b).data.numpy()
+        w = dist.block.weight.squeeze().data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100,50))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                x = np.dot(np.dot(a[i, j].T, w), b[i])
+                npd[i, j] = x
+        self.assertTrue(np.allclose(d, npd, atol=1e-5))
+
+    def test_bilin_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
+        dist = BilinearDistance(200, 200)
+        d = dist(a, b).data.numpy()
+        w = dist.block.weight.squeeze().data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    x = np.dot(np.dot(a[i, j].T, w), b[i, k])
+                    npd[i, j, k] = x
+        self.assertTrue(np.allclose(d, npd, atol=1e-5))
+
+    def test_trilin_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((100, 50, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((100, 40, 20))))
+        dist = TrilinearDistance(20, 20, 10, activation=None, use_bias=False)
+        dist.memsave = False
+        d = dist(a, b).data.numpy()
+        w = dist.block.weight.squeeze().data.numpy()
+        aggw = dist.agg.data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((100, 50, 40))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    x = np.dot(np.dot(np.dot(a[i, j].T, w), b[i, k]), aggw)
+                    npd[i, j, k] = x
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))

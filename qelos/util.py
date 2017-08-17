@@ -324,7 +324,8 @@ def name2fn(x):
     mapping = {"tanh": F.tanh,
                "sigmoid": F.sigmoid,
                "relu": F.relu,
-               "linear": F.linear,}
+               "linear": F.linear,
+               None: lambda x: x}
     if x not in mapping:
         raise Exception("unknown activation function name")
     return mapping[x]

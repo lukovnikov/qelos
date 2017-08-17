@@ -1,6 +1,6 @@
 from __future__ import print_function
 from unittest import TestCase
-from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder
+from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder
 from qelos.rnn import RecStack, GRUCell, GRULayer, RecurrentStack
 from qelos.basic import Forward, Softmax, Stack, Lambda
 import torch, numpy as np
@@ -70,7 +70,7 @@ class TestDecoder(TestCase):
         self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
 
 
-class TestAttentionDecoder(TestCase):
+class TestAttentionDecoderCell(TestCase):
     def test_shapes(self):
         batsize, seqlen, inpdim = 5, 7, 8
         vocsize, embdim, encdim = 20, 9, 10
@@ -98,6 +98,50 @@ class TestAttentionDecoder(TestCase):
             decinp_to_att=True
         )
         decoder = decoder_cell.to_decoder()
+
+        ctx = np.random.random((batsize, seqlen, inpdim))
+        ctx = Variable(torch.FloatTensor(ctx))
+        ctxmask = np.ones((batsize, seqlen))
+        ctxmask[:, -2:] = 0
+        ctxmask[[0, 1], -3:] = 0
+        ctxmask = Variable(torch.FloatTensor(ctxmask))
+        inp = np.random.randint(0, vocsize, (batsize, seqlen))
+        inp = Variable(torch.LongTensor(inp))
+
+        decoded = decoder(inp, ctx, ctxmask)
+
+        self.assertEqual((batsize, seqlen, vocsize), decoded.size())
+        self.assertTrue(np.allclose(
+            np.sum(decoded.data.numpy(), axis=-1),
+            np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
+        print(decoded.size())
+
+
+class TestAttentionDecoder(TestCase):
+    def test_shapes(self):
+        batsize, seqlen, inpdim = 5, 7, 8
+        vocsize, embdim, encdim = 20, 9, 10
+        ctxtoinitff = Forward(inpdim, encdim)
+        coreff = Forward(encdim, encdim)
+        initstategen = Lambda(lambda *x, **kw: coreff(ctxtoinitff(x[1][:, -1, :])), register_modules=coreff)
+
+        decoder = AttentionDecoder(
+            attention=Attention().forward_gen(inpdim, encdim+embdim, encdim),
+            embedder=nn.Embedding(vocsize, embdim),
+            core=RecurrentStack(
+                GRULayer(embdim, encdim),
+                GRULayer(encdim, encdim),
+                coreff
+            ),
+            smo=Stack(
+                Forward(encdim+inpdim, encdim),
+                Forward(encdim, vocsize),
+                Softmax()
+            ),
+            ctx_to_smo=True,
+            state_to_smo=True,
+            decinp_to_att=True
+        )
 
         ctx = np.random.random((batsize, seqlen, inpdim))
         ctx = Variable(torch.FloatTensor(ctx))
