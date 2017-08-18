@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 from torch.utils.data.dataset import Dataset
+from torch.utils.data import DataLoader
 from torch import nn
 import numpy as np
 import qelos as q
@@ -27,22 +28,25 @@ class var(object):
         return self
 
 
-class MultiTensorDataset(Dataset):      # TODO
+class TensorDataset(Dataset):      # TODO
     def __init__(self, *x):
         """
         :param x: tensors in torch or numpy (converted to tensors). Last tensor must be gold.
         """
-        super(MultiTensorDataset, self).__init__()
-        self.tensors = x
+        super(TensorDataset, self).__init__()
+        self.tensors = []
+        for xe in x:
+            if isinstance(xe, np.ndarray):
+                xe = torch.from_numpy(xe)
+            self.tensors.append(xe)
+        for xe in self.tensors:
+            assert(xe.size(0) == self.tensors[0].size(0))
 
     def __getitem__(self, index):
-        pass
+        return tuple([xe[index] for xe in self.tensors])
 
     def __len__(self):
-        pass
-
-
-
+        return self.tensors[0].size(0)
 
 
 class Aggregator(object):

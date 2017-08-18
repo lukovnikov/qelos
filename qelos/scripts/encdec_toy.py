@@ -50,20 +50,15 @@ def main(
     # create data tensor
     tt.tick("loading data")
     sequences = np.random.randint(0, vocsize, (batsize * 100, 16))
-    totalbats = sequences.shape[0] // batsize
-    trainsrc = torch.LongTensor(sequences[:batsize * 80])
-    traintgt = torch.LongTensor(sequences[:batsize * 80])
-    validsrc = torch.LongTensor(sequences[batsize * 80:])
-    validtgt = torch.LongTensor(sequences[batsize * 80:])
     # wrap in dataset
-    dataset = TensorDataset(trainsrc, traintgt)
-    validdataset = TensorDataset(validsrc, validtgt)
+    dataset = q.TensorDataset(sequences[:batsize * 80], sequences[:batsize * 80])
+    validdataset = q.TensorDataset(sequences[batsize * 80:], sequences[batsize * 80:])
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batsize,
                             shuffle=True)
     validdataloader = DataLoader(dataset=validdataset,
                             batch_size=batsize,
-                            shuffle=True)
+                            shuffle=False)
     tt.tock("data loaded")
     # model
     tt.tick("building model")
