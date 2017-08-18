@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Variable
+from torch.utils.data.dataset import Dataset
 from torch import nn
 import numpy as np
 import qelos as q
@@ -24,6 +25,24 @@ class var(object):
         elif crit is None:
             self.cuda(crit=var.all_cuda)
         return self
+
+
+class MultiTensorDataset(Dataset):      # TODO
+    def __init__(self, *x):
+        """
+        :param x: tensors in torch or numpy (converted to tensors). Last tensor must be gold.
+        """
+        super(MultiTensorDataset, self).__init__()
+        self.tensors = x
+
+    def __getitem__(self, index):
+        pass
+
+    def __len__(self):
+        pass
+
+
+
 
 
 class Aggregator(object):
