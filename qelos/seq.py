@@ -20,8 +20,10 @@ class AttentionGenerator(nn.Module):
         if scores.dim() == 3:       # (batsize, dseqlen, cseqlen)
             assert(crit.dim() == 3)
             scores = scores.permute(0, 2, 1)
-            mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
-        weights, _ = self.normalizer(scores, mask=mask)
+            if mask is not None:
+                mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
+        weights = self.normalizer(scores, mask=mask)
+        weights = weights[0] if mask is not None else weights
         return weights      # (batsize, dseqlen) or (batsize, cseqlen, dseqlen)
 
 
@@ -202,7 +204,7 @@ class AttentionDecoder(ContextDecoder):
         self.return_out = return_out
         self.return_att = return_att
 
-    def forward(self, x, ctx, ctxmask):
+    def forward(self, x, ctx, ctxmask=None):
         """
         :param x:   (batsize, seqlen) of integers or (batsize, seqlen, dim) of vectors if embedder is None
         :param ctx: (batsize, dim) of context vectors
@@ -428,7 +430,7 @@ class AttentionDecoderCell(DecoderCell):
         self._state = [None]
 
     # region implement DecoderCell signature
-    def forward(self, x_t, ctx, ctxmask, t=None, **kw):
+    def forward(self, x_t, ctx, ctxmask=None, t=None, **kw):
         """
         :param x_t:     (batsize,...) input for current timestep
         :param ctx:     (batsize, inpseqlen, dim) whole context
@@ -489,12 +491,15 @@ class AttentionDecoderCell(DecoderCell):
         return res, att_weights
 
     def get_inputs_t(self, t, x, y_t):      # TODO implement teacher forcing
-        return x[0][:, t], x[1], x[2]
+        if len(x) == 2:     # no mask
+            return x[0][:, t], x[1]
+        elif len(x) == 3:   # with mask
+            return x[0][:, t], x[1], x[2]
     # endregion
 
     # region RecStatefulContainer signature
     def reset_state(self):
-        self._state[0] = None
+        #self._state[0] = None
         self.core.reset_state()
 
     def set_init_states(self, ownstate, *states):
