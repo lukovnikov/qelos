@@ -172,7 +172,7 @@ class RNUBase(RecStateful):
             statespec = self.state_spec[i]
             initstate = _init_states[i]
             if initstate is None:
-                state_0 = q.var(torch.zeros((arg, statespec))).cuda(self.parameters()[0].is_cuda).v
+                state_0 = q.var(torch.zeros((arg, statespec))).cuda(next(self.parameters()).is_cuda).v
                 _init_states[i] = state_0
             elif initstate.dim() == 2:        # init state set differently for different batches
                 pass
