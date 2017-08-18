@@ -125,8 +125,17 @@ class TestGRU(TestCase):
 class TestLSTM(TestCase):
     def test_lstm_shapes(self):
         batsize = 5
-        rnn.LSTMCell.debug = True
         lstm = rnn.LSTMCell(9, 10)
+        x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
+        h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        lstm.set_init_states(c_tm1, h_tm1)
+        y_t = lstm(x_t)
+        self.assertEqual((5, 10), y_t.data.numpy().shape)
+
+    def test_lstm_shapes_non_cudnn(self):
+        batsize = 5
+        lstm = rnn.LSTMCell(9, 10, use_cudnn_cell=False)
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))

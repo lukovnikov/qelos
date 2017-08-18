@@ -256,28 +256,42 @@ class RNU(RNUBase):
         return h_t, h_t
 
 
+class _GRUCell(nn.Module):
+    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid", activation="tanh"):
+        super(_GRUCell, self).__init__()
+        self.indim, self.outdim, self.use_bias = indim, outdim, bias
+        self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
+
+        self.gates = PackedRNUGates(self.indim+self.outdim,
+                                   [(self.outdim, self.gate_activation),
+                                    (self.outdim, self.gate_activation)],
+                                   use_bias=self.use_bias)
+        self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, None)], use_bias=self.use_bias)
+        self.activation_fn = name2fn(activation)
+
+    def forward(self, x_t, h_tm1, t=None):
+        update_gate, reset_gate = self.gates(x_t, h_tm1)
+        canh = torch.mul(h_tm1, reset_gate)
+        canh = self.main_gate(canh)
+        canh = self.activation_fn(canh)
+        h_t = (1 - update_gate) * h_tm1 + update_gate * canh
+        return h_t
+
+
 class GRUCell(RNUBase):
     debug = False
 
     def __init__(self, indim, outdim, use_bias=True,
                  dropout_in=None, dropout_rec=None, zoneout=None,
-                 shared_dropout_rec=None, shared_zoneout=None):
+                 shared_dropout_rec=None, shared_zoneout=None,
+                 use_cudnn_cell=True, activation="tanh", gate_activation="sigmoid"):    # custom activations have only an effect when not using cudnn cell
         super(GRUCell, self).__init__()
         self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout, self.shared_dropout_rec, self.shared_zoneout = \
             indim, outdim, use_bias, dropout_in, dropout_rec, zoneout, shared_dropout_rec, shared_zoneout
-
+        self.use_cudnn_cell = use_cudnn_cell
+        self.activation, self.gate_activation = activation, gate_activation
         self.nncell = None
         self.setcell()
-
-        # self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
-        #
-        # self.gates = PackedRNUGates(self.indim+self.outdim,
-        #                            [(self.outdim, gate_activation),
-        #                             (self.outdim, gate_activation)],
-        #                            use_bias=use_bias)
-        # self.update_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        # self.reset_gate = RNUGate(self.indim, self.outdim, activation=gate_activation, use_bias=use_bias)
-        # self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, activation)], use_bias=use_bias)
 
         if self.dropout_in:
             self.dropout_in = nn.Dropout(p=self.dropout_in)
@@ -294,7 +308,12 @@ class GRUCell(RNUBase):
             self.shared_zoneouter = None
 
     def setcell(self):
-        self.nncell = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
+        if self.use_cudnn_cell:
+            self.nncell = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
+        else:
+            self.nncell = _GRUCell(self.indim, self.outdim, bias=self.use_bias,
+                                   activation=self.activation,
+                                   gate_activation=self.gate_activation)
 
     def reset_parameters(self):
         # self.gates.reset_parameters()
@@ -338,9 +357,34 @@ class GRUCell(RNUBase):
         return h_t, h_t
 
 
+class _LSTMCell(_GRUCell):
+    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid", activation="tanh"):
+        super(_LSTMCell, self).__init__(indim, outdim, bias=bias, gate_activation=gate_activation, activation=activation)
+
+        self.gates = PackedRNUGates(self.indim+self.outdim,
+                                   [(self.outdim, self.gate_activation),
+                                    (self.outdim, self.gate_activation),
+                                    (self.outdim, self.gate_activation),
+                                    (self.outdim, None)],
+                                   use_bias=self.use_bias)
+        self.activation_fn = name2fn(activation)
+
+    def forward(self, x_t, states, t=None):
+        y_tm1, c_tm1 = states
+        forget_gate, input_gate, output_gate, main_gate = self.gates(x_t, y_tm1)
+        c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
+        c_t = self.activation_fn(c_t)
+        y_t = torch.mul(c_t, output_gate)
+        return y_t, c_t
+
+
 class LSTMCell(GRUCell):
     def setcell(self):
-        self.nncell = nn.LSTMCell(self.indim, self.outdim, bias=self.use_bias)
+        if self.use_cudnn_cell:
+            self.nncell = nn.LSTMCell(self.indim, self.outdim, bias=self.use_bias)
+        else:
+            self.nncell = _LSTMCell(self.indim, self.outdim, bias=self.use_bias,
+                                    gate_activation=self.gate_activation, activation=self.activation)
 
     @property
     def state_spec(self):
@@ -361,12 +405,6 @@ class LSTMCell(GRUCell):
             c_tm1 = torch.mul(y_tm1, self.shared_dropout_reccer[1])
         # endregion
         y_t, c_t = self.nncell(x_t, (y_tm1, c_tm1))
-        # input_gate = self.input_gate(x_t, y_tm1)
-        # output_gate = self.output_gate(x_t, y_tm1)
-        # forget_gate = self.forget_gate(x_t, y_tm1)
-        # main_gate = self.main_gate(x_t, y_tm1)
-        # c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
-        # y_t = torch.mul(self.activation_fn(c_t), output_gate)
         if self.zoneout:
             if self.zoner is None:
                 self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
