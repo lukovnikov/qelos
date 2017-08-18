@@ -103,9 +103,6 @@ def main(
 
     losses = q.lossarray(q.SeqNLLLoss())
     validlosses = q.lossarray(q.SeqNLLLoss())
-    if usecuda:
-        m.cuda()
-        losses.cuda()
 
     optimizer = torch.optim.Adadelta(m.parameters(), lr=lr, weight_decay=wreg)
     tt.tock("model built")
