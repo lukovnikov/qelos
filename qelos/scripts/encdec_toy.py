@@ -41,7 +41,10 @@ def main(
         mode="cell",     # "fast" or "cell"
         wreg=0.0001,
         cuda=False,
+        gpu=1,
          ):
+    if cuda:
+        torch.cuda.set_device(gpu)
     usecuda = cuda
     vocsize = 50
     # create data tensor
