@@ -141,7 +141,7 @@ class Forward(nn.Module):
     def __init__(self, indim, outdim, activation="tanh", use_bias=True):
         super(Forward, self).__init__()
         self.lin = nn.Linear(indim, outdim, bias=use_bias)
-        self.activation = name2fn(activation)
+        self.activation = name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -191,7 +191,7 @@ class ForwardDistance(Distance):
         super(ForwardDistance, self).__init__()
         self.lblock = nn.Linear(ldim, aggdim, bias=use_bias)
         self.rblock = nn.Linear(rdim, aggdim, bias=use_bias)
-        self.activation = name2fn(activation)
+        self.activation = name2fn(activation)()
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
         self.reset_parameters()
 
@@ -259,7 +259,7 @@ class TrilinearDistance(Distance):
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=False):
         super(TrilinearDistance, self).__init__()
         self.block = nn.Bilinear(ldim, rdim, aggdim, bias=use_bias)
-        self.activation = name2fn(activation)
+        self.activation = name2fn(activation)()
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
         self.reset_parameters()
 
@@ -361,3 +361,16 @@ class SeqBatchNorm1d(nn.Module):
         return ('{name}({num_features}, eps={eps}, momentum={momentum},'
                 ' max_length={max_length}, affine={affine})'
                 .format(name=self.__class__.__name__, **self.__dict__))
+
+
+class CReLU(nn.Module):
+    def __init__(self):
+        super(CReLU, self).__init__()
+        self.pos_relu = F.relu
+        self.neg_relu = F.relu
+
+    def forward(self, x):
+        left = self.pos_relu(x)
+        right = self.neg_relu(-x)
+        ret = torch.cat([left, right], -1)
+        return ret

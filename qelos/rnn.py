@@ -12,7 +12,7 @@ class RNUGate(nn.Module):
     def __init__(self, indim, outdim, hdim=None, activation="sigmoid", use_bias=True):
         super(RNUGate, self).__init__()
         self.indim, self.outdim, self.activation, self.use_bias = indim, outdim, activation, use_bias
-        self.activation_fn = name2fn(self.activation)
+        self.activation_fn = name2fn(self.activation)()
         self.W = nn.Parameter(torch.FloatTensor(self.indim, self.outdim))
         udim = self.outdim if hdim is None else hdim
         self.U = nn.Parameter(torch.FloatTensor(udim, self.outdim))
@@ -40,7 +40,7 @@ class RNUGate(nn.Module):
 
 
 class PackedRNUGates(nn.Module):
-    def __init__(self, indim, outgatespecs, use_bias=True):
+    def __init__(self, indim, outgatespecs, use_bias=True, rec_bn=False):
         super(PackedRNUGates, self).__init__()
         self.indim = indim
         self.outdim = 0
@@ -49,7 +49,7 @@ class PackedRNUGates(nn.Module):
         for outgatespec in outgatespecs:
             gateoutdim = outgatespec[0]
             gateact = outgatespec[1]
-            gateact_fn = name2fn(gateact)
+            gateact_fn = name2fn(gateact)()
             self.outgates.append(((self.outdim, self.outdim+gateoutdim), gateact_fn))
             self.outdim += gateoutdim
         self.W = nn.Parameter(torch.FloatTensor(self.indim, self.outdim))
@@ -57,16 +57,24 @@ class PackedRNUGates(nn.Module):
             self.b = nn.Parameter(torch.FloatTensor(1, self.outdim,))
         else:
             self.register_parameter("b", None)
+        self.rec_bn = rec_bn
+        self._rbn = None
+        if self.rec_bn is True:
+            self._rbn = q.SeqBatchNorm1d(self.outdim)
         self.reset_parameters()
 
     def reset_parameters(self):     # TODO incorporate gain per activation fn
         nn.init.xavier_uniform(self.W)
         if self.use_bias:
             nn.init.uniform(self.b, -0.01, 0.01)
+        if self.rec_bn is True:
+            self._rbn.reset_parameters()
 
-    def forward(self, x, h):
+    def forward(self, x, h, t=None):
         x = torch.cat([x, h], 1)
         v = torch.mm(x, self.W)
+        if self._rbn is not None:
+            v = self._rbn(v, t)      # TODO: check masking
         if self.use_bias:
             v.add_(self.b)
         ret = []
@@ -262,38 +270,39 @@ class RNU(RNUBase):
         return h_t, h_t
 
 
-class _GRUCell(nn.Module):
+class _GRUCell(nn.Module):      # TODO: test rbn
     def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid",
                  activation="tanh",
                  recurrent_batch_norm=None):
         super(_GRUCell, self).__init__()
         self.indim, self.outdim, self.use_bias = indim, outdim, bias
         self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
-
+        self.hdim = self.outdim
+        if self.activation == "crelu":
+            self.hdim = self.hdim // 2
+        self._rbn_on = recurrent_batch_norm
+        self._rbn_gates = self._rbn_on == "full" or self._rbn_on == "gates"
+        self._rbn_main = self._rbn_on == "full" or self._rbn_on == "main"
         self.gates = PackedRNUGates(self.indim+self.outdim,
                                    [(self.outdim, self.gate_activation),
                                     (self.outdim, self.gate_activation)],
-                                   use_bias=self.use_bias)
-        self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, None)], use_bias=self.use_bias)
-        self.activation_fn = name2fn(activation)
-        self._rbn_on = recurrent_batch_norm
-        self._rbn_main = None
-        if self._rbn_on == "main":    # only on main pre-activation
-            self._rbn_main = q.SeqBatchNorm1d(self.outdim)
+                                   use_bias=self.use_bias,
+                                    rec_bn=self._rbn_gates)
+        self.main_gate = PackedRNUGates(self.indim + self.outdim,
+                                        [(self.hdim, None)],
+                                        use_bias=self.use_bias,
+                                        rec_bn=self._rbn_main)
+        self.activation_fn = name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
         self.gates.reset_parameters()
         self.main_gate.reset_parameters()
-        if self._rbn_main is not None:
-            self._rbn_main.reset_parameters()
 
     def forward(self, x_t, h_tm1, t=None):
-        update_gate, reset_gate = self.gates(x_t, h_tm1)
+        update_gate, reset_gate = self.gates(x_t, h_tm1, t=t)
         canh = torch.mul(h_tm1, reset_gate)
-        canh = self.main_gate(x_t, canh)
-        if self._rbn_main is not None:
-            canh = self._rbn_main(canh, t)      # TODO: check masking
+        canh = self.main_gate(x_t, canh, t=t)
         canh = self.activation_fn(canh)
         h_t = (1 - update_gate) * h_tm1 + update_gate * canh
         return h_t
@@ -387,17 +396,31 @@ class GRUCell(RNUBase):
         return h_t, h_t
 
 
-class _LSTMCell(_GRUCell):
-    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid", activation="tanh"):
-        super(_LSTMCell, self).__init__(indim, outdim, bias=bias, gate_activation=gate_activation, activation=activation)
+class _LSTMCell(nn.Module):
+    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid",
+                 activation="tanh",
+                 recurrent_batch_norm=None):
+        super(_LSTMCell, self).__init__()
+        self.indim, self.outdim, self.use_bias = indim, outdim, bias
+        self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
+        self.hdim = self.outdim
+        if self.activation == "crelu":
+            self.hdim = self.hdim // 2
+        self._rbn_on = recurrent_batch_norm
+        self._rbn_gates = self._rbn_on == "full"
 
-        self.gates = PackedRNUGates(self.indim+self.outdim,
-                                   [(self.outdim, self.gate_activation),
-                                    (self.outdim, self.gate_activation),
-                                    (self.outdim, self.gate_activation),
-                                    (self.outdim, None)],
-                                   use_bias=self.use_bias)
-        self.activation_fn = name2fn(activation)
+        self.gates = PackedRNUGates(self.indim + self.outdim,
+                                    [(self.outdim, self.gate_activation),
+                                     (self.outdim, self.gate_activation),
+                                     (self.outdim, self.gate_activation),
+                                     (self.hdim, None)],
+                                    use_bias=self.use_bias,
+                                    rec_bn=self._rbn_gates)
+        self.activation_fn = name2fn(activation)()
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.gates.reset_parameters()
 
     def forward(self, x_t, states, t=None):
         y_tm1, c_tm1 = states

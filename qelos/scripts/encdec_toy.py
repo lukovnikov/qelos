@@ -37,7 +37,7 @@ def main(
         epochs=100,
         batsize=32,
         embdim=50,
-        encdim=64,
+        encdim=90,
         mode="cell",     # "fast" or "cell"
         wreg=0.0001,
         cuda=False,
@@ -85,7 +85,10 @@ def main(
         decoder = q.AttentionDecoderCell(attention=q.Attention().forward_gen(encdim, encdim+embdim, encdim),
                                          embedder=embedder,
                                          core=q.RecStack(
-                                             q.GRUCell(embdim+encdim, encdim, use_cudnn_cell=False, rec_batch_norm="main")
+                                             q.GRUCell(embdim+encdim, encdim,
+                                                       use_cudnn_cell=False,
+                                                       rec_batch_norm=None,
+                                                       activation="crelu")
                                          ),
                                          smo=q.Stack(
                                              nn.Linear(encdim+encdim, vocsize),

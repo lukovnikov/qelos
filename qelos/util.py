@@ -1,6 +1,7 @@
 import collections, inspect, argparse, numpy as np, sys, re, unidecode, nltk, signal
 from datetime import datetime as dt
 from IPython import embed
+import qelos
 
 class ticktock(object):
     def __init__(self, prefix="-", verbose=True):
@@ -318,14 +319,28 @@ def tokenize(s, preserve_patterns=None):
 
 
 from torch.nn import functional as F
+from torch import nn
+
+
+class Identity(nn.Module):
+    def __init__(self, *a, **kw):
+        super(Identity, self).__init__(*a, **kw)
+
+    def forward(self, *x):
+        if len(x) == 1:
+            x = x[0]
+        return x
 
 
 def name2fn(x):
-    mapping = {"tanh": F.tanh,
-               "sigmoid": F.sigmoid,
-               "relu": F.relu,
-               "linear": F.linear,
-               None: lambda x: x}
+    mapping = {"tanh": nn.Tanh,
+               "sigmoid": nn.Sigmoid,
+               "relu": nn.ReLU,
+               "linear": nn.Linear,
+               "elu": nn.ELU,
+               "selu": nn.SELU,
+               "crelu": qelos.basic.CReLU,
+               None: Identity}
     if x not in mapping:
         raise Exception("unknown activation function name")
     return mapping[x]
