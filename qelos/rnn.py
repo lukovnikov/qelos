@@ -186,8 +186,16 @@ class RNUBase(RecStateful):
                 state_0 = q.var(torch.zeros(statespec)).cuda(next(self.parameters()).is_cuda).v
                 _init_states[i] = state_0
             if initstate.dim() == 2:        # init state set differently for different batches
-                pass
-            elif initstate.dim() == 1:
+                if arg > initstate.size(0):
+                    raise Exception("asked for a bigger batch size than init states")
+                elif arg == initstate.size(0):
+                    pass
+                else:
+                    if arg == 0:
+                        return initstate[0]
+                    else:
+                        return initstate[:arg]
+            elif initstate.dim() == 1 and arg > 0:
                 _init_states[i] = initstate.unsqueeze(0).expand(arg, initstate.size(-1))
             else:
                 raise Exception("initial states set to wrong dimensional values. Must be 1D (will be repeated) or 2D.")
@@ -342,7 +350,7 @@ class GRUCell(RNUBase):
 
     @property
     def h_0(self):
-        return self.get_init_states(None)[0]
+        return self.get_init_states(0)[0]
 
     @h_0.setter
     def h_0(self, value):
@@ -451,7 +459,7 @@ class LSTMCell(GRUCell):
 
     @property
     def y_0(self):
-        return self.get_init_states(None)[1]
+        return self.get_init_states(0)[1]
 
     @y_0.setter
     def y_0(self, value):
@@ -565,7 +573,7 @@ class GRULayer(RNUBase, Recurrent):
 
     @property
     def h_0(self):
-        return self.get_init_states(None)
+        return self.get_init_states(0)[0]
 
     @h_0.setter
     def h_0(self, value):
@@ -613,7 +621,7 @@ class LSTMLayer(GRULayer):
 
     @property
     def y_0(self):
-        return self.get_init_states(None)[1]
+        return self.get_init_states(0)[1]
 
     @y_0.setter
     def y_0(self, value):
@@ -626,7 +634,7 @@ class LSTMLayer(GRULayer):
             statespec = statespec + statespec
         return statespec
 
-    def get_init_states(self, arg):
+    def _get_init_states(self, arg):
         initstate = super(LSTMLayer, self).get_init_states(arg)
         ret = (initstate[:initstate.size(0)/2],
                initstate[initstate.size(0)/2:])
