@@ -87,7 +87,7 @@ def main(
                                          core=q.RecStack(
                                              q.GRUCell(embdim+encdim, encdim,
                                                        use_cudnn_cell=False,
-                                                       rec_batch_norm=None,
+                                                       rec_batch_norm="main",
                                                        activation="crelu")
                                          ),
                                          smo=q.Stack(

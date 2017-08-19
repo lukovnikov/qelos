@@ -185,6 +185,7 @@ class RNUBase(RecStateful):
             if initstate is None:
                 state_0 = q.var(torch.zeros(statespec)).cuda(next(self.parameters()).is_cuda).v
                 _init_states[i] = state_0
+                initstate = state_0
             if initstate.dim() == 2:        # init state set differently for different batches
                 if arg > initstate.size(0):
                     raise Exception("asked for a bigger batch size than init states")
@@ -635,7 +636,7 @@ class LSTMLayer(GRULayer):
         return statespec
 
     def _get_init_states(self, arg):
-        initstate = super(LSTMLayer, self).get_init_states(arg)
+        initstate = super(LSTMLayer, self)._get_init_states(arg)
         ret = (initstate[:initstate.size(0)/2],
                initstate[initstate.size(0)/2:])
         return ret
