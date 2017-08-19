@@ -167,10 +167,12 @@ class RNUBase(RecStateful):
 
     def get_init_states(self, arg):
         """
-        :param arg: batch size
+        :param arg: batch size (will generate and return compatible init states) or None (will return what is stored)
         :return: initial states, states that have previously been set or newly generated zero states based on given batch size
         """
-        assert(isnumber(arg))       # is batch size
+        if arg is None:
+            return self._init_states
+        assert(isnumber(arg) or arg is None)       # is batch size
         if self._init_states is None:       # no states have been set using .set_init_states()
             _init_states = [None] * self.numstates
         else:
@@ -181,9 +183,9 @@ class RNUBase(RecStateful):
             statespec = self.state_spec[i]
             initstate = _init_states[i]
             if initstate is None:
-                state_0 = q.var(torch.zeros((arg, statespec))).cuda(next(self.parameters()).is_cuda).v
+                state_0 = q.var(torch.zeros(statespec)).cuda(next(self.parameters()).is_cuda).v
                 _init_states[i] = state_0
-            elif initstate.dim() == 2:        # init state set differently for different batches
+            if initstate.dim() == 2:        # init state set differently for different batches
                 pass
             elif initstate.dim() == 1:
                 _init_states[i] = initstate.unsqueeze(0).expand(arg, initstate.size(-1))
@@ -338,6 +340,14 @@ class GRUCell(RNUBase):
             self.shared_zoneout = nn.Dropout(p=self.shared_zoneout)
             self.shared_zoneouter = None
 
+    @property
+    def h_0(self):
+        return self.get_init_states(None)[0]
+
+    @h_0.setter
+    def h_0(self, value):
+        self.set_init_states(value)
+
     def setcell(self):
         if self.use_cudnn_cell:
             self.nncell = nn.GRUCell(self.indim, self.outdim, bias=self.use_bias)
@@ -438,6 +448,14 @@ class LSTMCell(GRUCell):
         else:
             self.nncell = _LSTMCell(self.indim, self.outdim, bias=self.use_bias,
                                     gate_activation=self.gate_activation, activation=self.activation)
+
+    @property
+    def y_0(self):
+        return self.get_init_states(None)[1]
+
+    @y_0.setter
+    def y_0(self, value):
+        self.set_init_states(self.h_0, value)       # TODO: maybe has to be other way around
 
     @property
     def state_spec(self):
@@ -545,12 +563,20 @@ class GRULayer(RNUBase, Recurrent):
         self.indim, self.outdim, self.use_bias, self.bidirectional = indim, outdim, use_bias, bidirectional
         self.nnlayer = self._nn_unit()(indim, outdim, bias=use_bias, batch_first=True, bidirectional=bidirectional, num_layers=1)
 
+    @property
+    def h_0(self):
+        return self.get_init_states(None)
+
+    @h_0.setter
+    def h_0(self, value):
+        self.set_init_states(value)
+
     def _nn_unit(self):
         return nn.GRU
 
     def forward(self, x):
         self.reset_state()
-        h_0 = self.get_init_states(x.size(0))
+        h_0 = self._get_init_states(x.size(0))
         y, s_t = self.nnlayer(x, h_0)
         self.set_states(s_t)
         return y
@@ -562,7 +588,7 @@ class GRULayer(RNUBase, Recurrent):
         else:
             return (self.outdim,)
 
-    def get_init_states(self, arg):
+    def _get_init_states(self, arg):
         initstates = super(GRULayer, self).get_init_states(arg)
         l = []
         for initstate in initstates:
@@ -584,6 +610,14 @@ class GRULayer(RNUBase, Recurrent):
 class LSTMLayer(GRULayer):
     def _nn_unit(self):
         return nn.LSTM
+
+    @property
+    def y_0(self):
+        return self.get_init_states(None)[1]
+
+    @y_0.setter
+    def y_0(self, value):
+        self.set_init_states(self.h_0, value)
 
     @property
     def state_spec(self):
