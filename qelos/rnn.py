@@ -257,7 +257,9 @@ class RNU(RNUBase):
 
 
 class _GRUCell(nn.Module):
-    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid", activation="tanh"):
+    def __init__(self, indim, outdim, bias=True, gate_activation="sigmoid",
+                 activation="tanh",
+                 recurrent_batch_norm=None):
         super(_GRUCell, self).__init__()
         self.indim, self.outdim, self.use_bias = indim, outdim, bias
         self.gate_activation, self.activation = gate_activation, activation        # sigm, tanh
@@ -268,11 +270,24 @@ class _GRUCell(nn.Module):
                                    use_bias=self.use_bias)
         self.main_gate = PackedRNUGates(self.indim + self.outdim, [(self.outdim, None)], use_bias=self.use_bias)
         self.activation_fn = name2fn(activation)
+        self._rbn_on = recurrent_batch_norm
+        self._rbn_main = None
+        if self._rbn_on == "main":    # only on main pre-activation
+            self._rbn_main = q.SeqBatchNorm1d(self.outdim)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.gates.reset_parameters()
+        self.main_gate.reset_parameters()
+        if self._rbn_main is not None:
+            self._rbn_main.reset_parameters()
 
     def forward(self, x_t, h_tm1, t=None):
         update_gate, reset_gate = self.gates(x_t, h_tm1)
         canh = torch.mul(h_tm1, reset_gate)
-        canh = self.main_gate(canh)
+        canh = self.main_gate(x_t, canh)
+        if self._rbn_main is not None:
+            canh = self._rbn_main(canh, t)
         canh = self.activation_fn(canh)
         h_t = (1 - update_gate) * h_tm1 + update_gate * canh
         return h_t
@@ -284,12 +299,13 @@ class GRUCell(RNUBase):
     def __init__(self, indim, outdim, use_bias=True,
                  dropout_in=None, dropout_rec=None, zoneout=None,
                  shared_dropout_rec=None, shared_zoneout=None,
-                 use_cudnn_cell=True, activation="tanh", gate_activation="sigmoid"):    # custom activations have only an effect when not using cudnn cell
+                 use_cudnn_cell=True, activation="tanh",
+                 gate_activation="sigmoid", rec_batch_norm=None):    # custom activations have only an effect when not using cudnn cell
         super(GRUCell, self).__init__()
         self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout, self.shared_dropout_rec, self.shared_zoneout = \
             indim, outdim, use_bias, dropout_in, dropout_rec, zoneout, shared_dropout_rec, shared_zoneout
         self.use_cudnn_cell = use_cudnn_cell
-        self.activation, self.gate_activation = activation, gate_activation
+        self.activation, self.gate_activation, self.recbn = activation, gate_activation, rec_batch_norm
         self.nncell = None
         self.setcell()
 
@@ -313,7 +329,15 @@ class GRUCell(RNUBase):
         else:
             self.nncell = _GRUCell(self.indim, self.outdim, bias=self.use_bias,
                                    activation=self.activation,
-                                   gate_activation=self.gate_activation)
+                                   gate_activation=self.gate_activation,
+                                   recurrent_batch_norm=self.recbn)
+
+    def apply_nncell(self, *x, **kw):
+        t = kw["t"] if "t" in kw else None
+        if self.use_cudnn_cell:
+            return self.nncell(*x)
+        else:
+            return self.nncell(*x, t=t)
 
     def reset_parameters(self):
         # self.gates.reset_parameters()
@@ -342,7 +366,7 @@ class GRUCell(RNUBase):
                 self.shared_dropout_reccer = [self.shared_dropout_rec(ones)]
             h_tm1 = torch.mul(h_tm1, self.shared_dropout_reccer[0])
 
-        h_t = self.nncell(x_t, h_tm1)
+        h_t = self.apply_nncell(x_t, h_tm1, t=t)
 
         if self.zoneout:
             if self.zoner is None:
@@ -404,7 +428,7 @@ class LSTMCell(GRUCell):
             y_tm1 = torch.mul(c_tm1, self.shared_dropout_reccer[0])
             c_tm1 = torch.mul(y_tm1, self.shared_dropout_reccer[1])
         # endregion
-        y_t, c_t = self.nncell(x_t, (y_tm1, c_tm1))
+        y_t, c_t = self.apply_nncell(x_t, (y_tm1, c_tm1), t=t)
         if self.zoneout:
             if self.zoner is None:
                 self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v

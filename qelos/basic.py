@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from qelos.util import name2fn, issequence
 from qelos.containers import ModuleList
+import numpy as np
 
 
 class Lambda(nn.Module):
@@ -289,3 +290,74 @@ class TrilinearDistance(Distance):
         else:
             dists = dists.view(*data.size()[:-1])
         return dists
+
+
+class SeqBatchNorm1d(nn.Module):
+
+    """
+    A batch normalization module which keeps its running mean
+    and variance separately per timestep.
+    """
+
+    def __init__(self, num_features, max_length=None, eps=1e-5, momentum=0.1,
+                 affine=True):
+        """
+        Most parts are copied from
+        torch.nn.modules.batchnorm._BatchNorm.
+        """
+
+        super(SeqBatchNorm1d, self).__init__()
+        self.num_features = num_features
+        self.max_length = max_length
+        self.max_time = 0
+        self.affine = affine
+        self.eps = eps
+        self.momentum = momentum
+        if self.affine:
+            self.weight = nn.Parameter(torch.FloatTensor(num_features))
+            self.bias = nn.Parameter(torch.FloatTensor(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for i in range(self.max_time):
+            running_mean_i = getattr(self, 'running_mean_{}'.format(i))
+            running_var_i = getattr(self, 'running_var_{}'.format(i))
+            running_mean_i.zero_()
+            running_var_i.fill_(1)
+        if self.affine:
+            self.weight.data.fill_(0.1)
+            self.bias.data.fill_(0.)
+
+    def _check_input_dim(self, input_):
+        if input_.size(1) != self.num_features:
+            raise ValueError('got {}-feature tensor, expected {}'
+                             .format(input_.size(1), self.num_features))
+
+    def get_running_stat(self, which, time):
+        if not hasattr(self, "running_{}_{}".format(which, time)):
+            self.register_buffer("running_{}_{}".format(which, time),
+                                 torch.zeros(self.num_features)
+                                 if which == "mean"
+                                 else torch.ones(self.num_features))
+        return getattr(self, "running_{}_{}".format(which, time))
+
+    def forward(self, input_, time):
+        self._check_input_dim(input_)
+        maxtime = self.max_length if self.training else self.max_time
+        if maxtime is not None and time >= maxtime:
+            time = maxtime - 1
+        running_mean = self.get_running_stat("mean", time)
+        running_var = self.get_running_stat("var", time)
+        ret = F.batch_norm(
+            input=input_, running_mean=running_mean, running_var=running_var,
+            weight=self.weight, bias=self.bias, training=self.training,
+            momentum=self.momentum, eps=self.eps)
+        return ret
+
+    def __repr__(self):
+        return ('{name}({num_features}, eps={eps}, momentum={momentum},'
+                ' max_length={max_length}, affine={affine})'
+                .format(name=self.__class__.__name__, **self.__dict__))

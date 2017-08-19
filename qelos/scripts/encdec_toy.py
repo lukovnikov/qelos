@@ -85,7 +85,7 @@ def main(
         decoder = q.AttentionDecoderCell(attention=q.Attention().forward_gen(encdim, encdim+embdim, encdim),
                                          embedder=embedder,
                                          core=q.RecStack(
-                                             q.GRUCell(embdim+encdim, encdim)
+                                             q.GRUCell(embdim+encdim, encdim, use_cudnn_cell=False, rec_batch_norm="main")
                                          ),
                                          smo=q.Stack(
                                              nn.Linear(encdim+encdim, vocsize),

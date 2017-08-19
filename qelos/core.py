@@ -98,8 +98,11 @@ class lossarray(object):
             outl.append(l)
         return outl
 
+    def get_agg_errors(self):
+        return [agg.get_agg_error() for agg in self.lossaggs]
+
     def pp(self):
-        aggouts = [agg.get_agg_error() for agg in self.lossaggs]
+        aggouts = self.get_agg_errors()
         ret = " - ".join(["{:.4f}".format(aggout) for aggout in aggouts])
         return ret
 
@@ -132,11 +135,49 @@ class train(object):
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
+        # long API
         self._clip_grad_norm = None
+        # early stopping
+        self._earlystop = False
+        self._earlystop_criterium = None
+        self._earlystop_selector = None
+        self._earlystop_select_history = None
 
     def clip_grad_norm(self, x):
         self._clip_grad_norm = x
         return self
+
+    def earlystop(self, select=None, stopcrit=None):
+        if select is None:
+            select = lambda (x, y, i): y[0]
+        if stopcrit is None:
+            stopcrit = lambda h: h[-2] < h[-1] if len(h) >= 2 else False
+        elif isinstance(stopcrit, int):
+            stopcrit_window = stopcrit
+
+            def windowstopcrit(h):
+                window = stopcrit_window
+                minpos = 0
+                minval = np.infty
+                for i, he in enumerate(h):
+                    if he < minval:
+                        minval = he
+                        minpos = i
+                ret = minpos < len(h) - window
+                return ret
+
+            stopcrit = windowstopcrit
+        self._earlystop_criterium = stopcrit
+        self._earlystop_selector = select
+        self._earlystop_select_history = []
+        self._earlystop = True
+        return self
+
+    def earlystop_eval(self, trainscores, validscores):
+        selected = self._earlystop_selector(trainscores, validscores, self.current_epoch)
+        self._earlystop_select_history.append(selected)
+        ret = self._earlystop_criterium(self._earlystop_select_history)
+        return ret
 
     def cuda(self, usecuda, *args, **kwargs):
         self.usecuda = usecuda
@@ -179,6 +220,7 @@ class train(object):
             stop = self.current_epoch+1 == self.epochs
             self.trainlosses.push_and_reset()
             tt.tick()
+            self.model.train()
             for i, batch in enumerate(self.traindataloader):
                 self.optim.zero_grad()
                 params = self.model.parameters()
@@ -221,7 +263,10 @@ class train(object):
                     self.epochs,
                     self.trainlosses.pp()
                 )
+            train_epoch_losses = self.trainlosses.get_agg_errors()
+            valid_epoch_losses = []
             if self.validlosses is not None:
+                self.model.eval()
                 self.validlosses.push_and_reset()
                 totalvalidbats = len(self.validdataloader)
                 for i, batch in enumerate(self.validdataloader):
@@ -242,8 +287,14 @@ class train(object):
                                 )
                             )
                 ttmsg += " -- valid: {}".format(self.validlosses.pp())
+                valid_epoch_losses = self.validlosses.get_agg_errors()
             tt.stoplive()
             tt.tock(ttmsg)
+            if self._earlystop:
+                doearlystop = self.earlystop_eval(train_epoch_losses, valid_epoch_losses)
+                if doearlystop:
+                    tt.msg("stopping early")
+                stop = stop or doearlystop
             current_epoch += 1
         self.tt.tock("trained")
 

@@ -27,12 +27,12 @@ def main(
         hidden_size = 128,
         num_layers = 2,
         num_classes = 10,
-        batch_size = 568,
+        batch_size = 100,
         num_epochs = 2,
         learning_rate = 0.01,
 
         gpu = False,
-        mode = "stack"     # "nn" or "qrnn" or "stack"
+        mode = "qrnn"     # "nn" or "qrnn" or "stack"
     ):
 
 
@@ -65,7 +65,7 @@ def main(
             self.num_layers = num_layers
             if mode == "qrnn":
                 tt.msg("using q.RNN")
-                self.rnn = RecStack(*[GRUCell(input_size, hidden_size)] +
+                self.rnn = RecStack(*[GRUCell(input_size, hidden_size, use_cudnn_cell=False, rec_batch_norm="main")] +
                                      [GRUCell(hidden_size, hidden_size) for i in range(num_layers - 1)])\
                             .to_layer().return_all()
             elif mode == "nn":
@@ -101,36 +101,38 @@ def main(
 
 
     # Loss and Optimizer
-    criterion = nn.NLLLoss()
+    criterion = q.lossarray(nn.NLLLoss())
     if gpu:
         criterion.cuda()
     optimizer = torch.optim.Adam(rnn.parameters(), lr=learning_rate)
-
-    tt.msg("training")
-    # Train the Model
-    for epoch in range(num_epochs):
-        tt.tick()
-        btt = ticktock("batch")
-        btt.tick()
-        for i, (images, labels) in enumerate(train_loader):
-            #btt.tick("doing batch")
-            images = q.var(images.view(-1, sequence_length, input_size)).cuda(crit=gpu).v
-            labels = q.var(labels).cuda(crit=gpu).v
-
-            # Forward + Backward + Optimize
-            optimizer.zero_grad()
-            outputs = rnn(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            if (i+1) % 100 == 0:
-                btt.tock("100 batches done")
-                print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
-                       %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0]))
-                btt.tick()
-            #tt.tock("batch done")
-        tt.tock("epoch {} done".format(epoch))
+    q.train(rnn).train_on(train_loader, criterion).cuda(gpu)\
+        .optimizer(optimizer).set_batch_transformer(lambda x, y: (x.view(-1, sequence_length, input_size), y))\
+        .train(num_epochs)
+    # tt.msg("training")
+    # # Train the Model
+    # for epoch in range(num_epochs):
+    #     tt.tick()
+    #     btt = ticktock("batch")
+    #     btt.tick()
+    #     for i, (images, labels) in enumerate(train_loader):
+    #         #btt.tick("doing batch")
+    #         images = q.var(images.view(-1, sequence_length, input_size)).cuda(crit=gpu).v
+    #         labels = q.var(labels).cuda(crit=gpu).v
+    #
+    #         # Forward + Backward + Optimize
+    #         optimizer.zero_grad()
+    #         outputs = rnn(images)
+    #         loss = criterion(outputs, labels)
+    #         loss.backward()
+    #         optimizer.step()
+    #
+    #         if (i+1) % 100 == 0:
+    #             btt.tock("100 batches done")
+    #             print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
+    #                    %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0]))
+    #             btt.tick()
+    #         #tt.tock("batch done")
+    #     tt.tock("epoch {} done".format(epoch))
     # Test the Model
     correct = 0
     total = 0
