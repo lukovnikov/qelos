@@ -126,6 +126,7 @@ class RNUBase(RecStateful):
         super(RecStateful, self).__init__(*x, **kw)
         self._init_states = None
         self._states = None
+        self._y_tm1 = None
 
     def to_layer(self):
         return RNNLayer(self)
@@ -210,6 +211,11 @@ class RNUBase(RecStateful):
             for newstate, oldstate in zip(newstates, states):
                 newstate = newstate * mask_t + oldstate * (1 - mask_t)
                 st.append(newstate)
+            if mask_t is not None:  # moved from RNNLayer
+                if self._y_tm1 is None:
+                    self._y_tm1 = q.var(torch.zeros(y_t.size())).cuda(crit=y_t).v
+                y_t = y_t * mask_t + self._y_tm1 * (1 - mask_t)
+                self._y_tm1 = y_t
         else:
             st = newstates
         self.set_states(*st)
@@ -287,7 +293,7 @@ class _GRUCell(nn.Module):
         canh = torch.mul(h_tm1, reset_gate)
         canh = self.main_gate(x_t, canh)
         if self._rbn_main is not None:
-            canh = self._rbn_main(canh, t)
+            canh = self._rbn_main(canh, t)      # TODO: check masking
         canh = self.activation_fn(canh)
         h_t = (1 - update_gate) * h_tm1 + update_gate * canh
         return h_t
@@ -485,12 +491,12 @@ class RNNLayer(nn.Module, Recurrent):
             cellout = self.cell(x_t, mask_t=mask_t, t=t)
             y_t = cellout
             # mask
-            if mask_t is not None:
-                if y_tm1 is None:
-                    y_tm1 = q.var(torch.zeros(y_t.size())).cuda(crit=y_t).v
-                    if x.is_cuda: y_tm1 = y_tm1.cuda()
-                y_t = y_t * mask_t + y_tm1 * (1 - mask_t)
-                y_tm1 = y_t
+            # if mask_t is not None:  # moved to cells (recBN is affected here)
+            #     if y_tm1 is None:
+            #         y_tm1 = q.var(torch.zeros(y_t.size())).cuda(crit=y_t).v
+            #         if x.is_cuda: y_tm1 = y_tm1.cuda()
+            #     y_t = y_t * mask_t + y_tm1 * (1 - mask_t)
+            #     y_tm1 = y_t
             if "all" in self.result:
                 y_list.append(y_t)
             i -= 1
