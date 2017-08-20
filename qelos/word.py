@@ -434,41 +434,26 @@ class OverriddenWordLinout(WordLinoutBase):
     def __init__(self, base, override, which=None, **kw):
         super(OverriddenWordLinout, self).__init__(base.D)
         self.base = base
-        self.over = override
-        # assert(base.outdim == override.outdim)  # ensure same output dimension
-        baseindexes_val = np.arange(max(base.D.values()) + 1).astype("int64")
-        self.baseindexes = q.val(torch.from_numpy(baseindexes_val)).v
-        overridemask_val = np.zeros_like(baseindexes_val, dtype="float32")
-        overrideindexes_val = np.zeros_like(baseindexes_val, dtype="int64")
+        self.over = override.adapt(base.D)
+
+        numout = max(base.D.values()) + 1
+
+        overridemask_val = np.zeros((numout,), dtype="float32")
         if which is None:   # which: list of words to override
             for k, v in base.D.items():     # for all symbols in base dic
                 if k in override.D:         # if also in override dic
-                    overrideindexes_val[v] = override.D[k]   # map base idx to ovrd idx
                     overridemask_val[v] = 1
         else:
             for k in which:
                 if k in override.D:     # TODO: if k from which is missing from base.D
-                    overrideindexes_val[base.D[k]] = override.D[k]
                     overridemask_val[base.D[k]] = 1
-        self.overrideindexes = q.val(torch.from_numpy(overrideindexes_val)).v
         self.overridemask = q.val(torch.from_numpy(overridemask_val)).v
 
-    def forward(self, x, mask=None):
-        xshape = x.size()
-        x = x.view(-1)
-        base_idx_select = torch.gather(self.baseindexes, 0, x)
-        over_idx_select = torch.gather(self.overrideindexes, 0, x)
-        over_msk_select = torch.gather(self.overridemask, 0, x)
-        base_emb = self.base(base_idx_select)
-        base_msk = None
-        if isinstance(base_emb, tuple):
-            base_emb, base_msk = base_emb
-        over_emb = self.over(over_idx_select)
-        if isinstance(over_emb, tuple):
-            over_emb, over_msk = over_emb
-        emb = base_emb * (1 - over_msk_select.unsqueeze(1)) + over_emb * over_msk_select.unsqueeze(1)
-        emb = emb.view(*(xshape + (-1,)))
-        msk = None
-        if base_msk is not None:
-            msk = base_msk.view(xshape)
-        return emb, msk
+    def forward(self, x, mask=None):    # (batsize, indim), (batsize, outdim)
+        baseres = self.base(x, mask=mask)
+        overres = self.over(x, mask=mask)
+        res = self.overridemask.unsqueeze(0) * overres \
+              + (1 - self.overridemask.unsqueeze(0)) * baseres
+        if mask is not None:
+            res = res * mask
+        return res#, mask
