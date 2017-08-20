@@ -118,12 +118,13 @@ class WordEmb(WordEmbBase):
 class AdaptedWordEmb(WordEmbBase):  # adapt to given dictionary, map extra words to rare
     def __init__(self, wordemb, wdic, **kw):
         D = wordemb.D
-        assert(wordemb.raretoken in D)     # must have rareid in D to map extra words to it
+        # assert(wordemb.raretoken in D)     # must have rareid in D to map extra words to it
         super(AdaptedWordEmb, self).__init__(wdic, **kw)
         self.inner = wordemb
 
-        self.ad = {v: D[k] if k in D else D[self.raretoken]
-                   for k, v in wdic.items()}
+        rareid = D[wordemb.raretoken] if wordemb.raretoken in D else 0
+
+        self.ad = {v: D[k] if k in D else rareid for k, v in wdic.items()}
 
         valval = np.ones((max(self.ad.keys()) + 1,), dtype="int64")
         for i in range(valval.shape[0]):
@@ -135,13 +136,11 @@ class AdaptedWordEmb(WordEmbBase):  # adapt to given dictionary, map extra words
         inpshape = inp.size()
         inp = inp.view(-1)
         x = self.adb.gather(0, inp)
-        ret = self.inner(x)
-        mask = None
-        if issequence(ret):
-            ret, mask = ret
-            mask = mask.view(inpshape)
+        ret, msk = self.inner(x)
+        if msk is not None:
+            msk = msk.view(inpshape)
         ret = ret.view(*(inpshape+(-1,)))
-        return ret, mask
+        return ret, msk
 
 
 class ComputedWordEmb(WordEmbBase):
@@ -170,7 +169,7 @@ class ComputedWordEmb(WordEmbBase):
         mask = None
         if self.maskid is not None:
             mask = x != self.maskid
-        xshape = x
+        xshape = x.size()
         x = x.view(-1)
         data = self.data.index_select(0, x)
         emb = self.computer(data)
@@ -178,42 +177,33 @@ class ComputedWordEmb(WordEmbBase):
         return emb, mask
 
 
-class OverriddenWordEmb(WordEmbBase):
+class OverriddenWordVecBase(WordVecBase, nn.Module):
     def __init__(self, base, override, which=None, **kw):
-        super(OverriddenWordEmb, self).__init__(base.D)
+        super(OverriddenWordVecBase, self).__init__(base.D)
         self.base = base
-        self.over = override
-        # assert(base.outdim == override.outdim)  # ensure same output dimension
-        baseindexes_val = np.arange(max(base.D.values()) + 1).astype("int64")
-        self.baseindexes = q.val(torch.from_numpy(baseindexes_val)).v
-        overridemask_val = np.zeros_like(baseindexes_val, dtype="float32")
-        overrideindexes_val = np.zeros_like(baseindexes_val, dtype="int64")
+        self.over = override.adapt(base.D)
+
+        numout = max(base.D.values()) + 1
+
+        overridemask_val = np.zeros((numout,), dtype="float32")
         if which is None:   # which: list of words to override
             for k, v in base.D.items():     # for all symbols in base dic
                 if k in override.D:         # if also in override dic
-                    overrideindexes_val[v] = override.D[k]   # map base idx to ovrd idx
                     overridemask_val[v] = 1
         else:
             for k in which:
                 if k in override.D:     # TODO: if k from which is missing from base.D
-                    overrideindexes_val[base.D[k]] = override.D[k]
                     overridemask_val[base.D[k]] = 1
-        self.overrideindexes = q.val(torch.from_numpy(overrideindexes_val)).v
         self.overridemask = q.val(torch.from_numpy(overridemask_val)).v
 
+
+class OverriddenWordEmb(OverriddenWordVecBase, WordEmbBase):
     def forward(self, x):
         xshape = x.size()
         x = x.view(-1)
-        base_idx_select = torch.gather(self.baseindexes, 0, x)
-        over_idx_select = torch.gather(self.overrideindexes, 0, x)
+        base_emb, base_msk = self.base(x)
+        over_emb, over_msk = self.over(x)
         over_msk_select = torch.gather(self.overridemask, 0, x)
-        base_emb = self.base(base_idx_select)
-        base_msk = None
-        if isinstance(base_emb, tuple):
-            base_emb, base_msk = base_emb
-        over_emb = self.over(over_idx_select)
-        if isinstance(over_emb, tuple):
-            over_emb, over_msk = over_emb
         emb = base_emb * (1 - over_msk_select.unsqueeze(1)) + over_emb * over_msk_select.unsqueeze(1)
         emb = emb.view(*(xshape + (-1,)))
         msk = None
@@ -222,7 +212,7 @@ class OverriddenWordEmb(WordEmbBase):
         return emb, msk
 
 
-class GloveVec(object):
+class PretrainedWordVec(object):
     defaultpath = "../data/glove/glove.%dd"
     maskid = 0
     rareid = 1
@@ -264,7 +254,7 @@ class GloveVec(object):
         return W, D
 
 
-class GloveEmb(WordEmb, GloveVec):
+class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
     def __init__(self, dim, vocabsize=None, path=None, freeze=True, maskid=None,
                  **kw):
@@ -273,8 +263,8 @@ class GloveEmb(WordEmb, GloveVec):
         maskid = self.maskid if maskid is None else maskid
         value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=maskid, rareid=self.rareid)
         self.allwords = wdic.keys()
-        super(GloveEmb, self).__init__(dim=dim, value=value,
-                                       worddic=wdic, freeze=freeze, **kw)
+        super(PretrainedWordEmb, self).__init__(dim=dim, value=value,
+                                                worddic=wdic, freeze=freeze, **kw)
 
 
 class WordLinoutBase(WordVecBase, nn.Module):
@@ -282,10 +272,10 @@ class WordLinoutBase(WordVecBase, nn.Module):
         try:
             if isstring(word):
                 word = self.D[word]
-            wordid = q.var(torch.LongTensor([[word]])).v
-            ret, _ = self._getvector(wordid)
+            wordid = q.var(torch.LongTensor([word])).v
+            ret = self._getvector(wordid)
             return ret.squeeze().data.numpy()
-        except Exception:
+        except Exception as e:
             return None
 
     def _getvector(self, wordid):
@@ -300,7 +290,7 @@ class WordLinoutBase(WordVecBase, nn.Module):
 
 
 class WordLinout(WordLinoutBase):
-    def __init__(self, outdim, worddic=None, weight=None, bias=True, freeze=False):
+    def __init__(self, indim, worddic=None, weight=None, bias=True, freeze=False):
         super(WordLinout, self).__init__(worddic)
         wdvals = worddic.values()
         assert(min(wdvals) >= 0)     # word ids must be positive
@@ -310,7 +300,8 @@ class WordLinout(WordLinoutBase):
         rareid = worddic[self.raretoken] if self.raretoken in worddic else None
         self.maskid = maskid
 
-        indim = max(worddic.values())+1        # to init from worddic
+        outdim = max(worddic.values())+1        # to init from worddic
+        self.outdim = outdim
         self.indim = indim
         self.lin = nn.Linear(indim, outdim, bias=bias)
 
@@ -325,9 +316,10 @@ class WordLinout(WordLinoutBase):
         vec = self.lin.weight.index_select(0, wordid)
         return vec
 
-    def forward(self, x, mask=None):    # TODO mask
+    def forward(self, x, mask=None):
         ret = self.lin(x)
-        ret = ret * mask if mask is not None else mask
+        ret = ret.mul(mask if mask is not None else 1)
+        return ret#, mask ?
 
 
 class ComputedWordLinout(WordLinoutBase):
@@ -378,7 +370,7 @@ class ComputedWordLinout(WordLinoutBase):
         return out#, mask ?
 
 
-class GloveLinout(WordLinout, GloveVec):
+class PretrainedWordLinout(WordLinout, PretrainedWordVec):
     def __init__(self, dim, vocabsize=None, path=None, freeze=True,
                  maskid=None, bias=False,
                  **kw):
@@ -388,9 +380,9 @@ class GloveLinout(WordLinout, GloveVec):
         value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=maskid, rareid=self.rareid)
         self.allwords = wdic.keys()
         outdim = max(wdic.values()) + 1
-        super(GloveLinout, self).__init__(outdim, value=value,
-                                          worddic=wdic, freeze=freeze, bias=bias,
-                                          **kw)
+        super(PretrainedWordLinout, self).__init__(dim, weight=value,
+                                                   worddic=wdic, freeze=freeze, bias=bias,
+                                                   **kw)
 
 
 class AdaptedWordLinout(WordLinoutBase):
@@ -423,32 +415,18 @@ class AdaptedWordLinout(WordLinoutBase):
         self.old_to_new = nn.Parameter(torch.from_numpy(old_to_new),
                                        requires_grad=False)  # for every old dic word id, contains new dic id
 
+    def _getvector(self, wordid):
+        wordid = self.new_to_old[wordid]
+        return self.inner.lin.weight[wordid]
+
     def forward(self, x, mask=None):       # (batsize, indim), (batsize, outdim)
-        innermask = mask.index_select(1, self.new_to_old) if mask is not None else None
+        innermask = mask.index_select(1, self.old_to_new) if mask is not None else None
         baseout = self.inner(x, mask=innermask)     # (batsize, outdim) --> need to permute columns
-        out = baseout.index_select(1, self.old_to_new)
+        out = baseout.index_select(1, self.new_to_old)
         return out#, mask?
 
 
-class OverriddenWordLinout(WordLinoutBase):
-    def __init__(self, base, override, which=None, **kw):
-        super(OverriddenWordLinout, self).__init__(base.D)
-        self.base = base
-        self.over = override.adapt(base.D)
-
-        numout = max(base.D.values()) + 1
-
-        overridemask_val = np.zeros((numout,), dtype="float32")
-        if which is None:   # which: list of words to override
-            for k, v in base.D.items():     # for all symbols in base dic
-                if k in override.D:         # if also in override dic
-                    overridemask_val[v] = 1
-        else:
-            for k in which:
-                if k in override.D:     # TODO: if k from which is missing from base.D
-                    overridemask_val[base.D[k]] = 1
-        self.overridemask = q.val(torch.from_numpy(overridemask_val)).v
-
+class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
     def forward(self, x, mask=None):    # (batsize, indim), (batsize, outdim)
         baseres = self.base(x, mask=mask)
         overres = self.over(x, mask=mask)

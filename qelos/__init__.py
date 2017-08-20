@@ -7,4 +7,4 @@ from qelos.basic import Softmax, LogSoftmax, BilinearDistance, CosineDistance, D
 from qelos.containers import ModuleList
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, name2fn, StringMatrix, tokenize
-from qelos.word import WordEmb, GloveEmb
+from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, WordLinout, PretrainedWordLinout, ComputedWordLinout
