@@ -28,6 +28,11 @@ class var(object):
         return self
 
 
+class val(object):
+    def __init__(self, tensor):
+        self.v = nn.Parameter(tensor, requires_grad=False)
+
+
 class TensorDataset(Dataset):      # TODO
     def __init__(self, *x):
         """

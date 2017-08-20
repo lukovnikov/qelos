@@ -71,9 +71,15 @@ class WordEmbBase(object):
             return self.__getitem__(other)
     # endregion
 
-    @property
-    def block(self):
-        return self
+    def adapt(self, wdic):  # adapts to given word-idx dictionary
+        return AdaptedWordEmb(self, wdic)
+
+    def override(self, wordemb,
+                 which=None):  # uses override vectors instead of base vectors if word in override dictionary
+        return OverriddenWordEmb(self, wordemb, which=which)
+
+    def augment(self, wordemb):
+        return AugmentedWordEmb(self, wordemb)
 
 
 class WordEmb(WordEmbBase, nn.Module):
@@ -110,15 +116,6 @@ class WordEmb(WordEmbBase, nn.Module):
         else:
             return ret
 
-    def adapt(self, wdic):      # adapts to given word-idx dictionary
-        return AdaptedWordEmb(self, wdic)
-
-    def override(self, wordemb, which=None):    # uses override vectors instead of base vectors if word in override dictionary
-        return OverriddenWordEmb(self, wordemb, which=which)
-
-    def augment(self, wordemb):
-        return AugmentedWordEmb(self, wordemb)
-
 
 class AdaptedWordEmb(WordEmbBase, nn.Module):  # adapt to given dictionary, map extra words to rare
     def __init__(self, wordemb, wdic, **kw):
@@ -149,14 +146,50 @@ class AdaptedWordEmb(WordEmbBase, nn.Module):  # adapt to given dictionary, map 
             return ret
 
 
-class OverriddenWordEmb(WordEmb):
+class ComputedWordEmb(WordEmbBase, nn.Module):
+    def __init__(self, data=None, computer=None, worddic=None):
+        """
+        :param data:
+        :param computer:
+        :param worddic:     must not contain any non-computed special tokens (no maskid and no rareid).
+        """
+        super(ComputedWordEmb, self).__init__(worddic=worddic)
+        self.data = nn.Parameter(torch.from_numpy(data), requires_grad=False)
+        self.computer = computer
+        self.weight = None
+        wdvals = worddic.values()
+        assert(min(wdvals) >= 0)     # word ids must be positive
+
+        # extract maskid and rareid from worddic
+        maskid = worddic[self.masktoken] if self.masktoken in worddic else None
+        rareid = worddic[self.raretoken] if self.raretoken in worddic else None
+        assert(maskid is None)
+        assert(rareid is None)
+        self.indim = max(worddic.values())+1
+
+    def forward(self, x):
+        data = self.data.index_select(0, x)
+        emb = self.computer(data)
+        if self.maskid is not None:
+            mask = x != self.maskid
+            return emb, mask
+        else:
+            return emb
+
+
+# do extended/merged embedding instead of override?
+
+
+class OverriddenWordEmb(WordEmbBase, nn.Module):
     def __init__(self, base, override, which=None, **kw):
+        super(OverriddenWordEmb, self).__init__(base.D)
+        self.base = base
+        self.override = override
         assert(base.outdim == override.outdim)  # ensure same output dimension
-        baseindexes_val = np.arange(max(base.D.values()) + 1).astype("int32")
-        baseindexes = Val(baseindexes_val)
-        basevar = base(baseindexes)     # slicing out all base vectors as they are
+        baseindexes_val = np.arange(max(base.D.values()) + 1).astype("int64")
+        self.baseindexes = q.val(torch.from_numpy(baseindexes_val)).v
         overridemask_val = np.zeros_like(baseindexes_val, dtype="float32")
-        overrideindexes_val = np.zeros_like(baseindexes_val, dtype="int32")
+        overrideindexes_val = np.zeros_like(baseindexes_val, dtype="int64")
         if which is None:   # which: list of words to override
             for k, v in base.D.items():     # for all symbols in base dic
                 if k in override.D:         # if also in override dic
@@ -167,12 +200,13 @@ class OverriddenWordEmb(WordEmb):
                 if k in override.D:     # TODO: if k from which is missing from base.D
                     overrideindexes_val[base.D[k]] = override.D[k]
                     overridemask_val[base.D[k]] = 1
-        overrideindexes = Val(overrideindexes_val)
-        overridemask = Val(overridemask_val)
+        self.overrideindexes = q.val(torch.from_numpy(overrideindexes_val)).v
+        self.overridemask = q.val(torch.from_numpy(overridemask_val)).v
+
+    def forward(self, x):
+        basevar = base(baseindexes)     # slicing out all base vectors as they are
         overridevar = override(overrideindexes)
         v = T.switch(overridemask.dimadd(1), overridevar, basevar)
-        super(OverriddenWordEmb, self).__init__(worddic=base.D, value=v,
-               dim=base.outdim, **kw)
 
 
 class AugmentedWordEmb(WordEmb):    # TODO: RARE TOKEN MGMT
