@@ -29,17 +29,17 @@ class TestGRU(TestCase):
     #     gru.set_init_states(h_tm1)
     #     h_t, rg, ug = gru._forward(x_t, h_tm1)
     #     # simulate reset gate
-    #     nprg = np.dot(x_t.data.numpy(), gru.reset_gate.W.data.numpy())
-    #     nprg += np.dot(h_tm1.data.numpy(), gru.reset_gate.U.data.numpy())
-    #     nprg += gru.reset_gate.b.data.numpy()
+    #     nprg = np.dot(x_t.datasets.numpy(), gru.reset_gate.W.datasets.numpy())
+    #     nprg += np.dot(h_tm1.datasets.numpy(), gru.reset_gate.U.datasets.numpy())
+    #     nprg += gru.reset_gate.b.datasets.numpy()
     #     self.assertTrue(np.allclose(rg, nprg))
     #     # simulate update gate
-    #     npug = np.dot(x_t.data.numpy(), gru.update_gate.W.data.numpy())
-    #     npug += np.dot(h_tm1.data.numpy(), gru.update_gate.U.data.numpy())
-    #     npug += gru.update_gate.b.data.numpy()
+    #     npug = np.dot(x_t.datasets.numpy(), gru.update_gate.W.datasets.numpy())
+    #     npug += np.dot(h_tm1.datasets.numpy(), gru.update_gate.U.datasets.numpy())
+    #     npug += gru.update_gate.b.datasets.numpy()
     #     self.assertTrue(np.allclose(ug, npug))
     #     # output shape
-    #     self.assertEqual((5, 10), h_t.data.numpy().shape)
+    #     self.assertEqual((5, 10), h_t.datasets.numpy().shape)
     #     print(rg)
     #
     # def test_params_collected(self):

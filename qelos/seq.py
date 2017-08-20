@@ -48,7 +48,7 @@ class Attention(nn.Module):
         self.attgen = AttentionGenerator()
         self.attcon = AttentionConsumer()
 
-    def split_data(self):       # splits data in two along dim axis, one goes to gen, other to cons
+    def split_data(self):       # splits datasets in two along dim axis, one goes to gen, other to cons
         def attgen_ds(data):        # (batsize, seqlen, dim)
             return data[:, :, :data.size(2)//2]
         def attcon_ds(data):

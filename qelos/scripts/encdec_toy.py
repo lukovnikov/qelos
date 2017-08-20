@@ -47,7 +47,7 @@ def main(
         torch.cuda.set_device(gpu)
     usecuda = cuda
     vocsize = 50
-    # create data tensor
+    # create datasets tensor
     tt.tick("loading data")
     sequences = np.random.randint(0, vocsize, (batsize * 100, 16))
     # wrap in dataset

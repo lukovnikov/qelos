@@ -39,12 +39,12 @@ def main(
     tt = ticktock("script")
     tt.msg("using q: {}".format(mode))
     # MNIST Dataset
-    train_dataset = dsets.MNIST(root='../../../data/mnist/',
+    train_dataset = dsets.MNIST(root='../../../datasets/mnist/',
                                 train=True,
                                 transform=transforms.ToTensor(),
                                 download=True)
 
-    test_dataset = dsets.MNIST(root='../../../data/mnist/',
+    test_dataset = dsets.MNIST(root='../../../datasets/mnist/',
                                train=False,
                                transform=transforms.ToTensor())
 
@@ -129,7 +129,7 @@ def main(
     #         if (i+1) % 100 == 0:
     #             btt.tock("100 batches done")
     #             print ('Epoch [%d/%d], Step [%d/%d], Loss: %.4f'
-    #                    %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.data[0]))
+    #                    %(epoch+1, num_epochs, i+1, len(train_dataset)//batch_size, loss.datasets[0]))
     #             btt.tick()
     #         #tt.tock("batch done")
     #     tt.tock("epoch {} done".format(epoch))

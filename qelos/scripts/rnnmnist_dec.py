@@ -153,12 +153,12 @@ def main(
     ):
     tt.msg("using q: {}".format(mode))
     # MNIST Dataset
-    train_dataset = dsets.MNIST(root='../../../data/mnist/',
+    train_dataset = dsets.MNIST(root='../../../datasets/mnist/',
                                 train=True,
                                 transform=transforms.ToTensor(),
                                 download=True)
 
-    test_dataset = dsets.MNIST(root='../../../data/mnist/',
+    test_dataset = dsets.MNIST(root='../../../datasets/mnist/',
                                train=False,
                                transform=transforms.ToTensor())
 

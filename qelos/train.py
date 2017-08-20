@@ -466,7 +466,7 @@ class TeafactoModelTrainer(object):
         self._validinter = validinter
         return self
 
-    def autovalidate(self, splits=5, random=True): # validates on the same data as training data
+    def autovalidate(self, splits=5, random=True): # validates on the same datasets as training datasets
         self.validate_on(self.traindata, self.traingold, splits=splits, random=random)
         self.validsetmode = True
         return self
@@ -483,7 +483,7 @@ class TeafactoModelTrainer(object):
         self.validsetmode = True
         self.validdata = data
         #if gold is None:
-        #    gold = np.ones((data[0].shape[0],), dtype="float32")
+        #    gold = np.ones((datasets[0].shape[0],), dtype="float32")
         #    self.linear_objective()
         self.validgold = gold
         self.validsplits = splits
@@ -773,7 +773,7 @@ class TeafactoModelTrainer(object):
 
 
     #region ################## TRAINING STRATEGIES ############
-    def _train_full(self, _lambda=False, _skiptrain=False): # on all data, no validation
+    def _train_full(self, _lambda=False, _skiptrain=False): # on all datasets, no validation
         df = DataFeeder(*self._concat_data(self.traindata, self.traingold)).numbats(self.numbats)
         trainf = self.buildtrainfun(self.model, df.batsize)
         if _lambda:

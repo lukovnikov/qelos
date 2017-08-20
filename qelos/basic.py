@@ -159,7 +159,7 @@ class Distance(nn.Module):          # TODO: all distances must work with 2D/2D, 
 
 class DotDistance(Distance):
     def forward(self, data, crit):        # (batsize, seqlen, dim), (batsize, dim)
-        if data.dim() == 2:               # if data is (batsize, dim),
+        if data.dim() == 2:               # if datasets is (batsize, dim),
             data = data.unsqueeze(1)      #     make (batsize, 1, dim)
         if crit.dim() == 2:               # if crit is (batsize, dim)
             crit = crit.unsqueeze(-1)     #     make crit (batsize, dim, 1)
@@ -174,10 +174,10 @@ class CosineDistance(DotDistance):
         dots = super(CosineDistance, self).forward(data, crit)
         lnorms = data.norm(2, -1)         # (batsize, [lseqlen])
         rnorms = crit.norm(2, -1)         # (batsize, [rseqlen])
-        if data.dim() == 3:               # if data is (batsize, lseqlen, dim)
+        if data.dim() == 3:               # if datasets is (batsize, lseqlen, dim)
             rnorms = rnorms.unsqueeze(1)  #     make crit norms (batsize, 1) or (batsize, 1, rseqlen)
             if crit.dim() == 3:                         # (batsize, rseqlen, dim)
-                lnorms = lnorms.unsqueeze(2)  # make data norms (batsize, lseqlen, 1)
+                lnorms = lnorms.unsqueeze(2)  # make datasets norms (batsize, lseqlen, 1)
         dots = dots.div(lnorms)
         dots = dots.div(rnorms)
         return dots
