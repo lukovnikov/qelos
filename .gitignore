@@ -1,4 +1,5 @@
 /datasets/*
+!/datasets/datasets_be_here.md
 # Byte-compiled / optimized / DLL files
 .idea/
 __pycache__/
