@@ -266,10 +266,17 @@ class TestOverriddenWordLinout(TestCase):
         self.assertEqual(pred.size(), (3, 51))
         basepred = self.base(x)
         overpred = self.over(x)
+
+        l = pred.sum()
+        l.backward()
+        self.assertTrue(self.base.lin.weight.grad.norm().data[0] > 0)
+        self.assertTrue(self.over.lin.weight.grad.norm().data[0] > 1)
+
         basepred = basepred.data.numpy()
         overpred = overpred.data.numpy()
         pred = pred.data.numpy()
         self.assertTrue(np.allclose(pred[:, 10], overpred[:, 2]))
         self.assertTrue(np.allclose(pred[:, 5], overpred[:, 3]))
         self.assertTrue(np.allclose(pred[:, 6], basepred[:, 6]))
+
 

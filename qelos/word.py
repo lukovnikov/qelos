@@ -18,6 +18,9 @@ class WordVecBase(object):
     raretoken = "<RARE>"
 
     def __init__(self, worddic, **kw):
+        """
+        Takes a worddic and provides word id lookup and vector retrieval interface
+        """
         super(WordVecBase, self).__init__(**kw)
         self.D = OrderedDict() if worddic is None else worddic
 
@@ -63,6 +66,9 @@ class WordVecBase(object):
 
 
 class WordEmbBase(WordVecBase, nn.Module):
+    """
+    All WordEmbs must be descendant.
+    """
     def getvector(self, word):
         try:
             if isstring(word):
@@ -74,19 +80,41 @@ class WordEmbBase(WordVecBase, nn.Module):
             return None
 
     def adapt(self, wdic):  # adapts to given word-idx dictionary
+        """
+        Adapts current word emb to a new dictionary
+        """
         return AdaptedWordEmb(self, wdic)
 
     def override(self, wordemb,
-                 which=None):  # uses override vectors instead of base vectors if word in override dictionary
-        return OverriddenWordEmb(self, wordemb, which=which)
+                 which=None, whichnot=None):  # uses override vectors instead of base vectors if word in override dictionary
+        """
+        Overrides this wordemb's token vectors with the vectors from given wordemb.
+        Optionally, restriction of which tokens to override can be specified by providing
+            a list of tokens in which= argument.
+        Optionally, exclusions can be made using whichnot
+        """
+        return OverriddenWordEmb(self, wordemb, which=which, whichnot=whichnot)
 
 
 class WordEmb(WordEmbBase):
     """ is a VectorEmbed with a dictionary to map words to ids """
     def __init__(self, dim=50, value=None, worddic=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 sparse=False, freeze=False,
+                 sparse=False, fixed=False,
                  **kw):
+        """
+        Normal word embedder. Wraps nn.Embedding.
+
+        :param dim: embedding vector dimension
+        :param value: (optional) value to set the weight of nn.Embedding to
+        :param worddic: worddic, must be provided
+        :param max_norm: see nn.Embedding
+        :param norm_type: see nn.Embedding
+        :param scale_grad_by_freq: see nn.Embedding
+        :param sparse: see nn.Embedding
+        :param fixed: fixed embeddings
+        :param kw:
+        """
         assert(worddic is not None)     # always needs a dictionary
         super(WordEmb, self).__init__(worddic, **kw)
         wdvals = worddic.values()
@@ -104,7 +132,7 @@ class WordEmb(WordEmbBase):
                                       sparse=sparse)
         if value is not None:
             self.embedding.weight = nn.Parameter(torch.from_numpy(value))
-        if freeze is True:
+        if fixed is True:
             self.embedding.weight.requires_grad = False
 
     def forward(self, x):
@@ -146,9 +174,11 @@ class AdaptedWordEmb(WordEmbBase):  # adapt to given dictionary, map extra words
 class ComputedWordEmb(WordEmbBase):
     def __init__(self, data=None, computer=None, worddic=None):
         """
-        :param data:
-        :param computer:
-        :param worddic:
+        Takes some numpy tensor, a module and a worddic and computes token vectors on the fly.
+
+        :param data: numpy tensor, wrapped with tensor.from_numpy(), so must watch dtype
+        :param computer: nn.Module that takes (some of) the data and computes a vector for each data row
+        :param worddic: dictionary of tokens to ids
         """
         super(ComputedWordEmb, self).__init__(worddic=worddic)
         self.data = nn.Parameter(torch.from_numpy(data), requires_grad=False)
@@ -178,17 +208,18 @@ class ComputedWordEmb(WordEmbBase):
 
 
 class OverriddenWordVecBase(WordVecBase, nn.Module):
-    def __init__(self, base, override, which=None, **kw):
+    def __init__(self, base, override, which=None, whichnot=None, **kw):
         super(OverriddenWordVecBase, self).__init__(base.D)
         self.base = base
         self.over = override.adapt(base.D)
-
+        assert(not (which is not None and whichnot is not None))
         numout = max(base.D.values()) + 1
+        whichnot = set()
 
         overridemask_val = np.zeros((numout,), dtype="float32")
         if which is None:   # which: list of words to override
             for k, v in base.D.items():     # for all symbols in base dic
-                if k in override.D:         # if also in override dic
+                if k in override.D and k not in whichnot:         # if also in override dic
                     overridemask_val[v] = 1
         else:
             for k in which:
@@ -214,8 +245,8 @@ class OverriddenWordEmb(OverriddenWordVecBase, WordEmbBase):
 
 class PretrainedWordVec(object):
     defaultpath = "../data/glove/glove.%dd"
-    maskid = 0
-    rareid = 1
+    masktoken = "<MASK>"
+    raretoken = "<RARE>"
 
     @classmethod
     def _get_path(cls, dim, path=None):
@@ -225,15 +256,16 @@ class PretrainedWordVec(object):
         path = os.path.join(os.path.dirname(__file__), relpath)
         return path
 
-    def loadvalue(self, path, dim, indim=None, maskid=None, rareid=None):
+    def loadvalue(self, path, dim, indim=None, maskid=True, rareid=True):
+        # TODO: nonstandard mask and rareid?
         tt = ticktock(self.__class__.__name__)
         tt.tick()
         W = np.load(open(path+".npy"))
         if indim is not None:
             W = W[:indim, :]
-        if rareid is not None:
+        if rareid:
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
-        if maskid is not None:
+        if maskid:
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
         tt.tock("vectors loaded")
         tt.tick()
@@ -242,9 +274,9 @@ class PretrainedWordVec(object):
         D = OrderedDict()
         i = 0
         if maskid is not None:
-            D["<MASK>"] = i; i+=1
+            D[self.masktoken] = i; i+=1
         if rareid is not None:
-            D["<RARE>"] = i; i+=1
+            D[self.raretoken] = i; i+=1
         for j, word in enumerate(words):
             if indim is not None and j >= indim:
                 break
@@ -256,15 +288,27 @@ class PretrainedWordVec(object):
 
 class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
-    def __init__(self, dim, vocabsize=None, path=None, freeze=True, maskid=None,
-                 **kw):
+    def __init__(self, dim, vocabsize=None, path=None, fixed=True, incl_maskid=True, incl_rareid=True, **kw):
+        """
+        WordEmb that sets the weight of nn.Embedder to loaded pretrained vectors.
+        Adds a maskid and rareid as specified on the class.
+
+        :param dim: token vector dimensions
+        :param vocabsize: (optional) number of tokens to load
+        :param path: (optional) where to load from.
+                     Must be of format .../xxx%dxxx.
+                     Files must be separated in .npy matrix and .words list.
+                     Defaults to glove in qelos/data/.
+        :param fixed: no learning
+        :param incl_maskid: includes a <MASK> token in dictionary and assigns it id 0
+        :param incl_rareid: includes a <RARE> token in dictionary and assigns it id 1 if incl_maskid was True, and id 0 otherwise
+        """
         assert("worddic" not in kw)
         path = self._get_path(dim, path=path)
-        maskid = self.maskid if maskid is None else maskid
-        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=maskid, rareid=self.rareid)
+        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=incl_maskid, rareid=incl_rareid)
         self.allwords = wdic.keys()
         super(PretrainedWordEmb, self).__init__(dim=dim, value=value,
-                                                worddic=wdic, freeze=freeze, **kw)
+                                                worddic=wdic, fixed=fixed, **kw)
 
 
 class WordLinoutBase(WordVecBase, nn.Module):
@@ -290,7 +334,17 @@ class WordLinoutBase(WordVecBase, nn.Module):
 
 
 class WordLinout(WordLinoutBase):
-    def __init__(self, indim, worddic=None, weight=None, bias=True, freeze=False):
+    def __init__(self, indim, worddic=None, weight=None, set_bias=None, bias=True, fixed=False):
+        """
+        Linear block to be used at the output for computing scores over a vocabulary of tokens. Usually followed by Softmax.
+
+        :param indim: incoming dimension
+        :param worddic: dictionary of words to ids
+        :param weight: (optional) custom weight matrix. Must be numpy array. Watch the dtype
+        :param set_bias: (optional) custom bias. Must be numpy array. Watch the dtype.
+        :param bias: (optional) use bias
+        :param fixed: (optional) don't train this
+        """
         super(WordLinout, self).__init__(worddic)
         wdvals = worddic.values()
         assert(min(wdvals) >= 0)     # word ids must be positive
@@ -307,7 +361,9 @@ class WordLinout(WordLinoutBase):
 
         if weight is not None:
             self.lin.weight = nn.Parameter(torch.from_numpy(weight))
-        if freeze is True:
+        if set_bias is not None:
+            self.lin.bias = nn.Parameter(torch.from_numpy(bias))
+        if fixed is True:
             self.lin.weight.requires_grad = False
             if bias is True:
                 self.lin.bias.requires_grad = False
@@ -323,7 +379,15 @@ class WordLinout(WordLinoutBase):
 
 
 class ComputedWordLinout(WordLinoutBase):
-    def __init__(self, data=None, computer=None, worddic=None, bias=True):
+    def __init__(self, data=None, computer=None, worddic=None, bias=False):
+        """
+        WordLinout that computes the weight matrix of the Linear transformation dynamically
+        based on provided data and computer.
+        :param data:    numpy array, 2D or more, one symbol data per row. Automatically wrapped so watch the dtype
+        :param computer: module that builds vectors for rows of data
+        :param worddic: token dictionary from token to id
+        :param bias: (optional) use bias (not computed)
+        """
         super(ComputedWordLinout, self).__init__(worddic)
         self.data = q.val(torch.from_numpy(data)).v
         self.computer = computer
@@ -371,17 +435,31 @@ class ComputedWordLinout(WordLinoutBase):
 
 
 class PretrainedWordLinout(WordLinout, PretrainedWordVec):
-    def __init__(self, dim, vocabsize=None, path=None, freeze=True,
-                 maskid=None, bias=False,
+    def __init__(self, dim, vocabsize=None, path=None, fixed=True,
+                 incl_maskid=True, incl_rareid=True, bias=False,
                  **kw):
+        """
+        WordLinout that sets the weight of the contained nn.Linear to loaded pretrained vectors.
+        Adds a maskid and rareid as specified on the class.
+
+        :param dim: token vector dimensions
+        :param vocabsize: (optional) number of tokens to load
+        :param path: (optional) where to load from.
+                     Must be of format .../xxx%dxxx.
+                     Files must be separated in .npy matrix and .words list.
+                     Defaults to glove in qelos/data/.
+        :param fixed: (optional) no learning. Disables bias automatically.
+        :param incl_maskid: (optional) includes a <MASK> token in dictionary and assigns it id 0
+        :param incl_rareid: (optional) includes a <RARE> token in dictionary and assigns it id 1 if incl_maskid was True, and id 0 otherwise
+        :param bias: (optional) use bias. Default initial bias value is random (bias disabled when fixed=True).
+        """
         assert ("worddic" not in kw)
         path = self._get_path(dim, path=path)
-        maskid = self.maskid if maskid is None else maskid
-        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=maskid, rareid=self.rareid)
+        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=incl_maskid, rareid=incl_rareid)
         self.allwords = wdic.keys()
-        outdim = max(wdic.values()) + 1
+        bias = bias and not fixed
         super(PretrainedWordLinout, self).__init__(dim, weight=value,
-                                                   worddic=wdic, freeze=freeze, bias=bias,
+                                                   worddic=wdic, fixed=fixed, bias=bias,
                                                    **kw)
 
 
