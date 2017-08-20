@@ -21,7 +21,7 @@ class SeqNLLLoss(nn.NLLLoss):
         mask = None
         if self.ignore_index >= 0:
             mask = y.ne(self.ignore_index)      # ByteTensor
-            mask = qelos.core.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
+            mask = qelos.train.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
         # mask = mask.type(torch.FloatTensor)
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
         if self.weight is not None:
@@ -37,7 +37,7 @@ class SeqNLLLoss(nn.NLLLoss):
             totals = logprobs.size(1)
         logprobsum = logprobs.sum(1)
         if self.time_average:
-            logprobsum = logprobsum / (totals + self.EPS)
+            logprobsum = logprobsum / totals.clamp(min=self.EPS)
         t = logprobsum.size(0)
         loss = logprobsum.sum()
         if self.size_average:

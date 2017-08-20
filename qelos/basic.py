@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from qelos.util import name2fn, issequence
+from qelos.util import issequence
+from qelos import name2fn
 from qelos.containers import ModuleList
 import numpy as np
 
@@ -178,8 +179,7 @@ class CosineDistance(DotDistance):
             rnorms = rnorms.unsqueeze(1)  #     make crit norms (batsize, 1) or (batsize, 1, rseqlen)
             if crit.dim() == 3:                         # (batsize, rseqlen, dim)
                 lnorms = lnorms.unsqueeze(2)  # make datasets norms (batsize, lseqlen, 1)
-        dots = dots.div(lnorms)
-        dots = dots.div(rnorms)
+        dots = dots.div(torch.mul(lnorms, rnorms).clamp(1e-6))
         return dots
 
 # TODO: Euclidean and LNorm distances
@@ -215,7 +215,6 @@ class ForwardDistance(Distance):
             else:                       # (batsize, rseqlen, dim)
                 datalin = datalin.unsqueeze(2)      # --> (batsize, lseqlen, 1, dim)
                 critlin = critlin.unsqueeze(1)      # --> (batsize, 1, rseqlen, dim)
-                    # TODO: memsave --> loop over 2D slices of 3D crit, do we need memsave?
         linsum = datalin + critlin      # (batsize, dim) or (batsize, lseqlen, dim) or (batsize, lseqlen, rseqlen, dim)
         linsum = self.activation(linsum)
         dists = torch.matmul(linsum, self.agg)  # TODO: check if this works for 3D x 1D and 4D x 1D
@@ -244,7 +243,6 @@ class BilinearDistance(Distance):
             else:       # crit.dim() == 3
                 l = l.unsqueeze(1).expand(l.size(0), r.size(1), data.size(-1)).contiguous().view(-1, data.size(-1))     # (batsize * lseqlen * rseqlen, dim)
                 r = r.unsqueeze(1).repeat(1, data.size(1), 1, 1).view(-1, crit.size(-1))                                # (batsize * rseqlen * lseqlen, dim)
-            # TODO: 3D crit and memsave
         bilinsum = self.block(l, r)
         dists = bilinsum.squeeze()
         if data.dim() == 3 and crit.dim() == 3:
@@ -374,3 +372,13 @@ class CReLU(nn.Module):
         right = self.neg_relu(-x)
         ret = torch.cat([left, right], -1)
         return ret
+
+
+class Identity(nn.Module):
+    def __init__(self, *a, **kw):
+        super(Identity, self).__init__(*a, **kw)
+
+    def forward(self, *x):
+        if len(x) == 1:
+            x = x[0]
+        return x

@@ -29,6 +29,7 @@ class WordVecBase(object):
         return self.D[word] if word in self.D else self.D[self.raretoken] if self.raretoken in self.D else -1
 
     def __mul__(self, other):
+        """ given word (string), returns index (integer) based on dictionary """
         return self.getindex(other)
 
     def __contains__(self, word):
@@ -38,6 +39,7 @@ class WordVecBase(object):
         raise NotImplemented()
 
     def __getitem__(self, word):
+        """ given word (string or index), returns vector """
         return self.getvector(word)
 
     @property
@@ -53,6 +55,8 @@ class WordVecBase(object):
         return distance(self.getvector(A), self.getvector(B))
 
     def __mod__(self, other):
+        """ Given word (string or integer), returns vector.
+            Does similarity computation if argument is a sequences. Compares first element of sequence with each of the following elements. """
         if isinstance(other, (tuple, list)):  # distance
             assert len(other) > 1
             if len(other) == 2:

@@ -1,7 +1,8 @@
 import torch
 from torch.autograd import Variable
 from torch import nn
-from qelos.util import name2fn, issequence, isnumber
+from qelos.util import issequence, isnumber
+from qelos import name2fn
 from qelos.basic import Stack
 import qelos as q
 
