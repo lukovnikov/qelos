@@ -1,5 +1,5 @@
 from unittest import TestCase
-from qelos.seq import Attention
+import qelos as q
 import torch
 from torch import nn
 from torch.autograd import Variable
@@ -11,7 +11,7 @@ class TestAttention(TestCase):
         batsize, seqlen, datadim, critdim, attdim = 5, 3, 4, 3, 7
         crit = Variable(torch.FloatTensor(np.random.random((batsize, critdim))))
         data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, datadim))))
-        att = Attention().forward_gen(datadim, critdim, attdim)
+        att = q.Attention().forward_gen(datadim, critdim, attdim)
         m = att.attgen
         pred = m(data, crit)
         pred = pred.data.numpy()
@@ -22,7 +22,7 @@ class TestAttention(TestCase):
         batsize, seqlen, datadim, critdim, attdim = 5, 3, 4, 3, 7
         crit = torch.FloatTensor(np.random.random((batsize, critdim)))
         data = torch.FloatTensor(np.random.random((batsize, seqlen, datadim)))
-        att = Attention().forward_gen(datadim, critdim, attdim).split_data()
+        att = q.Attention().forward_gen(datadim, critdim, attdim).split_data()
         attgendata = att.attgen.data_selector(data).numpy()
         attcondata = att.attcon.data_selector(data).numpy()
         recdata = np.concatenate([attgendata, attcondata], axis=2)
@@ -37,7 +37,7 @@ class TestAttention(TestCase):
         for i in range(batsize):
             mask[i, maskstarts[i]:] = 0
         mask = Variable(torch.FloatTensor(mask*1.))
-        att = Attention().forward_gen(datadim, critdim, attdim)
+        att = q.Attention().forward_gen(datadim, critdim, attdim)
         m = att.attgen
         pred = m(data, crit, mask=mask)
         pred = pred.data.numpy()
@@ -55,7 +55,7 @@ class TestAttention(TestCase):
         for i in range(batsize):
             mask[i, maskstarts[i]:] = 0
         mask = Variable(torch.FloatTensor(mask*1.))
-        att = Attention().forward_gen(datadim, critdim, attdim)
+        att = q.Attention().forward_gen(datadim, critdim, attdim)
         m = att.attgen
         pred = m(data, crit, mask=mask)
         pred = pred.data.numpy()

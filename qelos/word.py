@@ -229,7 +229,7 @@ class OverriddenWordVecBase(WordVecBase, nn.Module):
             for k in which:
                 if k in override.D:     # TODO: if k from which is missing from base.D
                     overridemask_val[base.D[k]] = 1
-        self.overridemask = q.val(torch.from_numpy(overridemask_val)).v
+        self.overridemask = q.val(overridemask_val).v
 
 
 class OverriddenWordEmb(OverriddenWordVecBase, WordEmbBase):

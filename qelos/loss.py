@@ -1,4 +1,4 @@
-import torch, qelos
+import torch, qelos as q
 from torch import nn
 import numpy as np
 
@@ -21,7 +21,7 @@ class SeqNLLLoss(nn.NLLLoss):
         mask = None
         if self.ignore_index >= 0:
             mask = y.ne(self.ignore_index)      # ByteTensor
-            mask = qelos.train.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
+            mask = q.var(mask.data.type(torch.FloatTensor)).cuda(crit=mask).v
         # mask = mask.type(torch.FloatTensor)
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
         if self.weight is not None:

@@ -1,15 +1,17 @@
+import torch
 from torch import nn
 from torch.autograd import Variable
-
-import qelos
-from qelos.basic import Identity
+import numpy as np
+import qelos as q
 
 
 class var(object):
     all_cuda = False
 
-    def __init__(self, torchtensor):
-        self.v = Variable(torchtensor)
+    def __init__(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x)
+        self.v = Variable(x)
 
     def cuda(self, crit=None):
         if crit is False:
@@ -26,8 +28,10 @@ class var(object):
 
 
 class val(object):
-    def __init__(self, tensor):
-        self.v = nn.Parameter(tensor, requires_grad=False)
+    def __init__(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x)
+        self.v = nn.Parameter(x, requires_grad=False)
 
 
 def name2fn(x):
@@ -37,8 +41,8 @@ def name2fn(x):
                "linear": nn.Linear,
                "elu": nn.ELU,
                "selu": nn.SELU,
-               "crelu": qelos.basic.CReLU,
-               None: Identity}
+               "crelu": q.CReLU,
+               None: q.Identity}
     if x not in mapping:
         raise Exception("unknown activation function name")
     return mapping[x]

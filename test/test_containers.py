@@ -1,12 +1,12 @@
 from unittest import TestCase
 from torch import nn
-from qelos.containers import ModuleList
+import qelos as q
 
 
 class TestModuleList(TestCase):
     def test_ListModule(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
-        module_list = ModuleList(modules)
+        module_list = q.ModuleList(modules)
 
         def check():
             self.assertEqual(len(module_list), len(modules))

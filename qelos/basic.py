@@ -1,9 +1,10 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from qelos.util import issequence
-from qelos import name2fn
-from qelos.containers import ModuleList
+import qelos as q
+# from qelos.util import issequence
+# from qelos import name2fn
+# from qelos.containers import ModuleList
 import numpy as np
 
 
@@ -14,11 +15,11 @@ class Lambda(nn.Module):
         self.fn = fn
         # optionally registers passed modules and params
         if register_modules is not None:
-            if not issequence(register_modules):
+            if not q.issequence(register_modules):
                 register_modules = [register_modules]
-            self.extra_modules = ModuleList(register_modules)
+            self.extra_modules = q.ModuleList(register_modules)
         if register_params is not None:
-            if not issequence(register_params):
+            if not q.issequence(register_params):
                 register_params = [register_params]
             self.extra_params = nn.ParameterList(register_params)
 
@@ -29,7 +30,7 @@ class Lambda(nn.Module):
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
-        self.layers = ModuleList(list(layers))
+        self.layers = q.ModuleList(list(layers))
 
     def add(self, *layers):
         self.layers.extend(list(layers))
@@ -37,7 +38,7 @@ class Stack(nn.Module):
     def forward(self, *x, **kw):
         for layer in self.layers:
             x = layer(*x, **kw)
-            if not issequence(x):
+            if not q.issequence(x):
                 x = (x,)
         if len(x) == 1:
             x = x[0]
@@ -117,7 +118,7 @@ class Softmax(nn.Module):
             o_exp = o_exp.view(s)
             if mask is not None:
                 mask = mask.view(maskshape)
-                retmask = mask
+        retmask = mask
         if seqmask is not None:
             retmask = seqmask
         if retmask is not None:
@@ -142,7 +143,7 @@ class Forward(nn.Module):
     def __init__(self, indim, outdim, activation="tanh", use_bias=True):
         super(Forward, self).__init__()
         self.lin = nn.Linear(indim, outdim, bias=use_bias)
-        self.activation = name2fn(activation)()
+        self.activation = q.name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -191,7 +192,7 @@ class ForwardDistance(Distance):
         super(ForwardDistance, self).__init__()
         self.lblock = nn.Linear(ldim, aggdim, bias=use_bias)
         self.rblock = nn.Linear(rdim, aggdim, bias=use_bias)
-        self.activation = name2fn(activation)()
+        self.activation = q.name2fn(activation)()
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
         self.reset_parameters()
 
@@ -257,7 +258,7 @@ class TrilinearDistance(Distance):
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=False):
         super(TrilinearDistance, self).__init__()
         self.block = nn.Bilinear(ldim, rdim, aggdim, bias=use_bias)
-        self.activation = name2fn(activation)()
+        self.activation = q.name2fn(activation)()
         self.agg = nn.Parameter(torch.FloatTensor(aggdim))
         self.reset_parameters()
 

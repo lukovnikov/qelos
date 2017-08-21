@@ -33,8 +33,8 @@ class EncDec(nn.Module):
 
 
 def main(
-        lr=0.1,
-        epochs=100,
+        lr=0.5,
+        epochs=7,
         batsize=32,
         embdim=50,
         encdim=90,
@@ -87,7 +87,7 @@ def main(
                                          core=q.RecStack(
                                              q.GRUCell(embdim+encdim, encdim,
                                                        use_cudnn_cell=False,
-                                                       rec_batch_norm="main",
+                                                       rec_batch_norm=None,
                                                        activation="crelu")
                                          ),
                                          smo=q.Stack(
