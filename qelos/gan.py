@@ -5,7 +5,7 @@ import qelos as q
 class GANTrainer(object):
     def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG
                         modeD="critic",  # disc or critic
-                        one_sided=True,
+                        one_sided=False,
                         penalty_weight=None,
                         perturb_both=False,
                         perturb_symmetric=False,
@@ -112,7 +112,8 @@ class GANTrainer(object):
                     interp_alpha.uniform_(0, 1)
                     interp_points = interp_alpha * real.data + (1 - interp_alpha) * fake.data
                     grad_points = Variable(interp_points.clone())
-                    errD_interp_vec = netD(Variable(interp_points, requires_grad=True))
+                    interp_points = Variable(interp_points, requires_grad=True)
+                    errD_interp_vec = netD(interp_points)
                     errD_gradient, = torch.autograd.grad(errD_interp_vec.sum(),
                                                          interp_points,
                                                          create_graph=True)
@@ -153,7 +154,7 @@ class GANTrainer(object):
             vnoise.data.normal_(0, 1)
             fake = netG(vnoise)
             errG = netD(fake)
-            errG = errG.mean()
+            errG = -errG.mean()
             errG.backward()
             self.optimizerG.step()
 

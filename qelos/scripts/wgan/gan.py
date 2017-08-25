@@ -130,7 +130,7 @@ class Plotter(object):
 
     def log(self, _iter=None, niter=None, errD=None, errG=None, scoreD_real=None, scoreD_fake=None, lip_loss=None, **kw):
         if (_iter+1) % 2 == 0:
-            self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4} Score Real: {:.4f} Score Fake: {:.4f} Loss Lip: {:.4f}"
+            self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f} Loss Lip: {:.4f}"
                          .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake, lip_loss))
 
 
@@ -143,8 +143,8 @@ def main(
         ):
     netD = ToyGAN_D()
     netG = ToyGAN_G()
-    optimizerD = optim.Adam(netD.parameters(), lr=lr)
-    optimizerG = optim.Adam(netG.parameters(), lr=lr)
+    optimizerD = optim.RMSprop(netD.parameters(), lr=lr)
+    optimizerG = optim.RMSprop(netG.parameters(), lr=lr)
 
     plotter = Plotter(mode)
     logger = Logger(plotter)
