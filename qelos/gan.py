@@ -111,7 +111,7 @@ class GANTrainer(object):
                     interp_alpha = real.data.new(num_examples, 1)
                     interp_alpha.uniform_(0, 1)
                     interp_points = interp_alpha * real.data + (1 - interp_alpha) * fake.data
-                    grad_points = Variable(interp_points.clone())
+                    grad_points = interp_points.clone()
                     interp_points = Variable(interp_points, requires_grad=True)
                     errD_interp_vec = netD(interp_points)
                     errD_gradient, = torch.autograd.grad(errD_interp_vec.sum(),
