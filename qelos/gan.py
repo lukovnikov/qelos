@@ -99,15 +99,15 @@ class GANTrainer(object):
                 vnoise.data.normal_(0, 1)
                 fake = netG(vnoise)
                 scoreD_real_vec = netD(real)        # (batsize,)
-                scoreD_real = scoreD_real_vec.mean()
+                #scoreD_real = scoreD_real_vec.mean()
                 # scoreD_real.backward(one, retain_graph=(lc> 0))
                 scoreD_fake_vec = netD(fake)
-                scoreD_fake = scoreD_fake_vec.mean()
+                #scoreD_fake = scoreD_fake_vec.mean()
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
                 if self.mode == "WGAN":
-                    errD = scoreD_fake - scoreD_real
+                    errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                 elif self.mode == "WGAN-GP":
-                    errD = scoreD_fake - scoreD_real
+                    errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     interp_alpha = real.data.new(num_examples, 1)
                     interp_alpha.uniform_(0, 1)
                     interp_points = interp_alpha * real.data + (1 - interp_alpha) * fake.data
@@ -122,9 +122,9 @@ class GANTrainer(object):
                     errD = errD + lip_loss
                 elif self.mode == "DRAGAN" or self.mode == "DRAGAN-G" or self.mode == "DRAGAN-LG":
                     if self.modeD == "disc":
-                        errD = - torch.log(scoreD_real) - torch.log(1 - scoreD_fake)
+                        errD = - torch.log(scoreD_real_vec).mean() - torch.log(1 - scoreD_fake_vec).mean()
                     elif self.modeD == "critic":
-                        errD = scoreD_fake - scoreD_real
+                        errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
 
                     real_perturbed = self.perturb(real)
                     grad_points = real_perturbed.data
@@ -154,7 +154,10 @@ class GANTrainer(object):
             vnoise.data.normal_(0, 1)
             fake = netG(vnoise)
             errG = netD(fake)
-            errG = -errG.mean()
+            if self.modeD == "critic":
+                errG = -errG.mean()
+            elif self.modeD == "disc":
+                errG = torch.log(1.0 - errG).mean()
             errG.backward()
             self.optimizerG.step()
 
@@ -162,8 +165,8 @@ class GANTrainer(object):
                 self.logger.log(_iter=_iter, niter=niter,
                                 real=real.data, fake=fake.data, grad_points=grad_points,
                                 errD=errD.data[0], errG=errG.data[0],
-                                scoreD_real=scoreD_real.data[0],
-                                scoreD_fake=scoreD_fake.data[0],
+                                scoreD_real=scoreD_real_vec.mean().data[0],
+                                scoreD_fake=scoreD_fake_vec.mean().data[0],
                                 lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
                                 when="after_G")
 
