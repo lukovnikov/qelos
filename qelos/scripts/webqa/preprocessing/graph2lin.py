@@ -3,7 +3,7 @@ import qelos as q
 import re
 
 
-def run(prefix="../../../../datasets/webqsp/webqsp.", files=("train", "test")):
+def run(prefix="../../../../datasets/webqsp/webqsp.", files=("test", "train", "core.train", "core.test")):
     for file in files:
         p = prefix+file+".graph"
         relins = load_graph_dataset(p)
@@ -49,9 +49,12 @@ def relinearize(graph):
     constraintpoints = filter(lambda x: re.match("var\d", x) or x == "OUT", corechain)
     constraints = {}
     ret = " ".join(corechain)
+    if "ARGMAX" in graph:
+        pass
     for constraintpoint in constraintpoints:
-        constraint, othertriples = _get_constraint(othertriples, constraintpoint)
-        constraints[constraintpoint] = " ".join(["<BRANCH> {} <JOIN>".format(x) for x in constraint])
+        othertriples = sorted(othertriples, key=lambda x: int("ARGMAX" in x or "ARGMIN" in x))
+        varconstraints, othertriples = _get_constraints_for_var(othertriples, constraintpoint)
+        constraints[constraintpoint] = " ".join(["<BRANCH> {} <JOIN>".format(x) for x in varconstraints])
     for constraintpoint in constraintpoints:
         ret = ret.replace(constraintpoint, constraints[constraintpoint])
     ret += " <RETURN>"
@@ -62,7 +65,7 @@ def relinearize(graph):
     return ret
 
 
-def _get_constraint(triples, root):
+def _get_constraints_for_var(triples, root):
     if not (re.match("var\d", root) or root == "OUT"):
         return [root], triples
 
@@ -75,7 +78,7 @@ def _get_constraint(triples, root):
             othertriples.append((s, p, o))
     branches = []
     for s, p, o in roottriples:
-        branch, othertriples = _get_constraint(othertriples, o)
+        branch, othertriples = _get_constraints_for_var(othertriples, o)
         if len(branch) == 1:
             app = "{} {}".format(p, branch[0])
             branches.append(app)

@@ -1,6 +1,6 @@
 from __future__ import print_function
 import qelos as q
-import re, time
+import re, time, pickle
 from SPARQLWrapper import SPARQLWrapper, JSON
 from SPARQLWrapper.SPARQLExceptions import EndPointNotFound, EndPointInternalError
 
@@ -114,10 +114,10 @@ class Querier(object):
             revrels = {"reverse:{}".format(revrel) for revrel in revrels}
         if only_reverse:
             query = "SELECT DISTINCT(?p) WHERE {{ ?o ?p ?s VALUES ?s {{ {} }} }}" \
-                .format(" ".join(["<http://rdf.freebase.com/ns/{}>".format(srce) for srce in mid]))
+                .format(" ".join([fbfy(srce) for srce in mid]))
         else:
             query = "SELECT DISTINCT(?p) WHERE {{ ?s ?p ?o VALUES ?s {{ {} }} }}" \
-                .format(" ".join(["<http://rdf.freebase.com/ns/{}>".format(srce) for srce in mid]))
+                .format(" ".join([fbfy(srce) for srce in mid]))
         # print q
         ret = set()
         res = self._exec_query(query)
@@ -134,16 +134,29 @@ class Querier(object):
                     toadd = True
                     break
             if toadd:
-                rete = unfbfy(rete)
+                rete = ":"+unfbfy(rete)
                 ret.add(rete)
         ret.update(revrels)
         return ret
 
+    def _arg_opt_at_triples(self, expr_so_far, mode, basevar, critvar, crittype):
+        mode = "DESC" if mode == "<ARGMAX>" else "ASC"
+        subquery = """{{
+                    SELECT {} WHERE
+                    {{ {} }}
+                    ORDER BY {}({}({})) LIMIT 1
+                   }}\n""".format(fbfy(basevar), expr_so_far, mode, crittype, fbfy(critvar))
+        return subquery
+
     def triples2expr(self, triples):
         """ freebaseify everything and join """
         expr = ""
-        for s, p, o in triples:
-            expr += "{} {} {}.\n".format(fbfy(s), fbfy(p), fbfy(o))
+        for triple in triples:
+            if category(triple[0]) == ARGOPT:
+                expr = self._arg_opt_at_triples(expr, *triple)
+            else:
+                s, p, o = triple
+                expr += "{} {} {}.\n".format(fbfy(s), fbfy(p), fbfy(o))
         return expr
 
     def values2sparql(self, value_dict):
@@ -184,24 +197,21 @@ class Querier(object):
             return list(ret)[0]
 
     def get_relations_of_var(self, spec, var, only_reverse=False, incl_reverse=False):
-        triples, values, const = spec
-        sparqlvalues = self.values2sparql(values)
-        expr = self.triples2expr(triples)
-        orderby = self.const2orderby(const)
+        entityquery = self.get_entity_query(spec, var, noargopt=True)
+        # triples, values, const = spec
+        # sparqlvalues = self.values2sparql(values)
+        # expr = self.triples2expr(triples)
+        # orderby = self.const2orderby(const)
         revrels = set()
         if incl_reverse:
-            revrels = self.get_relations_of_var(expr, var, only_reverse=True, incl_reverse=False)
+            revrels = self.get_relations_of_var(spec, var, only_reverse=True, incl_reverse=False)
             revrels = {"reverse:{}".format(revrel) for revrel in revrels}
         if only_reverse:
-            query = "SELECT DISTINCT(?p) WHERE {{ {} ?o ?p {}. {}}} {}" \
-                .format(expr, fbfy(var),
-                        sparqlvalues,
-                        orderby)
+            query = "SELECT DISTINCT(?p) WHERE {{ {{ {} }} ?o ?p {}. }}" \
+                .format(entityquery, fbfy(var))
         else:
-            query = "SELECT DISTINCT(?p) WHERE {{ {} {} ?p ?o. {}}} {}" \
-                .format(expr, fbfy(var),
-                        sparqlvalues,
-                        orderby)
+            query = "SELECT DISTINCT(?p) WHERE {{ {{ {} }} {} ?p ?o. }}" \
+                .format(entityquery, fbfy(var))
         # print q
         ret = set()
         res = self._exec_query(query)
@@ -218,14 +228,14 @@ class Querier(object):
                     toadd = True
                     break
             if toadd:
-                rete = unfbfy(rete)
+                rete = ":"+unfbfy(rete)
                 if rete is not None:
                     ret.add(rete)
         ret.update(revrels)
         return ret
 
     def get_entities_of_var(self, spec, var):
-        query = self.get_entity_query(spec, var)
+        query = self.get_entity_query(spec, var, noargopt=True)
         # print q
         ret = set()
         res = self._exec_query(query)
@@ -239,11 +249,12 @@ class Querier(object):
                     ret.add(rete)
         return ret
 
-    def get_entity_query(self, spec, var):
+    def get_entity_query(self, spec, var, noargopt=False):
         triples, values, const = spec
         expr = self.triples2expr(triples)
         sparqlvalues = self.values2sparql(values)
         orderby = self.const2orderby(const)
+        orderby = "" if noargopt else orderby
         query = "SELECT DISTINCT({}) WHERE {{ {} {}}} {}" \
             .format(fbfy(var), expr,
                     sparqlvalues,
@@ -276,7 +287,7 @@ class Traverser(object):
     """
 
     def __init__(self, address="http://drogon:9890/sparql", repl_dic=None, **kw):
-        address = "http://localhost:9890/sparql"        # TODO remote testing
+        #address = "http://localhost:9890/sparql"        # TODO remote testing
         super(Traverser, self).__init__(**kw)
         self.que = Querier(address=address)
 
@@ -345,6 +356,7 @@ class Traverser(object):
                 if self.mode == TOPDOWN:
                     entities = self.que.get_entities_of_var(self.current_value_query, self.varstack[-1])
                     vnt |= set(entities)
+                    vnt |= {"<E0>"}
             elif category(token) == BRANCH:
                 self.branchdepth += 1
                 self.mode = TOPDOWN
@@ -359,6 +371,7 @@ class Traverser(object):
                 del self.varstack[-1]
                 if self.prev_type == ARGOPT:
                     self.current_value_query[2][-1]["select"] = self.varstack[-1]       # complete argopt
+                    # self.current_value_query[0][-1][1] = self.varstack[-1]
                 relations = self.que.get_relations_of_var(self.current_value_query, self.varstack[-1])
                 self.prevrelstack[-1] = set(relations)
                 vnt |= set(relations)
@@ -372,6 +385,7 @@ class Traverser(object):
                                                     "select": None,     # must be completed by JOIN
                                                     "littype": literaltype,
                                                     "criterium": self.varstack[-1]})        # TODO: incorrect sorting if type wrong --> must specify type
+                # self.current_value_query[0].append([token, None, self.varstack[-1], literaltype])
             elif category(token) == RETURN:
                 self.query_fn, self.query = self.que.get_entity_query_fn(self.current_value_query, self.varstack[-1])
         if self.current_type == REL:
@@ -394,28 +408,66 @@ class Traverser(object):
         return vnt
 
 
-def run(butd="WebQTest-523	what is the largest nation in <E0>	<E0> :base.locations.continents.countries_within <BRANCH> :topic_server.population_number <ARGMAX> <JOIN> <RETURN>	(<E0>|europe|m.02j9z)"):
+def get_vnt_for_butd(butd="WebQTest-523	what is the largest nation in <E0>	<E0> :base.locations.continents.countries_within <BRANCH> :topic_server.population_number <ARGMAX> <JOIN> <RETURN>	(<E0>|europe|m.02j9z)"):
     qid, question, query, replacements = butd.split("\t")
     replacements = replacements.split(",")
     nl_repl_dic = {}
     fl_repl_dic = {}
     for replacement in replacements:
-        tkn, nlrep, flrep = replacement[1:-1].split("|")
+        replacement = re.match("\(([^\]]+)\)", replacement.strip()).group(1)
+        tkn, nlrep, flrep = replacement.split("|")
         nl_repl_dic[tkn] = nlrep
         fl_repl_dic[tkn] = flrep
-    print(query, fl_repl_dic)
+    # print(query, fl_repl_dic)
     traverser = Traverser(repl_dic=fl_repl_dic)
-    vnts = []
+    vnts = [{"<E0>"}]
     for token in query.split():
+        if not token in vnts[-1]:
+            # EXCEPTIONS DUE TO MISMATCH DATA/GOLD
+            solved = False
+            if qid in "WebQTest-238 WebQTest-863 WebQTest-974".split():
+                vnts[-1].add(token)
+                solved = True
+            if re.match(r'WebQTrn-\d+', qid):
+                vnts[-1].add(token)
+                solved = True
+            if solved:
+                print("{}: added token {} to vnt manually".format(qid, token))
+            else:
+                raise Exception("{}: token {} not in vnt".format(qid, token))
         vnt = traverser.next_token(token)
         vnts.append(vnt)
     for vnt, token in zip(vnts, query.split()):
-        print(token, len(vnt), vnt)
+        # print(token, len(vnt), vnt)
+        pass
 
-    print(traverser.query)
+
     res = traverser.query_fn()
-    print(res)
+    # print(traverser.query)
+    # print(res)
+    return qid, vnts, traverser.query_fn
+
+
+def get_vnt_for_datasets(p="../../../../datasets/webqsp/webqsp.",
+                         files=("train", "test", "core.test", "core.train")):
+    tt = q.ticktock("vnt builder")
+    for file in files:
+        tt.tick("doing {}".format(file))
+        filep = p+file+".butd"
+        vnts = {}
+        with open(filep) as f:
+            i = 0
+            for line in f:
+                qid, vnt, _ = get_vnt_for_butd(line)
+                vnts[qid] = vnt
+                i += 1
+                if i % 10 == 0:
+                    tt.msg("{}".format(i))
+        pickle.dump(vnts, open(p+file+".butd.vnt", "w"))
+        tt.tock("done {}".format(file))
 
 
 if __name__ == "__main__":
-    q.argprun(run)
+    _, _, query = get_vnt_for_butd("WebQTrn-1102	what is the name of <E0> 's son	<E0> :people.person.children <BRANCH> :people.person.gender m.05zppz <JOIN> <RETURN>	(<E0>|walt disney|m.081nh)")
+    print(query())
+    q.argprun(get_vnt_for_datasets)
