@@ -5,6 +5,7 @@ import re
 import signal
 import sys
 from datetime import datetime as dt
+import dill as pickle
 
 import nltk
 import numpy as np
@@ -287,6 +288,7 @@ class StringMatrix():
         self._matrix = ret
         self._do_rare()
         self._rd = {v: k for k, v in self._dictionary.items()}
+        self._strings = None
 
     def _do_rare(self):
         sortedwordidxs = [self.d(x) for x in self.protectedwords] + \
@@ -304,9 +306,17 @@ class StringMatrix():
         # change dictionary
         self._dictionary = {k: transdic[v] for k, v in self._dictionary.items() if self.d(k) in sortedwordidxs}
 
+    def save(self, p):
+        pickle.dump(self, open(p, "w"))
+
+    @staticmethod
+    def load(p):
+        return pickle.load(open(p))
+
 
 def tokenize(s, preserve_patterns=None):
-    s = s.decode("utf-8")
+    if not isinstance(s, unicode):
+        s = s.decode("utf-8")
     s = unidecode.unidecode(s)
     repldic = None
     if preserve_patterns is not None:

@@ -142,6 +142,7 @@ def run(basep="../../../../datasets/webqsp/webqsp.",
         ranges = que.get_entity_property(batch, "type.property.expected_type")
         rangesnames = que.get_entity_property(batch, "type.property.expected_type type.object.name", language="en")
         for x in batch:
+            x = x[1:]
             relationinfo[":"+x] = {"name": names[x] if x in names else None,
                                    "domain": domains[x] if x in domains else None,
                                    "range": ranges[x] if x in ranges else None,
