@@ -10,3 +10,4 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
 from qelos.qutils import name2fn, var, val
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, WordLinout, PretrainedWordLinout, ComputedWordLinout
 from qelos.gan import GANTrainer
+from IPython import embed

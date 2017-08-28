@@ -28,6 +28,7 @@ JOIN = 4
 ARGOPT = 5
 RETURN = 6
 VAR = 7
+PLACEHOLDER = 8
 
 # mode
 BOTTOMUP = 1
@@ -47,6 +48,8 @@ def category(token):
         return RETURN
     elif re.match("var\d+", token):
         return VAR
+    elif re.match("<E\d+>", token):
+        return PLACEHOLDER
     else:
         return ENT
 
