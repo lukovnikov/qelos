@@ -3,6 +3,7 @@ import numpy
 import torch
 from torch.autograd import Variable
 import IPython
+import qelos as q
 
 # Generates and saves a plot of the true distribution, the generator, and the
 # critic.
@@ -75,6 +76,6 @@ class ImageGenerator:
 
         return ret      # return saved
 
-    except Exception as e:
+    except q.SumTingWongException as e:
         raise e
         print("some exception occurred while plotting")
