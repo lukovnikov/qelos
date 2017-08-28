@@ -44,6 +44,7 @@ def load_graph_dataset(inp="../../../../datasets/webqsp/webqsp.train.graph"):
 
 def relinearize(graph):
     triples = [tuple(x.strip().split()) for x in graph.strip().split(";") if len(x) > 0]
+    triples = [(s, ":"+p, o) for s, p, o in triples]
     corechain, othertriples = _get_core_chain(triples, "OUT")
     constraintpoints = filter(lambda x: re.match("var\d", x) or x == "OUT", corechain)
     constraints = {}
@@ -105,38 +106,6 @@ def _get_core_chain(triples, root):
     assert(len(roottriples) == 1)
     prechain, othertriples = _get_core_chain(othertriples, roottriples[0][0])
     return prechain + [roottriples[0][1]] + [root], othertriples
-
-
-def _relinearize_rec(triples, root):
-    if not (re.match("var\d", root) or root == "OUT"):      # root is not a variable (intermediate or output)
-        return [root]       # because it's a leaf
-
-    # separate triples in triples resulting in root and other triples
-    roottriples = []
-    othertriples = []
-    constrainttriples = []
-    for s, p, o in triples:
-        if s == root:
-            # constraint on root
-            constrainttriples.append((s, ":"+p, o))
-        elif o == root:
-            roottriples.append((s, ":"+p, o))
-        else:
-            othertriples.append((s, p, o))
-
-    # get sublinearizations
-    sublinearisations = []
-    constraints = []
-    for s, p, o in constrainttriples:
-        constraint_sublinearisation = _relinearize_rec(othertriples, o)
-        for csl in constraint_sublinearisation:
-            constraints.append("{} {}".format(p, csl))
-    constraints = " ".join(["<BRANCH> {}".format(x) for x in constraints])
-    for s, p, o in roottriples:
-        core_sublinearisation = _relinearize_rec(othertriples, s)        # can only be one
-        core_sublinearisation = core_sublinearisation[0]
-        core_sublinearisation = "{} {}".format(core_sublinearisation, p)
-    return
 
 
 def load_graph_question(line):
