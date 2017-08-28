@@ -75,5 +75,6 @@ class ImageGenerator:
 
         return ret      # return saved
 
-    except Exception:
+    except Exception as e:
+        raise e
         print("some exception occurred while plotting")
