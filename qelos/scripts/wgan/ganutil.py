@@ -27,7 +27,7 @@ class ImageGenerator:
         points = points.reshape((-1,2))
         points = Variable(torch.from_numpy(points))
         if true_dist.is_cuda:
-            points.cuda()
+            points = points.cuda()
 
         noise = Variable(true_dist.new(true_dist.size(0), 2))
         noise.data.normal_(0, 1)
