@@ -163,9 +163,25 @@ class Querier(object):
         else:
             const = const[0]
         ### TODO WARNING !!! - doesn't do argmax on intermediate, instead order final result by intermediate
-        ### TODO: somehow get the literal type
-        valtype = "xsd:float"
-        return "ORDER BY {}({}({})) LIMIT 1".format(const["optmode"], valtype, fbfy(const["criterium"]))
+        return "ORDER BY {}({}({})) LIMIT 1".format(
+            const["optmode"], const["littype"], fbfy(const["criterium"]))
+
+    def get_range_of_relation(self, rel):
+        query = "SELECT DISTINCT ?o WHERE {{ {} <http://www.w3.org/2000/01/rdf-schema#range> ?o}}".format(fbfy(rel))
+        ret = set()
+        res = self._exec_query(query)
+        results = res["results"]["bindings"]
+        for result in results:
+            rete = result["o"]["value"]
+            toadd = True
+            if toadd:
+                rete = unfbfy(rete)
+                if rete is not None:
+                    ret.add(rete)
+        if len(ret) == 0:
+            return None
+        else:
+            return list(ret)[0]
 
     def get_relations_of_var(self, spec, var, only_reverse=False, incl_reverse=False):
         triples, values, const = spec
@@ -347,8 +363,14 @@ class Traverser(object):
                 self.prevrelstack[-1] = set(relations)
                 vnt |= set(relations)
             elif category(token) == ARGOPT:
+                rng = self.que.get_range_of_relation(self.current_butd[-2])     # TODO hacky
+                if rng == "type.datetime":
+                    literaltype = "xsd:datetime"
+                else:
+                    literaltype = "xsd:float"
                 self.current_value_query[2].append({"optmode": "DESC" if token == "<ARGMAX>" else "ASC",
                                                     "select": None,     # must be completed by JOIN
+                                                    "littype": literaltype,
                                                     "criterium": self.varstack[-1]})        # TODO: incorrect sorting if type wrong --> must specify type
             elif category(token) == RETURN:
                 self.query_fn, self.query = self.que.get_entity_query_fn(self.current_value_query, self.varstack[-1])
@@ -372,7 +394,7 @@ class Traverser(object):
         return vnt
 
 
-def run(butd="WebQTest-671	who are the senators of <E0> 2012	<E0> :government.political_district.representatives <BRANCH> :government.government_position_held.from <ARGMAX> <JOIN> <BRANCH> :government.government_position_held.jurisdiction_of_office m.09c7w0 <JOIN> :government.government_position_held.office_holder <RETURN>	(<E0>|hawaii|m.03gh4)"):
+def run(butd="WebQTest-523	what is the largest nation in <E0>	<E0> :base.locations.continents.countries_within <BRANCH> :topic_server.population_number <ARGMAX> <JOIN> <RETURN>	(<E0>|europe|m.02j9z)"):
     qid, question, query, replacements = butd.split("\t")
     replacements = replacements.split(",")
     nl_repl_dic = {}
