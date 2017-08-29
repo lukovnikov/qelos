@@ -88,6 +88,7 @@ class GANTrainer(object):
         valid_EMD = 0.
         valid_fake2real = 0.    # mean of distances from each fake to closest real
         valid_real2fake = 0.    # mean of distances from each real to closest fake
+        valid_fakeandreal = 0.  # harmonic mean of above
 
         vnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
 
@@ -189,14 +190,15 @@ class GANTrainer(object):
                         validreal.unsqueeze(0),
                         validfake.unsqueeze(0)).squeeze(0)
                     npdistmat = distmat.cpu().data.numpy()
-                    ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
-                    valid_EMD = npdistmat[ass_x, ass_y].mean()
+                    # ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
+                    # valid_EMD = npdistmat[ass_x, ass_y].mean()
 
                     #real2fake and fake2real
                     valid_fake2real, _ = torch.min(distmat, 0)
                     valid_real2fake, _ = torch.min(distmat, 1)
                     valid_fake2real = valid_fake2real.mean()
                     valid_real2fake = valid_real2fake.mean()
+                    valid_fakeandreal = 2 * valid_fake2real * valid_real2fake / (valid_fake2real + valid_real2fake).clamp(min=1e-6)
 
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
@@ -205,6 +207,7 @@ class GANTrainer(object):
                                 scoreD_real=scoreD_real_vec.mean().data[0],
                                 scoreD_fake=scoreD_fake_vec.mean().data[0],
                                 lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
-                                valid_EMD=valid_EMD, valid_fake2real=valid_fake2real.data[0], valid_real2fake=valid_real2fake.data[0],
+                                valid_EMD=valid_EMD, valid_fake2real=valid_fake2real.data[0],
+                                valid_real2fake=valid_real2fake.data[0], valid_fakeandreal=valid_fakeandreal.data[0],
                                 when="after_G")
 
