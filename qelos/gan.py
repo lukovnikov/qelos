@@ -172,7 +172,7 @@ class GANTrainer(object):
             self.optimizerG.step()
 
             ######### Validate G net ##########
-            valid_EMD = None
+            valid_EMD = 0.
             if valid_data_gen is not None:
                 if _iter % self.validinter == 0 or self.validinter == 1:
                     validdata = next(valid_data_gen)
@@ -187,7 +187,7 @@ class GANTrainer(object):
                         validfake.unsqueeze(0)).squeeze(0)
                     npdistmat = distmat.cpu().data.numpy()
                     ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
-                    valid_EMD = npdistmat[ass_x, ass_y].sum()
+                    valid_EMD = npdistmat[ass_x, ass_y].mean()
 
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
