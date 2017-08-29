@@ -193,8 +193,8 @@ class GANTrainer(object):
                     valid_EMD = npdistmat[ass_x, ass_y].mean()
 
                     #real2fake and fake2real
-                    valid_fake2real = torch.min(distmat, 0).mean()
-                    valid_real2fake = torch.min(distmat, 1).mean()
+                    valid_fake2real, _ = torch.min(distmat, 0).mean()
+                    valid_real2fake, _ = torch.min(distmat, 1).mean()
 
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
@@ -203,6 +203,6 @@ class GANTrainer(object):
                                 scoreD_real=scoreD_real_vec.mean().data[0],
                                 scoreD_fake=scoreD_fake_vec.mean().data[0],
                                 lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
-                                valid_EMD=valid_EMD, valid_fake2real=valid_fake2real, valid_real2fake=valid_real2fake,
+                                valid_EMD=valid_EMD, valid_fake2real=valid_fake2real.data[0], valid_real2fake=valid_real2fake.data[0],
                                 when="after_G")
 
