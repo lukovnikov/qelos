@@ -85,6 +85,8 @@ class GANTrainer(object):
             netD.cuda()
             netG.cuda()
 
+        valid_EMD = 0.
+
         vnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
 
         for _iter in range(niter):
@@ -172,7 +174,6 @@ class GANTrainer(object):
             self.optimizerG.step()
 
             ######### Validate G net ##########
-            valid_EMD = 0.
             if valid_data_gen is not None:
                 if _iter % self.validinter == 0 or self.validinter == 1:
                     validdata = next(valid_data_gen)
