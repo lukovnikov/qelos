@@ -185,8 +185,8 @@ class GANTrainer(object):
                     fake.unsqueeze(0)).squeeze(0)
                 npdistmat = distmat.cpu().data.numpy()
                 ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
-                ass_x = q.var(torch.from_numpy(ass_x).long()).cuda(distmat).v
-                ass_y = q.var(torch.from_numpy(ass_y).long()).cuda(distmat).v
+                ass_x = q.var(torch.from_numpy(ass_x).long()).cuda(distmat).v.data
+                ass_y = q.var(torch.from_numpy(ass_y).long()).cuda(distmat).v.data
                 valid_EMD = distmat[ass_x, ass_y].mean()
                 # real2fake and fake2real
                 fake2real, _ = torch.min(distmat, 0)
