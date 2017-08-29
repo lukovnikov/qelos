@@ -187,7 +187,7 @@ class GANTrainer(object):
                 ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
                 ass_x = q.var(torch.from_numpy(ass_x).long()).cuda(distmat).v.data
                 ass_y = q.var(torch.from_numpy(ass_y).long()).cuda(distmat).v.data
-                valid_EMD = distmat[ass_x, ass_y].mean()
+                EMD = distmat[ass_x, ass_y].mean()
                 # real2fake and fake2real
                 fake2real, _ = torch.min(distmat, 0)
                 real2fake, _ = torch.min(distmat, 1)
@@ -195,7 +195,7 @@ class GANTrainer(object):
                 real2fake = real2fake.mean()
                 fakeandreal = 2 * fake2real * real2fake / (fake2real + real2fake).clamp(min=1e-6)
                 errG = torch.max(real2fake, fake2real)
-                errG = valid_EMD
+                errG = EMD
 
             errG.backward()
             self.optimizerG.step()
