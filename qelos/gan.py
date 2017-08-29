@@ -18,6 +18,7 @@ class GANTrainer(object):
                         logger=None,
                         data_iter=None,
                         valid_data_iter=None,
+                        validation_metrics=[],  # f2r, r2f, fnr, emd
                         validinter=1):
         if one_sided:
             self.clip_fn = lambda x: x.clamp(min=0)
@@ -38,6 +39,7 @@ class GANTrainer(object):
         self.data_iter = data_iter
         self.valid_data_iter = valid_data_iter
         self.validinter = validinter
+        self.validation_metrics = validation_metrics
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -186,7 +188,7 @@ class GANTrainer(object):
                     vnoise.data.normal_(0, 1)
                     validfake = netG(vnoise)
                     # compute distance matrix
-                    distmat = -q.LNormDistance(2)(
+                    distmat = -q.LNormDistance(1)(
                         validreal.unsqueeze(0),
                         validfake.unsqueeze(0)).squeeze(0)
                     npdistmat = distmat.cpu().data.numpy()
