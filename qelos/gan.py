@@ -86,6 +86,8 @@ class GANTrainer(object):
             netG.cuda()
 
         valid_EMD = 0.
+        valid_fake2real = 0.    # mean of distances from each fake to closest real
+        valid_real2fake = 0.    # mean of distances from each real to closest fake
 
         vnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
 
@@ -190,6 +192,10 @@ class GANTrainer(object):
                     ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
                     valid_EMD = npdistmat[ass_x, ass_y].mean()
 
+                    #real2fake and fake2real
+                    valid_fake2real = torch.min(distmat, 0).mean()
+                    valid_real2fake = torch.min(distmat, 1).mean()
+
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
                                 real=real.data, fake=fake.data, grad_points=grad_points,
@@ -197,6 +203,6 @@ class GANTrainer(object):
                                 scoreD_real=scoreD_real_vec.mean().data[0],
                                 scoreD_fake=scoreD_fake_vec.mean().data[0],
                                 lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
-                                valid_EMD=valid_EMD,
+                                valid_EMD=valid_EMD, valid_fake2real=valid_fake2real, valid_real2fake=valid_real2fake,
                                 when="after_G")
 
