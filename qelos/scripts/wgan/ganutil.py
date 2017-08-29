@@ -4,6 +4,7 @@ import torch
 from torch.autograd import Variable
 import IPython
 import qelos as q
+from IPython.display import clear_output, display
 
 # Generates and saves a plot of the true distribution, the generator, and the
 # critic.
@@ -70,12 +71,11 @@ class ImageGenerator:
         else:
           pyplot.subplot(gs[1])
           pyplot.plot(losses)
-          IPython.display.clear_output(wait=True)
-          IPython.display.display(pyplot.gcf())
+          clear_output(wait=True)
+          display(pyplot.gcf())
         self.frame_index += 1
 
         return ret      # return saved
 
-    except q.SumTingWongException as e:
-        raise e
+    except Exception as e:
         print("some exception occurred while plotting")
