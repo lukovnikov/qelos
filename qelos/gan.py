@@ -193,8 +193,10 @@ class GANTrainer(object):
                     valid_EMD = npdistmat[ass_x, ass_y].mean()
 
                     #real2fake and fake2real
-                    valid_fake2real, _ = torch.min(distmat, 0).mean()
-                    valid_real2fake, _ = torch.min(distmat, 1).mean()
+                    valid_fake2real, _ = torch.min(distmat, 0)
+                    valid_real2fake, _ = torch.min(distmat, 1)
+                    valid_fake2real = valid_fake2real.mean()
+                    valid_real2fake = valid_real2fake.mean()
 
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
