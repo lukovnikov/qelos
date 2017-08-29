@@ -189,7 +189,7 @@ class GANTrainer(object):
                 fake2real = fake2real.mean()
                 real2fake = real2fake.mean()
                 fakeandreal = 2 * fake2real * real2fake / (fake2real + real2fake).clamp(min=1e-6)
-                errG = fakeandreal
+                errG = torch.max(real2fake, fake2real)
 
             errG.backward()
             self.optimizerG.step()
