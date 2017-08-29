@@ -1,6 +1,6 @@
 from __future__ import print_function
 from unittest import TestCase
-from qelos.basic import Softmax, LogSoftmax, SoftmaxLog, DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance
+from qelos.basic import Softmax, LogSoftmax, SoftmaxLog, DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, LNormDistance
 import torch
 from torch.autograd import Variable
 import numpy as np
@@ -444,3 +444,78 @@ class TestDistance(TestCase):
                     x = np.dot(np.dot(np.dot(a[i, j].T, w), b[i, k]), aggw)
                     npd[i, j, k] = x
         self.assertTrue(np.allclose(d, npd, atol=1e-6))
+
+    def test_lnorm_same_as_numpy_2D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((20, 2))))
+        b = Variable(torch.FloatTensor(np.random.random((20, 2))))
+        dist = LNormDistance(L=2)
+        d = dist(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((20,))
+        for i in range(a.shape[0]):
+            x = np.linalg.norm(a[i] - b[i])
+            npd[i] = x
+        print(d)
+        print(npd)
+        self.assertTrue(np.allclose(-d, npd))
+
+    def test_lnorm_same_as_numpy_3D2D(self):
+        a = Variable(torch.FloatTensor(np.random.random((20, 5, 2))))
+        b = Variable(torch.FloatTensor(np.random.random((20, 2))))
+        dist = LNormDistance(L=2)
+        d = dist(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((20, 5))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                x = np.linalg.norm(a[i, j] - b[i])
+                npd[i, j] = x
+        print(d)
+        print(npd)
+        self.assertTrue(np.allclose(-d, npd))
+
+    def test_lnorm_same_as_numpy_3D3D(self):
+        a = Variable(torch.FloatTensor(np.random.random((20, 5, 2))))
+        b = Variable(torch.FloatTensor(np.random.random((20, 3, 2))))
+        dist = LNormDistance(L=2)
+        d = dist(a, b).data.numpy()
+        a = a.data.numpy()
+        b = b.data.numpy()
+        npd = np.zeros((20, 5, 3))
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                for k in range(b.shape[1]):
+                    x = np.linalg.norm(a[i, j] - b[i, k])
+                    npd[i, j, k] = x
+        print(d[0])
+        print(npd[0])
+        self.assertTrue(np.allclose(-d, npd))
+
+    def test_lnorm_linear_sum_assignment(self):
+        from scipy import optimize as spopt
+        import qelos as q
+        tt = q.ticktock()
+        dim = 8
+        a = Variable(torch.FloatTensor(np.random.random((dim, 2))))
+        b = Variable(torch.FloatTensor(np.random.random((dim, 2))))
+        dist = -LNormDistance(L=2)(a.unsqueeze(0), b.unsqueeze(0)).squeeze(0)
+        npdist = dist.cpu().data.numpy()
+        tt.tick()
+        ass_x, ass_y = spopt.linear_sum_assignment(npdist)
+        tt.tock("spopt hungarian")
+        validEMD = npdist[ass_x, ass_y].sum()
+        if True:
+            import itertools
+            bfemd = np.infty
+            tt.tick()
+            perms = itertools.permutations(range(dim))
+            idx = range(dim)
+            for perm in perms:
+                bfemd = min(bfemd, npdist[idx, perm].sum())
+            tt.tock("brute force assignment")
+            self.assertEqual(bfemd, validEMD)
+        # self.assertTrue(False)
+
+

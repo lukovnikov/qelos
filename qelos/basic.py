@@ -183,6 +183,26 @@ class CosineDistance(DotDistance):
         dots = dots.div(torch.mul(lnorms, rnorms).clamp(1e-6))
         return dots
 
+
+class LNormDistance(Distance):
+    def __init__(self, L=2, **kw):
+        super(LNormDistance, self).__init__(**kw)
+        self.L = L
+
+    def forward(self, data, crit):      # (batsize, [lseqlen,] dim), (batsize, [rseqlen,], dim)
+        if data.dim() == 3 and crit.dim() == 2:
+            crit = crit.unsqueeze(1)
+        if data.dim() == 3 and crit.dim() == 3:
+            data = data.unsqueeze(2)
+            crit = crit.unsqueeze(1)
+        temp = torch.abs(data - crit)
+        maximum, _ = torch.max(temp, -1, keepdim=True)
+        maximum_red, _ = torch.max(temp, -1, keepdim=False)
+        temp = (temp / maximum) ** self.L
+        #lognorm = T.logsumexp(temp * self.L, axis=-1) / self.L
+        ret = maximum_red * (torch.sum(temp, -1).clamp(min=1e-6) ** (1./self.L))
+        return -ret
+
 # TODO: Euclidean and LNorm distances
 
 

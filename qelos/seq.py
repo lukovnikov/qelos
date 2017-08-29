@@ -19,7 +19,7 @@ class AttentionGenerator(nn.Module):
         scores = self.dist(data, crit)      # (batsize, seqlen)
         if scores.dim() == 3:       # (batsize, dseqlen, cseqlen)
             assert(crit.dim() == 3)
-            scores = scores.permute(0, 2, 1)
+            scores = scores.permute(0, 2, 1)        # because scores for 3D3D are given from data to crit, here we need from crit to data
             if mask is not None:
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
         weights = self.normalizer(scores, mask=mask)

@@ -1,6 +1,8 @@
 import torch
 from torch.autograd import Variable
 import qelos as q
+import scipy as sp
+from scipy import optimize as spopt
 
 class GANTrainer(object):
     def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG
@@ -13,7 +15,10 @@ class GANTrainer(object):
                         clamp_weights_rng=(-0.01, 0.01),
                         optimizerD=None,
                         optimizerG=None,
-                        logger=None):
+                        logger=None,
+                        data_iter=None,
+                        valid_data_iter=None,
+                        validinter=1):
         if one_sided:
             self.clip_fn = lambda x: x.clamp(min=0)
         else:
@@ -30,6 +35,9 @@ class GANTrainer(object):
         self.modeD = modeD
         self.logger = logger
         self._dragan_lg_var = 0.6
+        self.data_iter = data_iter
+        self.valid_data_iter = valid_data_iter
+        self.validinter = validinter
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -70,7 +78,9 @@ class GANTrainer(object):
         return Variable(ret, requires_grad=True)
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
-              data_gen=None, cuda=False):
+              data_gen=None, valid_data_gen=None, cuda=False):
+        data_gen = data_gen if data_gen is not None else self.data_iter
+        valid_data_gen = valid_data_gen if valid_data_gen is not None else self.valid_data_iter
         if cuda:
             netD.cuda()
             netG.cuda()
@@ -161,6 +171,24 @@ class GANTrainer(object):
             errG.backward()
             self.optimizerG.step()
 
+            ######### Validate G net ##########
+            valid_EMD = None
+            if valid_data_gen is not None:
+                if _iter % self.validinter == 0 or self.validinter == 1:
+                    validdata = next(valid_data_gen)
+                    validreal = q.var(validdata, volatile=True).cuda(cuda).v
+                    vnoise = q.var(validreal.data.new(validreal.size(0), self.noise_dim),
+                                   volatile=True).v
+                    vnoise.data.normal_(0, 1)
+                    validfake = netG(vnoise)
+                    # compute distance matrix
+                    distmat = -q.LNormDistance(2)(
+                        validreal.unsqueeze(0),
+                        validfake.unsqueeze(0)).squeeze(0)
+                    npdistmat = distmat.cpu().data.numpy()
+                    ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
+                    valid_EMD = npdistmat[ass_x, ass_y].sum()
+
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
                                 real=real.data, fake=fake.data, grad_points=grad_points,
@@ -168,5 +196,6 @@ class GANTrainer(object):
                                 scoreD_real=scoreD_real_vec.mean().data[0],
                                 scoreD_fake=scoreD_fake_vec.mean().data[0],
                                 lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
+                                valid_EMD=valid_EMD,
                                 when="after_G")
 

@@ -8,10 +8,10 @@ import qelos as q
 class var(object):
     all_cuda = False
 
-    def __init__(self, x, requires_grad=False):
+    def __init__(self, x, requires_grad=False, volatile=False):
         if isinstance(x, np.ndarray):
             x = torch.from_numpy(x)
-        self.v = Variable(x, requires_grad=requires_grad)
+        self.v = Variable(x, requires_grad=requires_grad, volatile=volatile)
 
     def cuda(self, crit=None):
         if crit is False:
