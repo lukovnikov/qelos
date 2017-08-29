@@ -19,6 +19,7 @@ class GANTrainer(object):
                         data_iter=None,
                         valid_data_iter=None,
                         validation_metrics=[],  # f2r, r2f, fnr, emd
+                        notgan=False,
                         validinter=1):
         if one_sided:
             self.clip_fn = lambda x: x.clamp(min=0)
@@ -40,6 +41,7 @@ class GANTrainer(object):
         self.valid_data_iter = valid_data_iter
         self.validinter = validinter
         self.validation_metrics = validation_metrics
+        self.notgan = notgan
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -170,11 +172,25 @@ class GANTrainer(object):
 
             vnoise.data.normal_(0, 1)
             fake = netG(vnoise)
-            errG = netD(fake)
-            if self.modeD == "critic":
-                errG = -errG.mean()
-            elif self.modeD == "disc":
-                errG = torch.log(1.0 - errG).mean()
+
+            if not self.notgan:
+                errG = netD(fake)
+                if self.modeD == "critic":
+                    errG = -errG.mean()
+                elif self.modeD == "disc":
+                    errG = torch.log(1.0 - errG).mean()
+            else:
+                distmat = q.LNormDistance(2)(
+                    real.unsqueeze(0),
+                    fake.unsqueeze(0)).squeeze(0)
+                # real2fake and fake2real
+                fake2real, _ = torch.min(distmat, 0)
+                real2fake, _ = torch.min(distmat, 1)
+                fake2real = fake2real.mean()
+                real2fake = real2fake.mean()
+                fakeandreal = 2 * fake2real * real2fake / (fake2real + real2fake).clamp(min=1e-6)
+                errG = fakeandreal
+
             errG.backward()
             self.optimizerG.step()
 
@@ -188,7 +204,7 @@ class GANTrainer(object):
                     vnoise.data.normal_(0, 1)
                     validfake = netG(vnoise)
                     # compute distance matrix
-                    distmat = -q.LNormDistance(1)(
+                    distmat = q.LNormDistance(2)(
                         validreal.unsqueeze(0),
                         validfake.unsqueeze(0)).squeeze(0)
                     npdistmat = distmat.cpu().data.numpy()

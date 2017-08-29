@@ -500,7 +500,7 @@ class TestDistance(TestCase):
         dim = 8
         a = Variable(torch.FloatTensor(np.random.random((dim, 2))))
         b = Variable(torch.FloatTensor(np.random.random((dim, 2))))
-        dist = -LNormDistance(L=2)(a.unsqueeze(0), b.unsqueeze(0)).squeeze(0)
+        dist = LNormDistance(L=2)(a.unsqueeze(0), b.unsqueeze(0)).squeeze(0)
         npdist = dist.cpu().data.numpy()
         tt.tick()
         ass_x, ass_y = spopt.linear_sum_assignment(npdist)

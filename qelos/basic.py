@@ -201,7 +201,7 @@ class LNormDistance(Distance):
         temp = (temp / maximum) ** self.L
         #lognorm = T.logsumexp(temp * self.L, axis=-1) / self.L
         ret = maximum_red * (torch.sum(temp, -1).clamp(min=1e-6) ** (1./self.L))
-        return -ret
+        return ret
 
 # TODO: Euclidean and LNorm distances
 
