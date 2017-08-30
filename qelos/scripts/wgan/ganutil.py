@@ -89,7 +89,7 @@ class ImageGenerator:
   def finalize(self, savedir="experiments/", savename=None, settings=None):
       if self.frames2pdf:
           # generate savename
-          if settings.savename is None:
+          if savename is None:
               extraoptstring = ""
               if settings.lip_mode in "DRAGAN DRAGAN-G DRAGAN-LG":
                   extraoptstring += "_pboth={}".format(int(settings.perturb_both))
@@ -98,7 +98,7 @@ class ImageGenerator:
               savename = "{}_os={}_pw={}{}_niter={}_at_{}".format(
                   settings.lip_mode, int(settings.onesided), settings.penalty_weight, extraoptstring, settings.niter,
                   str(dt.now()).replace(" ", "_"))
-          savep = savedir + savename
+          savep = savedir + savename + ".pdf"
           # do save
           pdf = mplpdf.PdfPages(savep)
           for fig in self.figs4pdf:
