@@ -46,7 +46,7 @@ class ImageGenerator:
         # disc_map = (disc_map - numpy.min(disc_map)) / numpy.max(disc_map) * 8
         # disc_map = numpy.log(disc_map + 0.25)
 
-        fig = pyplot.figure(num=1, figsize=(10,15))
+        fig = pyplot.figure(num=len(self.figs4pdf)+1, figsize=(10, 15))
         gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
 
         pyplot.clf()
