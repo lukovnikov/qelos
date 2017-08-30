@@ -233,6 +233,18 @@ class StringMatrix():
         self._rarewords = set()
         self.tokenize = tokenize
 
+    def __len__(self):
+        if self._matrix is None:
+            return len(self._strings)
+        else:
+            return self.matrix.shape[0]
+
+    def __getitem__(self, item):
+        if self._matrix is None:
+            return self._strings[item]
+        else:
+            return self.pp(self.matrix[item])
+
     @property
     def numwords(self):
         return len(self._dictionary)
@@ -246,6 +258,14 @@ class StringMatrix():
         if self._matrix is None:
             raise Exception("finalize first")
         return self._matrix
+
+    @property
+    def D(self):
+        return self._dictionary
+
+    @property
+    def RD(self):
+        return self._rd
 
     def d(self, x):
         return self._dictionary[x]
