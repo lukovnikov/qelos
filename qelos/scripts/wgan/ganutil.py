@@ -95,11 +95,11 @@ class ImageGenerator:
 
   def finalize(self, savedir="experiments/", savename=None, settings=None):
       if self.frames2pdf:
-          def plotfig_fn(plotdic):
+          def plotfig_fn_save(plotdic):
               true_dist, perturbed, samples, disc_map, RANGE, N_POINTS = \
                   [plotdic[x] for x in "true_dist perturbed samples disc_map RANGE N_POINTS".split()]
 
-              pyplot.figure(num=1, figsize=(10, 10))
+              fig = pyplot.figure(num=2, figsize=(10, 10))
 
               pyplot.clf()
               x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
@@ -114,7 +114,7 @@ class ImageGenerator:
               pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
               pyplot.scatter(samples[:, 0], samples[:, 1], c='green', marker='*')
 
-              return pyplot.gcf()
+              return fig
 
           # generate savename
           if savename is None:
@@ -131,6 +131,6 @@ class ImageGenerator:
           # do save
           pdf = mplpdf.PdfPages(savep)
           for datadic in self.figs4pdf:
-              fig = plotfig_fn(datadic)
+              fig = plotfig_fn_save(datadic)
               pdf.savefig(fig)
           pdf.close()
