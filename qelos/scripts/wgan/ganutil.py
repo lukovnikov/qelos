@@ -13,7 +13,7 @@ from datetime import datetime as dt
 # largely form Improved Training of Wasserstein GAN code (see link above)
 class ImageGenerator:
   def __init__(self, netG, netD, prefix='frame', noise_dim=2, save_frames_to_pdf=False):
-    self.prefix = prefix
+    self.prefix = None
     self.frame_index = 1
     self.noise_dim = noise_dim
     self.netG = netG
@@ -46,40 +46,47 @@ class ImageGenerator:
         # disc_map = (disc_map - numpy.min(disc_map)) / numpy.max(disc_map) * 8
         # disc_map = numpy.log(disc_map + 0.25)
 
-        fig = pyplot.figure(num=len(self.figs4pdf)+1, figsize=(10, 15))
-        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+        def plotfig_fn(plotdic):
+            true_dist, perturbed, samples, disc_map, RANGE, N_POINTS, losses = \
+                [plotdic[x] for x in "true_dist perturbed samples disc_map RANGE N_POINTS losses".split()]
 
-        pyplot.clf()
-        if self.prefix is None:
-            #pyplot.suplots(nrows=1, ncols=2)
-            pyplot.subplot(gs[0])
-        x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
-        disc_map = disc_map.reshape((len(x), len(y))).T
-        pyplot.contour(x, y, disc_map)
+            pyplot.figure(num=1, figsize=(10, 15))
+            gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
 
-        true_dist = true_dist.cpu().numpy()
-        perturbed = perturbed.cpu().numpy()
+            pyplot.clf()
+            if self.prefix is None:
+                #pyplot.suplots(nrows=1, ncols=2)
+                pyplot.subplot(gs[0])
+            x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
+            disc_map = disc_map.reshape((len(x), len(y))).T
+            pyplot.contour(x, y, disc_map)
 
-        # save
+            true_dist = true_dist.cpu().numpy()
+            perturbed = perturbed.cpu().numpy()
+
+            # plot scatter
+            pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='orange',marker='+')
+            pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
+            pyplot.scatter(samples[:, 0],   samples[:, 1],   c='green', marker='*')
+
+            pyplot.subplot(gs[1])
+            pyplot.plot(losses)
+
+            clear_output(wait=True)
+            display(pyplot.gcf())
+
         ret = {"true_dist": true_dist,
                "perturbed": perturbed,
                "samples": samples,
-               "contour": {"x": x, "y": y, "disc_map": disc_map}}
+               "disc_map": disc_map,
+               "RANGE": RANGE,
+               "N_POINTS": N_POINTS,
+               "losses": losses}
 
-        # plot scatter
-        pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='orange',marker='+')
-        pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
-        pyplot.scatter(samples[:, 0],   samples[:, 1],   c='green', marker='*')
+        plotfig_fn(ret)
+
         if self.frames2pdf:
-            self.figs4pdf.append(fig)
-        if self.prefix is not None:
-          pyplot.savefig(self.prefix+'{:05d}'.format(self.frame_index)+'.jpg')
-        else:
-          pyplot.subplot(gs[1])
-          pyplot.plot(losses)
-          clear_output(wait=True)
-          display(pyplot.gcf())
-        self.frame_index += 1
+            self.figs4pdf.append(ret)
 
         return ret      # return saved
 
@@ -88,6 +95,27 @@ class ImageGenerator:
 
   def finalize(self, savedir="experiments/", savename=None, settings=None):
       if self.frames2pdf:
+          def plotfig_fn(plotdic):
+              true_dist, perturbed, samples, disc_map, RANGE, N_POINTS = \
+                  [plotdic[x] for x in "true_dist perturbed samples disc_map RANGE N_POINTS".split()]
+
+              pyplot.figure(num=1, figsize=(10, 10))
+
+              pyplot.clf()
+              x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
+              disc_map = disc_map.reshape((len(x), len(y))).T
+              pyplot.contour(x, y, disc_map)
+
+              true_dist = true_dist.cpu().numpy()
+              perturbed = perturbed.cpu().numpy()
+
+              # plot scatter
+              pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='orange', marker='+')
+              pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
+              pyplot.scatter(samples[:, 0], samples[:, 1], c='green', marker='*')
+
+              return pyplot.gcf()
+
           # generate savename
           if savename is None:
               extraoptstring = ""
@@ -99,8 +127,10 @@ class ImageGenerator:
                   settings.lip_mode, int(settings.onesided), settings.penalty_weight, extraoptstring, settings.niter,
                   str(dt.now()).replace(" ", "_"))
           savep = savedir + savename + ".pdf"
+
           # do save
           pdf = mplpdf.PdfPages(savep)
-          for fig in self.figs4pdf:
+          for datadic in self.figs4pdf:
+              fig = plotfig_fn(datadic)
               pdf.savefig(fig)
           pdf.close()
