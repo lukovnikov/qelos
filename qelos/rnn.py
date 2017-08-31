@@ -779,7 +779,11 @@ class RecurrentWrapper(Recurrent, nn.Module):
 
 
 class RecurrentStack(RecStack):
-    def __init__(self, *layers):
+    def __init__(self, *layers, **kw):
+        if "output" in kw:
+            self.output = kw["output"]
+        else:
+            self.output = "all"
         newlayers = []
         for layer in layers:
             if not isinstance(layer, Recurrent):
@@ -794,6 +798,12 @@ class RecurrentStack(RecStack):
             y_l = layer(*y_l)
             if not issequence(y_l):
                 y_l = [y_l]
-        if len(y_l) == 1:
-            y_l = y_l[0]
-        return y_l
+        if self.output == "all":
+            ret = y_l
+        elif self.output == "last":
+            ret = [y_l_e[:, -1] for y_l_e in y_l]
+        else:
+            raise q.SumTingWongException()
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret

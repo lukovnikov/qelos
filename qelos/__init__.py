@@ -6,7 +6,7 @@ from qelos.basic import Softmax, LogSoftmax, BilinearDistance, CosineDistance, D
     Distance, Lambda, Stack, TrilinearDistance, LNormDistance, SeqBatchNorm1d, CReLU, Identity
 from qelos.containers import ModuleList
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
-    iscallable, isstring, isfunction, StringMatrix, tokenize
+    iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo
 from qelos.qutils import name2fn, var, val
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, WordLinout, PretrainedWordLinout, ComputedWordLinout
 from qelos.gan import GANTrainer

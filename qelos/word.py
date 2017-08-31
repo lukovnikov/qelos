@@ -99,6 +99,15 @@ class WordEmbBase(WordVecBase, nn.Module):
         """
         return OverriddenWordEmb(self, wordemb, which=which, whichnot=whichnot)
 
+    def merge(self, wordemb, mode="sum"):
+        """
+        Merges this embedding with provided embedding using the provided mode.
+        The dictionary of provided embedding must be identical to this embedding.
+        """
+        if not wordemb.D == self.D:
+            raise q.SumTingWongException("must have identical dictionary")
+        return MergedWordEmb(self, wordemb, mode=mode)
+
 
 class WordEmb(WordEmbBase):
     """ is a VectorEmbed with a dictionary to map words to ids """
@@ -247,10 +256,40 @@ class OverriddenWordEmb(OverriddenWordVecBase, WordEmbBase):
         return emb, msk
 
 
+class MergedWordVecBase(WordVecBase):
+    def __init__(self, base, merge, mode="sum"):
+        super(MergedWordVecBase, self).__init__(base.D)
+        self.base = base
+        self.merg = merge
+        self.mode = mode
+        if not mode in ("sum", "cat"):
+            raise q.SumTingWongException("{} merge mode not suported".format(mode))
+
+
+class MergedWordEmb(MergedWordVecBase, WordEmbBase):
+    def forward(self, x):
+        base_emb, base_msk = self.base(x)
+        merg_emb, merg_msk = self.merg(x)
+        if self.mode == "sum":
+            emb = base_emb + merg_emb
+            msk = base_msk      # since dictionaries are identical
+        elif self.mode == "cat":
+            emb = torch.cat([base_emb, merg_emb], 1)
+            msk = base_msk
+        else:
+            raise q.SumTingWongException()
+        return emb, msk
+
+
 class PretrainedWordVec(object):
     defaultpath = "../data/glove/glove.%dd"
     masktoken = "<MASK>"
     raretoken = "<RARE>"
+
+    trylowercase=True
+
+    loadcache = {}
+    useloadcache = True
 
     @classmethod
     def _get_path(cls, dim, path=None):
@@ -264,7 +303,13 @@ class PretrainedWordVec(object):
         # TODO: nonstandard mask and rareid?
         tt = ticktock(self.__class__.__name__)
         tt.tick()
-        W = np.load(open(path+".npy"))
+        # load weights
+        if path not in self.loadcache:
+            W = np.load(open(path+".npy"))
+        else:
+            W = self.loadcache[path][0]
+
+        # adapt
         if indim is not None:
             W = W[:indim, :]
         if rareid:
@@ -273,17 +318,30 @@ class PretrainedWordVec(object):
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
         tt.tock("vectors loaded")
         tt.tick()
+
+        # load words
+        if path not in self.loadcache:
+            words = pkl.load(open(path+".words"))
+        else:
+            words = self.loadcache[path]
+
+        # cache
+        if self.useloadcache:
+            self.loadcache[path] = (W, words)
+
         # dictionary
-        words = pkl.load(open(path+".words"))
         D = OrderedDict()
         i = 0
         if maskid is not None:
             D[self.masktoken] = i; i+=1
         if rareid is not None:
             D[self.raretoken] = i; i+=1
+        wordset = set(words)
         for j, word in enumerate(words):
             if indim is not None and j >= indim:
                 break
+            if word.lower() not in wordset and self.trylowercase:
+                word = word.lower()
             D[word] = i
             i += 1
         tt.tock("dictionary created")
@@ -517,3 +575,16 @@ class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
         if mask is not None:
             res = res * mask
         return res#, mask
+
+
+class MergedWordLinout(MergedWordVecBase, WordLinoutBase):
+    def forward(self, x, mask=None):
+        baseres = self.base(x, mask=mask)
+        mergres = self.merg(x, mask=mask)
+        if self.mode == "sum":
+            res = baseres + mergres
+        elif self.mode == "cat":
+            res = torch.cat([baseres, mergres], 1)
+        else:
+            raise q.SumTingWongException()
+        return res

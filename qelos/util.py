@@ -358,3 +358,13 @@ def tokenize(s, preserve_patterns=None):
         tokens = [repldic[token] if token in repldic else token for token in tokens]
     s = re.sub("`", "'", s)
     return tokens
+
+
+class DictObj(object):
+    def __init__(self, d):
+        for ditem in d:
+            self.__dict__[ditem] = d[ditem]
+
+
+def dtoo(d):
+    return DictObj(d)

@@ -1,6 +1,7 @@
 import qelos as q
 import dill as pickle
 import numpy as np
+from qelos.scripts.webqa.preprocessing.loader import *
 
 
 defaultp = "../../../../datasets/webqsp/flmats/"
@@ -12,13 +13,21 @@ def run(p=defaultp, qp=defaultqp):
     train, test = load_questions(qp)
     glovewords_ = {}
 
-    def loadglovewords(dim=300):
+    def loadglovewords(dim=300, trylowercase=True):
         if dim in glovewords_ and glovewords_[dim] is not None:
             return glovewords_[dim]
         p = "../../../../data/glove/glove.{}d.words".format(dim)
         tt = q.ticktock("glove loader")
         tt.tick("loading words {}D".format(dim))
         words = set(pickle.load(open(p)))
+        if trylowercase:
+            newwords = set()
+            for word in words:
+                if word.lower() not in words:
+                    newwords.add(word.lower())
+                else:
+                    newwords.add(word)
+            words = newwords
         tt.tock("{} words loaded".format(len(words)))
         glovewords_[dim] = words
         return words
@@ -99,61 +108,54 @@ def run(p=defaultp, qp=defaultqp):
         ret = {d[x] for x in querysm.D.keys() if x in d}
         return ret
 
+    def get_stats_train_test(glovedim=50):
+        train_nl_words = set(train[0].D.keys())
+        test_nl_words = set(test[0].D.keys())
+        train_fl_words = set(train[1].D.keys())
+        test_fl_words = set(test[1].D.keys())
+        nl_unseen_words = test_nl_words - train_nl_words
+        fl_unseen_words = test_fl_words - train_fl_words
+        # train frequencies for words in test that were seen during training
+        nl_overlap = train_nl_words & test_nl_words
+        fl_overlap = train_fl_words & test_fl_words
+        print("\n OVERLAP STATS \n")
+        nl_vrl_sorted = sorted(nl_overlap, key=lambda x: train[0]._wordcounts_original[x], reverse=True)
+        for nl_vrl_sorted_e in nl_vrl_sorted:
+            print(nl_vrl_sorted_e, train[0]._wordcounts_original[nl_vrl_sorted_e])
+        print("-")
+        fl_vrl_sorted = sorted(fl_overlap, key=lambda x: train[1]._wordcounts_original[x], reverse=True)
+        for fl_vrl_sorted_e in fl_vrl_sorted:
+            print(fl_vrl_sorted_e, train[1]._wordcounts_original[fl_vrl_sorted_e])
+        print("nl overlap: {}".format(len(nl_overlap), len(test_nl_words)))
+        print("fl overlap: {}".format(len(fl_overlap), len(test_fl_words)))
+
+        print("\n UNSEEN STATS \n")
+        nl_unseen_sorted = sorted(nl_unseen_words, key=lambda x: test[0]._wordcounts_original[x], reverse=True)
+        for nl_vrl_sorted_e in nl_unseen_sorted:
+            print(nl_vrl_sorted_e, test[0]._wordcounts_original[nl_vrl_sorted_e])
+        print("-")
+        fl_unseen_sorted = sorted(fl_unseen_words, key=lambda x: test[1]._wordcounts_original[x], reverse=True)
+        for fl_vrl_sorted_e in fl_unseen_sorted:
+            print(fl_vrl_sorted_e, test[1]._wordcounts_original[fl_vrl_sorted_e])
+
+        print("{}/{} nl words in test not seen during training".format(len(nl_unseen_words), len(set(test[0].D.keys()))))
+        print("{}/{} fl words in test not seen during training".format(len(fl_unseen_words), len(set(test[1].D.keys()))))
+
+        print("\n GLOVE COVERAGE OF UNSEEN TEST WORDS \n")
+        glovewords = loadglovewords(glovedim)
+        glove_unc_test = nl_unseen_words - glovewords
+        print("{}/{} unseen test words not covered by Glove".format(len(glove_unc_test), len(nl_unseen_words)))
+
+        print("\n GLOVE COVERAGE OF ALL WORDS \n")
+        glovewords = loadglovewords(glovedim)
+        print("{}/{} train words not covered by Glove".format(len(train_nl_words - glovewords), len(train_nl_words)))
+        print("{}/{} test words not covered by Glove".format(len(test_nl_words - glovewords), len(test_nl_words)))
+        print(train_nl_words - glovewords)
+        print(test_nl_words - glovewords)
+
+        return nl_unseen_words, fl_unseen_words
+
     q.embed()
-
-
-def load_info_mats(p=defaultp):
-    tt = q.ticktock("loader")
-    tt.tick()
-    entity_dict = pickle.load(open(p+"webqsp.entity.dic"))
-    relation_dict = pickle.load(open(p+"webqsp.relation.dic"))
-    entity_names_char = pickle.load(open(p+"webqsp.entity.names.char.sm"))
-    entity_names_word = pickle.load(open(p+"webqsp.entity.names.sm"))
-    entity_notabletypes = pickle.load(open(p+"webqsp.entity.notabletypes.sm"))
-    entity_types = pickle.load(open(p+"webqsp.entity.types.sm"))
-    entity_typenames = pickle.load(open(p+"webqsp.entity.typenames.sm"))
-    relation_names = pickle.load(open(p+"webqsp.relation.names.sm"))
-    relation_domainids = pickle.load(open(p+"webqsp.relation.domainids.sm"))
-    relation_rangeids = pickle.load(open(p+"webqsp.relation.rangeids.sm"))
-    relation_domains = pickle.load(open(p+"webqsp.relation.domains.sm"))
-    relation_ranges = pickle.load(open(p+"webqsp.relation.ranges.sm"))
-    relation_urltokens = pickle.load(open(p+"webqsp.relation.urltokens.sm"))
-    relation_urlwords = pickle.load(open(p+"webqsp.relation.urlwords.sm"))
-    tt.tock("loaded everything")
-    return (entity_dict, relation_dict), \
-           (entity_names_word, entity_names_char, entity_notabletypes, entity_types, entity_typenames), \
-           (relation_names, relation_urlwords, relation_urltokens, relation_domains, relation_ranges, relation_domainids, relation_rangeids)
-
-
-def load_questions(p=defaultqp):
-    tt = q.ticktock("question loader")
-    tt.tick("loading questions")
-    questions, queries = q.StringMatrix(), q.StringMatrix()
-    xquestions, xqueries = q.StringMatrix(), q.StringMatrix()
-
-    queries.tokenize = lambda x: x.split()
-    xqueries.tokenize = lambda x: x.split()
-
-    with open(p+".train.butd") as f:
-        for line in f:
-            qid, question, query, replacements = line.split("\t")
-            questions.add(question)
-            queries.add(query)
-
-    questions.finalize()
-    queries.finalize()
-
-    with open(p+".test.butd") as f:
-        for line in f:
-            qid, question, query, replacements = line.split("\t")
-            xquestions.add(question)
-            xqueries.add(query)
-
-    xquestions.finalize()
-    xqueries.finalize()
-    tt.tock("loaded questions")
-    return (questions, queries), (xquestions, xqueries)
-
 
 
 if __name__ == "__main__":

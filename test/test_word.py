@@ -169,6 +169,31 @@ class TestComputedWordEmb(TestCase):
         self.assertTrue(np.allclose(msk.data.numpy(), [[0,1,1]]))
 
 
+class TestMergedWordEmb(TestCase):
+    def setUp(self):
+        worddic = "<MASK> <RARE> first second third fourth fifth"
+        worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
+        self.emb1 = q.WordEmb(100, worddic=worddic)
+        self.emb2 = q.WordEmb(100, worddic=worddic)
+
+    def test_sum_merge(self):
+        emb = self.emb1.merge(self.emb2, mode="sum")
+        x = Variable(torch.LongTensor([0, 1, 2]))
+        emb1res, msk1 = self.emb1(x)
+        print(msk1)
+        emb2res, msk2 = self.emb2(x)
+        embres, msk = emb(x)
+        self.assertTrue(np.allclose(embres.data.numpy(), emb1res.data.numpy() + emb2res.data.numpy()))
+
+    def test_cat_merge(self):
+        emb = self.emb1.merge(self.emb2, mode="cat")
+        x = Variable(torch.LongTensor([0, 1, 2]))
+        emb1res, msk1 = self.emb1(x)
+        print(msk1)
+        emb2res, msk2 = self.emb2(x)
+        embres, msk = emb(x)
+        self.assertTrue(np.allclose(embres.data.numpy(), np.concatenate([emb1res.data.numpy(), emb2res.data.numpy()], axis=1)))
+
         # TODO: test WordLinouts
 
 class TestWordLinout(TestCase):
@@ -278,5 +303,8 @@ class TestOverriddenWordLinout(TestCase):
         self.assertTrue(np.allclose(pred[:, 10], overpred[:, 2]))
         self.assertTrue(np.allclose(pred[:, 5], overpred[:, 3]))
         self.assertTrue(np.allclose(pred[:, 6], basepred[:, 6]))
+
+
+
 
 
