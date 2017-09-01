@@ -18,7 +18,7 @@ class GANTrainer(object):
                         logger=None,
                         data_iter=None,
                         valid_data_iter=None,
-                        validation_metrics=[],  # f2r, r2f, fnr, emd
+                        validation_metrics=[],  # fnr, emd
                         notgan=False,
                         validinter=1):
         if one_sided:
@@ -42,6 +42,8 @@ class GANTrainer(object):
         self.validinter = validinter
         self.validation_metrics = validation_metrics
         self.notgan = notgan
+        # cache
+        self.validdata = None
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -213,16 +215,18 @@ class GANTrainer(object):
                     distmat = q.LNormDistance(2)(
                         validreal.unsqueeze(0),
                         validfake.unsqueeze(0)).squeeze(0)
-                    npdistmat = distmat.cpu().data.numpy()
-                    # ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
-                    # valid_EMD = npdistmat[ass_x, ass_y].mean()
+                    if "emd" in self.validation_metrics:
+                        npdistmat = distmat.cpu().data.numpy()
+                        ass_x, ass_y = spopt.linear_sum_assignment(npdistmat)
+                        valid_EMD = npdistmat[ass_x, ass_y].mean()
 
-                    #real2fake and fake2real
-                    valid_fake2real, _ = torch.min(distmat, 0)
-                    valid_real2fake, _ = torch.min(distmat, 1)
-                    valid_fake2real = valid_fake2real.mean()
-                    valid_real2fake = valid_real2fake.mean()
-                    valid_fakeandreal = 2 * valid_fake2real * valid_real2fake / (valid_fake2real + valid_real2fake).clamp(min=1e-6)
+                    if "fnr" in self.validation_metrics:
+                        #real2fake and fake2real
+                        valid_fake2real, _ = torch.min(distmat, 0)
+                        valid_real2fake, _ = torch.min(distmat, 1)
+                        valid_fake2real = valid_fake2real.mean()
+                        valid_real2fake = valid_real2fake.mean()
+                        valid_fakeandreal = 2 * valid_fake2real * valid_real2fake / (valid_fake2real + valid_real2fake).clamp(min=1e-6)
 
             if self.logger is not None:
                 self.logger.log(_iter=_iter, niter=niter,
