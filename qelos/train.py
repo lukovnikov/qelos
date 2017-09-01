@@ -23,7 +23,8 @@ class TensorDataset(Dataset):      # TODO
             assert(xe.size(0) == self.tensors[0].size(0))
 
     def __getitem__(self, index):
-        return tuple([xe[index] for xe in self.tensors])
+        ret = tuple([xe[index] for xe in self.tensors])
+        return ret
 
     def __len__(self):
         return self.tensors[0].size(0)
