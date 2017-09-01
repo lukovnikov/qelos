@@ -122,3 +122,7 @@ def load_questions_inone(p=defaultqp):
             qids.append(qid)
 
     return questions, queries, qids, tx_sep
+
+
+def load_vnt_mats(p=defaultqp, tgtdict=None):   # tgtdict: get from makereps.py get_all_reps() tgt_emb or tgt_lin
+    pass    # TODO

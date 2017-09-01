@@ -54,6 +54,9 @@ def get_all_reps(glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_emb
                          rel_embdim=rel_embdim,
                          rel_which=rel_which)
 
+    assert(tgt_emb.D == tgt_lin.D)
+    print("tgt emb dic and tgt lin dic consistent")
+
     return src_emb, tgt_emb, tgt_lin
 
 
@@ -98,6 +101,9 @@ def get_fl_emb(fl_sm, dim, gloveemb, computedwhat=q.ComputedWordEmb,
         raise q.SumTingWongException()
 
     emb = baseemb.override(ent_emb).override(rel_emb)
+    for k, v in fl_sm.D.items():
+        assert(emb.D[k] == v)
+    print("fl_sm and tgt's emb.D consistent !")
     return emb
 
 
