@@ -58,7 +58,7 @@ def load_relation_info_mats(p=defaultp):
     relation_ranges = pickle.load(open(p+"webqsp.relation.ranges.sm"))
     relation_urltokens = pickle.load(open(p+"webqsp.relation.urltokens.sm"))
     relation_urlwords = pickle.load(open(p+"webqsp.relation.urlwords.sm"))
-    tt.tock("loaded everything")
+    tt.tock("loaded relation info")
     return relation_dict, q.dtoo({"names": relation_names,
                                   "urlwords": relation_urlwords,
                                   "urltokens": relation_urltokens,
@@ -114,7 +114,7 @@ def load_questions_inone(p=defaultqp):
 
     tx_sep = len(qids)
 
-    with open(p+"test.butd") as f:
+    with open(p+".test.butd") as f:
         for line in f:
             qid, question, query, replacements = line.split("\t")
             questions.add(question)

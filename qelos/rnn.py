@@ -228,6 +228,7 @@ class RNUBase(RecStateful):
         newstates = ret[1:]
         st = []
         if mask_t is not None:
+            mask_t = mask_t.float()
             for newstate, oldstate in zip(newstates, states):
                 newstate = newstate * mask_t + oldstate * (1 - mask_t)
                 st.append(newstate)
@@ -513,14 +514,26 @@ class RNNLayer(nn.Module, Recurrent):
     def __init__(self, cell):
         super(RNNLayer, self).__init__()
         self.cell = cell
-        self.result = set()     # "all", "final"
+        self._return_final = False
+        self._return_all = True
+        self._return_mask = False
 
-    def return_all(self):
-        self.result.add("all")
+    def return_all(self, truth=True):
+        if truth == "only":
+            self._return_final = False
+            truth = True
+        self._return_all = truth
         return self
 
-    def return_final(self):
-        self.result.add("final")
+    def return_final(self, truth=True):
+        if truth == "only":
+            self._return_all = False
+            truth = True
+        self._return_final = truth
+        return self
+
+    def return_mask(self, truth=True):
+        self._return_mask = truth
         return self
 
     def forward(self, x, mask=None, init_states=None, reverse=False):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
@@ -548,16 +561,18 @@ class RNNLayer(nn.Module, Recurrent):
             #         if x.is_cuda: y_tm1 = y_tm1.cuda()
             #     y_t = y_t * mask_t + y_tm1 * (1 - mask_t)
             #     y_tm1 = y_t
-            if "all" in self.result:
+            if self._return_all:
                 y_list.append(y_t)
             i -= 1
         ret = tuple()
-        if "final" in self.result:
+        if self._return_final:
             ret += (y_t,)
-        if "all" in self.result:
+        if self._return_all:
             if reverse: y_list.reverse()
             y = torch.stack(y_list, 1)
             ret += (y,)
+        if self._return_mask:
+            ret += (mask,)
         if len(ret) == 1:
             return ret[0]
         elif len(ret) == 0:
@@ -774,8 +789,13 @@ class RecurrentWrapper(Recurrent, nn.Module):
         batsize, seqlen = x.size(0), x.size(1)
         i = x.view(batsize * seqlen, *x.size()[2:])
         y = self.block(i)
-        y = y.view(batsize, seqlen, *y.size()[1:])
-        return y
+        if not issequence(y):
+            y = (y,)
+        yo = []
+        for ye in y:
+            ye = ye.view(batsize, seqlen, *ye.size()[1:])
+            yo.append(ye)
+        return tuple(yo)
 
 
 class RecurrentStack(RecStack):
@@ -786,17 +806,27 @@ class RecurrentStack(RecStack):
             self.output = "all"
         newlayers = []
         for layer in layers:
-            if not isinstance(layer, Recurrent):
+            if not isinstance(layer, (Recurrent, q.argmap)):
                 layer = RecurrentWrapper(layer)
             newlayers.append(layer)
         super(RecurrentStack, self).__init__(*newlayers)
 
     def forward(self, *x):
         y_l = x
+        args, kwargs = None, None
+        argmapped = False
         for layer in self.layers:
             # print layer
-            y_l = layer(*y_l)
-            if not issequence(y_l):
+            if argmapped:
+                y_l = layer(*args, **kwargs)
+            else:
+                y_l = layer(*y_l)
+            if isinstance(layer, q.argmap):
+                args, kwargs = y_l
+                argmapped = True
+            else:
+                argmapped = False
+            if not issequence(y_l) and not argmapped:
                 y_l = [y_l]
         if self.output == "all":
             ret = y_l

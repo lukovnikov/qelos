@@ -165,12 +165,16 @@ class AdaptedWordEmb(WordEmbBase):  # adapt to given dictionary, map extra words
 
         rareid = D[wordemb.raretoken] if wordemb.raretoken in D else 0
 
+        # maps all idx from wdic (new) to idx in wordemb.D (old)
+        # maps words from wdic (new) that are missing in wordemb.D (old)
+        #   to wordemb.D's rare id
+
         self.ad = {v: D[k] if k in D else rareid for k, v in wdic.items()}
 
         valval = np.ones((max(self.ad.keys()) + 1,), dtype="int64")
         for i in range(valval.shape[0]):
-            valval[i] = self.ad[i] if i in self.ad else D[wordemb.raretoken]
-        self.adb = nn.Parameter(torch.from_numpy(valval), requires_grad=False)
+            valval[i] = self.ad[i] if i in self.ad else rareid
+        self.adb = q.val(valval).v
 
     def forward(self, inp):
         # x = q.var(self.adb).cuda(inp).v.gather(0, inp)
@@ -216,6 +220,7 @@ class ComputedWordEmb(WordEmbBase):
         x = x.view(-1)
         data = self.data.index_select(0, x)
         emb = self.computer(data)
+        emb = emb.contiguous()
         emb = emb.view(*(xshape + (-1,)))
         return emb, mask
 
@@ -394,6 +399,11 @@ class WordLinoutBase(WordVecBase, nn.Module):
                  which=None):  # uses override vectors instead of base vectors if word in override dictionary
         return OverriddenWordLinout(self, wordemb, which=which)
 
+    def merge(self, x, mode="sum"):
+        if not self.D == x.D:
+            raise q.SumTingWongException()
+        return MergedWordLinout(self, x, mode=mode)
+
 
 class WordLinout(WordLinoutBase):
     def __init__(self, indim, worddic=None, weight=None, set_bias=None, bias=True, fixed=False):
@@ -481,6 +491,7 @@ class ComputedWordLinout(WordLinoutBase):
             compute_ids = msk.nonzero()
             data_select = self.data[compute_ids]
             comp_weight = self.computer(data_select)        # (num_data_select, indim)
+            comp_weight = comp_weight.contiguous()
             indim = comp_weight.size(1)
             if self.base_weight is None or self.base_weight.size(1) != indim:
                 self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
@@ -489,6 +500,7 @@ class ComputedWordLinout(WordLinoutBase):
             weight = weight.gather(0, index_transform)
         else:
             weight = self.computer(self.data)
+            weight = weight.contiguous()
         out = torch.mm(x, weight.t)
         if self.bias:
             bias = self.bias if mask is not None else self.bias * mask
@@ -528,32 +540,37 @@ class PretrainedWordLinout(WordLinout, PretrainedWordVec):
 class AdaptedWordLinout(WordLinoutBase):
     def __init__(self, wordlinout, wdic, **kw):
         D = wordlinout.D
-        assert (wordlinout.raretoken in D)  # must have rareid in D to map extra words to it
-        assert(self.raretoken in wdic)
+        # assert (self.raretoken in D)  # must have rareid in D to map extra words to it
+        # assert(wordlinout.raretoken in wdic)
         super(AdaptedWordLinout, self).__init__(wdic, **kw)
         self.inner = wordlinout
 
-        self.new_to_old_d = {v: D[k] if k in D else D[self.raretoken]
+        rareid_new2old = D[wordlinout.raretoken] if wordlinout.raretoken in D else 0
+        rareid_old2new = wdic[self.raretoken] if self.raretoken in wdic else 0
+
+        self.new_to_old_d = {v: D[k] if k in D else rareid_new2old
                    for k, v in wdic.items()}
-        self.old_to_new_d = {v: wdic[k] if k in wdic else wdic[wordlinout.raretoken]
+        # mapping from new indexes (wdic) to old indexes (wordlinout)
+        self.old_to_new_d = {v: wdic[k] if k in wdic else rareid_old2new
                              for k, v in D.items()}
+        # mapping from old indexes (wordlinout) to new indexes (wdic)
 
         numnew = max(self.new_to_old_d.keys()) + 1
         numold = max(self.old_to_new_d.keys()) + 1
 
         new_to_old = np.zeros((numnew,), dtype="int64")
         for i in range(new_to_old.shape[0]):
-            j = self.new_to_old_d[i] if i in self.new_to_old_d else D[wordlinout.raretoken]
+            j = self.new_to_old_d[i] if i in self.new_to_old_d else rareid_new2old
             new_to_old[i] = j
-        self.new_to_old = nn.Parameter(torch.from_numpy(new_to_old),
-                                       requires_grad=False)  # for every new dic word id, contains old dic id
+        self.new_to_old = q.val(new_to_old).v  # for every new dic word id, contains old dic id
+        # index in new dic contains idx value of old dic
+        # --> used to slice from matrix in old idxs to get matrix in new idxs
 
         old_to_new = np.zeros((numold,), dtype="int64")
         for i in range(old_to_new.shape[0]):
-            j = self.old_to_new_d[i] if i in self.old_to_new_d else wdic[self.raretoken]
+            j = self.old_to_new_d[i] if i in self.old_to_new_d else rareid_old2new
             old_to_new[i] = j
-        self.old_to_new = nn.Parameter(torch.from_numpy(old_to_new),
-                                       requires_grad=False)  # for every old dic word id, contains new dic id
+        self.old_to_new = q.val(old_to_new).v  # for every old dic word id, contains new dic id
 
     def _getvector(self, wordid):
         wordid = self.new_to_old[wordid]

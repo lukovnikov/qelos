@@ -46,3 +46,46 @@ def name2fn(x):
     if x not in mapping:
         raise Exception("unknown activation function name")
     return mapping[x]
+
+
+def seq_pack(x, mask):  # mask: (batsize, seqlen)
+    # 1. get lengths
+    lens = torch.sum(mask, 1)
+    # 2. sort by length
+    # 3. pack
+    return x
+
+
+def seq_unpack(x):
+    return x, mask
+
+
+class argmap(nn.Module):
+    def __init__(self, f=lambda *args, **kwargs: (args, kwargs)):
+        super(argmap, self).__init__()
+        self.f = f
+
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+    @staticmethod
+    def from_spec(*argspec, **kwargspec):
+        """ specs for output args and kwargs"""
+
+        def dict_arg_map(*args, **kwargs):
+            def get_(spece, a, k):
+                if isinstance(spece, set):
+                    return k[list(spece)[0]]
+                else:
+                    return a[spece]
+
+            outargs = []
+            outkwargs = {}
+            for argspec_e in argspec:
+                outargs.append(get_(argspec_e, args, kwargs))
+            for kwargspec_k, kwargspec_v in kwargspec.items():
+                outkwargs[kwargspec_k] = get_(kwargspec_v, args, kwargs)
+            return outargs, outkwargs
+
+        mapfn = dict_arg_map
+        return argmap(mapfn)
