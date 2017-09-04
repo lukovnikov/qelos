@@ -594,26 +594,21 @@ def _reverse_seq(x, mask=None):
 
 
 class GRULayer(RNUBase, Recurrent):
-    def __init__(self, indim, outdim, use_bias=True, reverse=False, bidirectional=False):
+    def __init__(self, indim, outdim, use_bias=True, reverse=False):
         super(GRULayer, self).__init__()
-        self.indim, self.outdim, self.use_bias, self.bidirectional = indim, outdim, use_bias, bidirectional
+        self.indim, self.outdim, self.use_bias = indim, outdim, use_bias
         self.nnlayer = self._nn_unit()(indim, outdim, bias=use_bias, batch_first=True, bidirectional=False, num_layers=1)
         self._return_final = False
         self._return_all = True
         self._return_mask = False
         self._reverse = reverse
         self._reverse_net = None
-        if self.bidirectional:
-            assert(not self._reverse)
-            self._reverse_net = self.__class__(indim, outdim, use_bias=use_bias, reverse=True, bidirectional=False)
 
     def return_all(self, truth=True):
         if truth == "only":
             self._return_final = False
             truth = True
         self._return_all = truth
-        if self._reverse_net is not None:
-            self._reverse_net.return_all(truth)
         return self
 
     def return_final(self, truth=True):
@@ -621,14 +616,10 @@ class GRULayer(RNUBase, Recurrent):
             self._return_all = False
             truth = True
         self._return_final = truth
-        if self._reverse_net is not None:
-            self._reverse_net.return_final(truth)
         return self
 
     def return_mask(self, truth=True):
         self._return_mask = truth
-        if self._reverse_net is not None:
-            self._reverse_net.return_mask(truth)
         return self
     
     @property
@@ -645,7 +636,7 @@ class GRULayer(RNUBase, Recurrent):
     def forward(self, x, mask=None):
         self.reset_state()
         h_0 = self._get_init_states(x.size(0))
-        if self._reverse:       # TODO: test
+        if self._reverse:       # TODO: test reversed
             x = _reverse_seq(x, mask=mask)
             x = x * mask.unsqueeze(2).float()
         y, s_t = self.nnlayer(x, h_0)
@@ -658,7 +649,7 @@ class GRULayer(RNUBase, Recurrent):
             else:
                 if mask is None:
                     y_t = y[:, -1, :]
-                else:   # TODO test
+                else:   # TODO test masked final
                     cum = (torch.cumsum(mask, 1)[:, -1] - 1).long()             # (batsize): lengths of sequences - 1
                     rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
                     y_t = y[rng, cum, :]
@@ -671,19 +662,7 @@ class GRULayer(RNUBase, Recurrent):
             ret += (y,)
         if self._return_mask:
             ret += (mask,)
-           
-        # reverse net
-        if self._reverse_net is not None:       # TODO test
-            ret_rev = self._reverse_net(x, mask=mask)
-            mergefn = lambda x, y: torch.cat([x, y], -1)
-            if self._return_mask:
-                maskret = ret[-1]
-                ret = ret[:-1]
-                ret_rev = ret_rev[:-1]
-            ret = tuple([mergefn(x,y) for x, y in zip(ret, ret_rev)])
-            if self._return_mask:
-                ret += (maskret,)
-                
+            
         if len(ret) == 1:
             return ret[0]
         elif len(ret) == 0:
@@ -694,12 +673,8 @@ class GRULayer(RNUBase, Recurrent):
 
     @property
     def state_spec(self):
-        if self.bidirectional:
-            return (self.outdim, self.outdim)
-        else:
-            return (self.outdim,)
+        return (self.outdim,)
 
-    # TODO: managing _reverse_net's states from here
     def _get_init_states(self, arg):
         initstates = super(GRULayer, self).get_init_states(arg)
         l = []
@@ -734,8 +709,6 @@ class LSTMLayer(GRULayer):
     @property
     def state_spec(self):
         statespec = (self.outdim, self.outdim)
-        if self.bidirectional:
-            statespec = statespec + statespec
         return statespec
 
     def _get_init_states(self, arg):
@@ -747,9 +720,84 @@ class LSTMLayer(GRULayer):
     def set_states(self, *states):
         state = torch.cat(list(states[0]), 0)
         super(LSTMLayer, self).set_states(state)
+        
 
+class BidirGRULayer(_BidirRNNLayer):    # TODO: test bidirectional
+    def __init__(self, indim, outdim, use_bias=True):
+        super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias)
+        
+        
+class BidirLSTMLayer(_BidirRNNLayer):
+    def __init__(self, indim, outdim, use_bias=True):
+        super(BidirLSTMLayer, self).__init__(LSTMLayer, indim, outdim, use_bias=use_bias)
+        
+       
+class _BidirRNNLayer(nn.Module, Recurrent):
+    """ For creating bidir layers from layer class.
+        Initial states must be set on fwd and rev layers individually. TODO
+    """
+    def __init__(self, layercls, indim, outdim, use_bias=True, mode="cat"):
+        super(BidirRNNLayer, self).__init__()
+        self.layer_fwd = layercls(indim, outdim, use_bias=use_bias, reverse=False)
+        self.layer_rev = layercls(indim, outdim, use_bias=use_bias, reverse=True)
+        self.mode = mode        
+        self._return_final = False
+        self._return_all = True
+        self._return_mask = False
+        self._reverse = reverse
+        self._reverse_net = None
+
+    def return_all(self, truth=True):
+        self.layer_fwd.return_all(truth)
+        self.layer_rev.return_all(truth)
+        if truth == "only":
+            self._return_final = False
+            truth = True
+        self._return_all = truth
+        return self
+
+    def return_final(self, truth=True):
+        self.layer_fwd.return_final(truth)
+        self.layer_rev.return_final(truth)
+        if truth == "only":
+            self._return_all = False
+            truth = True
+        self._return_final = truth
+        return self
+
+    def return_mask(self, truth=True):
+        self._return_mask = truth
+        return self
+    
+    def forward(self, x, mask=None):
+        fwd_ret = self.layer_fwd(x, mask=mask)
+        rev_ret = self.layer_rev(x, mask=mask)
+        
+        merge_fn = (lambda x, y: torch.cat([x, y], -1)) if self.mode == "cat" else (lambda x, y: x + y)
+        
+        ret = tuple()
+        if self._return_final:
+            ret += (merge_fn(fwd_ret[0], rev_ret[0]),)
+            fwd_ret = fwd_ret[1:]
+            rev_ret = rev_ret[1:]
+        if self._return_all:
+            ret += (merge_fn(fwd_ret[0], rev_ret[0]),)
+        if self._return_mask:
+            ret += (mask,)
+            
+        if len(ret) == 1:
+            return ret[0]
+        elif len(ret) == 0:
+            print("no output specified")
+            return
+        else:
+            return ret
+        
+    # Setting initial states must be done in layers separately TODO: make proxy here
+    
 
 class BiRNNLayer(nn.Module, Recurrent):
+    """ Creates bidirectional RNN layer from two cells """
     def __init__(self, cell1, cell2, mode="cat"):       # "cat" or "sum" or ...?
         super(BiRNNLayer, self).__init__()
         self.cell1 = cell1
