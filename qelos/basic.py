@@ -27,22 +27,163 @@ class Lambda(nn.Module):
         return self.fn(*x, **kwargs)
 
 
+class StackSpecFunction(Lambda):
+    """ Only used inside stacks."""
+    @staticmethod
+    def get_(spece, a, k, g):
+        if isinstance(spece, set):
+            assert (len(spece) == 1)
+            return k[list(spece)[0]]
+        elif isinstance(spece, list):
+            assert (len(spece) == 1)
+            return g[spece[0]]
+        else:
+            return a[spece]
+
+
+class argmap(StackSpecFunction):
+    """
+    Only used inside stacks.
+    Provided function must follow .forward()'s specifications
+    """
+    def forward(self, args, kwargs, saved_slots):
+        """
+        :param args:    sequence outputs of previous layer
+        :param kwargs:  stack's current **kw to be fed to next layer
+        :param globols: stack's current saved slots
+        :return:        tuple of (*args, **kwargs) to feed to next layer
+        """
+        return self.fn(args, kwargs, saved_slots)
+
+    @classmethod
+    def from_spec(cls, *argspec, **kwargspec):
+        """
+        Specs for args and kwargs for next layer
+        Values from the sequence output of previous layer (args) can
+        be accessed by integers.
+        Values from the dictionary output of previous layer (kwargs), which can occur if this is preceded by another argmap
+        can be accessed by keys wrapped in a set (e.g. {1} or {"mask"}.
+        Values from the saved stack slots can be accessed
+        by keys wrapped in a list (e.g. [1] or ["mask"].
+
+        For example, if layer A outputs a tuple (x, y, z),
+        and the stack function-wide **kw contains a "t" key,
+        and a different key "t" was saved in stack,
+
+        argmap.from_spec(0, 1, {"t"}, z=2, t=["t"])
+
+        will map x to first input to next layer B,
+        map y to second input to B,
+        map the **kw's "t" to the third input to B,
+        map z to the keyword input "z" of B,
+        and map stack's saved "t" to keyword input "t" of B.
+
+        """
+        this = cls
+
+        def dict_arg_map(args, kwargs, saved_slots):
+            outargs = []
+            outkwargs = {}
+            for argspec_e in argspec:
+                outargs.append(this.get_(argspec_e, args, kwargs, saved_slots))
+            for kwargspec_k, kwargspec_v in kwargspec.items():
+                outkwargs[kwargspec_k] = this.get_(kwargspec_v, args, kwargs, saved_slots)
+            return outargs, outkwargs
+        return cls(dict_arg_map)
+
+
+class argsave(StackSpecFunction):
+    """
+    Only used inside stacks.
+    Provided function must accept .forward()'s argument specification
+    and return an update dictionary to apply to stack's saved slots (globols).
+    Can be used to implement shortcuts within a Stack.
+    """
+    def forward(self, args, kwargs, saved_slots):
+        """
+        Updates provided globols.
+        :param args:    sequence outputs of previous layer
+        :param kwargs:  stack's current **kw to be fed to next layer
+        :param globols: stack's current saved slots
+        :return:        globols
+        """
+        upd = self.fn(args, kwargs, saved_slots)
+        saved_slots.update(upd)
+        return saved_slots
+
+    @classmethod
+    def from_spec(cls, **savespec):
+        """
+        Specs for saving some current stack variables
+        (previous layer sequence outputs (args), kwargs, and saved stack globals)
+        to stack-global saved variables (_globals).
+        Follows the same specification format as argmap,
+        except only keyword-based storage is possible.
+
+        For example, if layer A outputs a tuple (x, y, z),
+        and the stack function-wide **kw contains a "t" key,
+        and a different key "t" was saved in stack,
+
+        cls.from_spec(t={"t"}, z=2, prev_t=["t"])
+
+        will save the **kw "t" to stack's "t" slot,
+        save z to to stack's "z" slot, and
+        save stack's saved "t" to stack's "prev_t" slot.
+        The update to stack's saved slots is carried out at once, so
+        the stack's saved "t" will be backed up
+        in stack's saved slot "prev_t" and saved slot "t"
+        will be overwritten by **kw's "t".
+
+        """
+        this = cls
+
+        def dict_save_map(args, kwargs, saved_slots):
+            update = {}
+            for spec_key, spec_val in savespec.items():
+                update[spec_key] = this.get_(spec_val, args, kwargs, saved_slots)
+            return update
+        return cls(dict_save_map)
+
+
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
         self.layers = q.ModuleList(list(layers))
+        self._saved_slots = {}      # not for params
 
     def add(self, *layers):
         self.layers.extend(list(layers))
 
     def forward(self, *x, **kw):
+        y_l = x
+        args, kwargs = None, None
+        argmapped = False
         for layer in self.layers:
-            x = layer(*x, **kw)
-            if not q.issequence(x):
-                x = (x,)
-        if len(x) == 1:
-            x = x[0]
-        return x
+            if argmapped:
+                rargs = args
+                rkw = {}
+                rkw.update(kw)
+                rkw.update(kwargs)
+            else:
+                rargs = y_l
+                rkw = kw
+            if isinstance(layer, q.argmap):
+                args, kwargs = layer(rargs, rkw, self._saved_slots)
+                argmapped = True
+            elif isinstance(layer, argsave):
+                globols = layer(rargs, rkw, self._saved_slots)
+            else:
+                y_l = layer(*rargs, **rkw)
+                argmapped = False
+            if not q.issequence(y_l) and not argmapped:
+                y_l = tuple([y_l])
+        if argmapped:
+            ret = args
+        else:
+            ret = y_l
+        if len(ret) == 1:
+            ret = ret[0]
+        return ret
 
     # TODO: stack generator
 
@@ -155,7 +296,7 @@ class Forward(nn.Module):
         return x
 
 
-class Distance(nn.Module):          # TODO: all distances must work with 2D/2D, 3D/2D and 3D/3D
+class Distance(nn.Module):
     pass
 
 
@@ -202,8 +343,6 @@ class LNormDistance(Distance):
         #lognorm = T.logsumexp(temp * self.L, axis=-1) / self.L
         ret = maximum_red * (torch.sum(temp, -1).clamp(min=1e-6) ** (1./self.L))
         return ret
-
-# TODO: Euclidean and LNorm distances
 
 
 class ForwardDistance(Distance):

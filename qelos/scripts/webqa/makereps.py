@@ -10,8 +10,9 @@ defaultqp = "../../../datasets/webqsp/webqsp"
 
 
 def run(x=0):
+    question_sm, query_sm, qids, tx_sep = load_questions_inone(p=defaultqp)
     # test
-    src_emb, tgt_emb, tgt_lin = get_all_reps()
+    src_emb, tgt_emb, tgt_lin = get_all_reps(question_sm=question_sm, query_sm=query_sm)
 
     x = q.var(np.asarray(
         [tgt_emb.D[":film.actor.film"], tgt_emb.D[":film.performance.character"]])).v
@@ -36,9 +37,9 @@ def run(x=0):
     print("same for ent")
 
 
-def get_all_reps(glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_embdim=None):
+def get_all_reps(glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_embdim=None,
+                 question_sm=None, query_sm=None):
     gloveemb = q.PretrainedWordEmb(glovedim, incl_maskid=False, incl_rareid=False)
-    question_sm, query_sm, qids, tx_sep = load_questions_inone(p=defaultqp)
 
     src_emb = get_nl_emb(question_sm, glovedim, gloveemb)
     tgt_emb = get_fl_emb(query_sm, glovedim, gloveemb,
@@ -103,7 +104,7 @@ def get_fl_emb(fl_sm, dim, gloveemb, computedwhat=q.ComputedWordEmb,
     emb = baseemb.override(ent_emb).override(rel_emb)
     for k, v in fl_sm.D.items():
         assert(emb.D[k] == v)
-    print("fl_sm and tgt's emb.D consistent !")
+    print("fl_sm and tgt's emb.D consistent")
     return emb
 
 
@@ -122,8 +123,7 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
         q.argmap.from_spec(0, mask=1),
         q.GRUCell(embdim, dim).to_layer(),
         #q.GRUCell(dim, dim).to_layer(),
-        output="last",
-    )
+    ).last_timestep()
     ent_name_emb_computer = ent_name_inner_enc
     ent_name_emb = computedwhat(data=entinfo.names_word.matrix, computer=ent_name_emb_computer, worddic=entdic)
     # 2. encode entity notable type
@@ -134,8 +134,7 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
         q.argmap.from_spec(0, mask=1),
         q.GRUCell(embdim, dim).to_layer(),
         #q.GRUCell(dim, dim).to_layer(),
-        output="last"
-    )
+    ).last_timestep()
     ent_notabletype_emb_computer = ent_notabletype_inner_enc
     ent_notabletype_emb = computedwhat(data=entinfo.notabletypes_word.matrix, computer=ent_notabletype_emb_computer, worddic=entdic)
     # 3. merge
@@ -161,8 +160,7 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
             q.argmap.from_spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             #q.GRUCell(dim, dim).to_layer(),
-            output="last"
-        )
+        ).last_timestep()
         rel_name_emb = computedwhat(data=relinfo.names.matrix, computer=rel_name_inner_enc, worddic=reldic)
         tomerge.append(rel_name_emb)
 
@@ -175,8 +173,7 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
             q.argmap.from_spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-            output="last"
-        )
+        ).last_timestep()
         rel_urlwords_emb = computedwhat(data=relinfo.urlwords.matrix, computer=rel_urlwords_inner_enc, worddic=reldic)
         tomerge.append(rel_urlwords_emb)
 
@@ -188,8 +185,7 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
             q.argmap.from_spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-            output="last"
-        )
+        ).last_timestep()
         rel_urltokens_emb = computedwhat(data=relinfo.urltokens.matrix, computer=rel_urltokens_comp, worddic=reldic)
         tomerge.append(rel_urltokens_emb)
 
@@ -217,8 +213,7 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
             q.argmap.from_spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-            output="last"
-        )
+        ).last_timestep()
         rel_domainwords_emb = computedwhat(data=relinfo.domainwords.matrix, computer=rel_domainwords_inner_enc, worddic=reldic)
 
         tomerge.append(rel_domainwords_emb)
@@ -232,8 +227,7 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
             q.argmap.from_spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-            output="last"
-        )
+        ).last_timestep()
         rel_rangewords_emb = computedwhat(data=relinfo.rangewords.matrix, computer=rel_rangewords_inner_enc, worddic=reldic)
 
         tomerge.append(rel_rangewords_emb)

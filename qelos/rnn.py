@@ -712,21 +712,31 @@ class BiRNNLayer(nn.Module, Recurrent):
 
 
 # region II. RNN stacks
+class ReccableWrap(Reccable, nn.Module):
+    def __init__(self, block):
+        super(ReccableWrap, self).__init__()
+        self.block = block
+
+    def forward(self, *args, **kwargs):     # ignore global mask_t and t
+        if "mask_t" in kwargs:
+            del kwargs["mask_t"]
+        if "t" in kwargs:
+            del kwargs["t"]
+        ret = self.block(*args, **kwargs)
+        return ret
+
+
 class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, not rec stateful itself
     """
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
-    def forward(self, *x_t, **kw):
-        y_t = x_t
-        for layer in self.layers:
-            layerkw = {k: v for k, v in kw.items() if k not in "mask_t t".split()}\
-                if not isinstance(layer, Reccable) else kw
-            y_t = layer(*y_t, **layerkw)
-            if not issequence(y_t):
-                y_t = tuple([y_t])
-        if len(y_t) == 1:
-            y_t = y_t[0]
-        return y_t
+    def __init__(self, *layers):
+        newlayers = []
+        for layer in layers:
+            if not isinstance(layer, (Reccable, q.argmap)):
+                layer = ReccableWrap(layer)
+            newlayers.append(layer)
+        super(RecStack, self).__init__(*newlayers)
 
     @property
     def state_spec(self):
@@ -798,42 +808,23 @@ class RecurrentWrapper(Recurrent, nn.Module):
         return tuple(yo)
 
 
+class LastTimestepGetter(nn.Module):
+    def forward(self, *x):
+        ret = [x_e[:, -1] for x_e in x]
+        return ret
+
+
 class RecurrentStack(RecStack):
-    def __init__(self, *layers, **kw):
-        if "output" in kw:
-            self.output = kw["output"]
-        else:
-            self.output = "all"
+    def __init__(self, *layers):
         newlayers = []
         for layer in layers:
             if not isinstance(layer, (Recurrent, q.argmap)):
                 layer = RecurrentWrapper(layer)
             newlayers.append(layer)
         super(RecurrentStack, self).__init__(*newlayers)
+        self.return_ = "all"
 
-    def forward(self, *x):
-        y_l = x
-        args, kwargs = None, None
-        argmapped = False
-        for layer in self.layers:
-            # print layer
-            if argmapped:
-                y_l = layer(*args, **kwargs)
-            else:
-                y_l = layer(*y_l)
-            if isinstance(layer, q.argmap):
-                args, kwargs = y_l
-                argmapped = True
-            else:
-                argmapped = False
-            if not issequence(y_l) and not argmapped:
-                y_l = [y_l]
-        if self.output == "all":
-            ret = y_l
-        elif self.output == "last":
-            ret = [y_l_e[:, -1] for y_l_e in y_l]
-        else:
-            raise q.SumTingWongException()
-        if len(ret) == 1:
-            ret = ret[0]
-        return ret
+    def last_timestep(self):
+        if self.return_ == "all":
+            self.add(LastTimestepGetter())
+        return self

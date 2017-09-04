@@ -7,3 +7,15 @@ class SumTingWongException(Exception):
 
 class HoLeePhukException(Exception):
     pass
+
+
+class BaDumTssException(Exception):
+    pass
+
+
+class WeTuLoException(Exception):
+    pass
+
+
+class WeTuHiException(Exception):
+    pass

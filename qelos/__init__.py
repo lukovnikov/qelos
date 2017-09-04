@@ -3,12 +3,12 @@ from qelos.rnn import GRUCell, LSTMCell, RNU, RecStack, RNNLayer, BiRNNLayer, GR
 from qelos.loss import SeqNLLLoss
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, CosineDistance, DotDistance, Forward, ForwardDistance, \
-    Distance, Lambda, Stack, TrilinearDistance, LNormDistance, SeqBatchNorm1d, CReLU, Identity
+    Distance, Lambda, Stack, TrilinearDistance, LNormDistance, SeqBatchNorm1d, CReLU, Identity, argmap, argsave
 from qelos.containers import ModuleList
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo
-from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, argmap
+from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, WordLinout, PretrainedWordLinout, ComputedWordLinout
 from qelos.gan import GANTrainer
-from qelos.exceptions import SumTingWongException
+from qelos.exceptions import SumTingWongException, HoLeePhukException, BaDumTssException
 from IPython import embed

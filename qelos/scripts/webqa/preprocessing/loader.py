@@ -1,5 +1,7 @@
 import dill as pickle
 import qelos as q
+import numpy as np
+import scipy.sparse as sparse
 
 
 defaultp = "../../../../datasets/webqsp/flmats/"
@@ -121,8 +123,47 @@ def load_questions_inone(p=defaultqp):
             queries.add(query)
             qids.append(qid)
 
+    questions.finalize()
+    queries.finalize()
+
     return questions, queries, qids, tx_sep
 
 
-def load_vnt_mats(p=defaultqp, tgtdict=None):   # tgtdict: get from makereps.py get_all_reps() tgt_emb or tgt_lin
-    pass    # TODO
+def load_vnt_mats(qids=None, p=defaultqp, tgtdict=None):   # tgtdict: get from makereps.py get_all_reps() tgt_emb or tgt_lin
+    tt = q.ticktock("vnt loader")
+    tt.tick("loading vnts")
+    trainvntp = p+".train.butd.vnt"
+    testvntp = p+".test.butd.vnt"
+    trainvnt = pickle.load(open(trainvntp))
+    print(len(trainvnt))
+    testvnt = pickle.load(open(testvntp))
+    print(len(testvnt))
+    tt.tock("loaded vnts")
+    tt.tick("making vnt mat")
+    vntmat = get_vnt_mat(qids, tgtdict, [trainvnt, testvnt])
+    tt.tock("made vnt mat")
+    return vntmat
+
+
+def get_vnt_mat(qids, tgtdict, vnts):
+    vnt = {}
+    for vnte in vnts:
+        vnt.update(vnte)
+
+    maxlen = 0
+    for example_vnt in vnt:
+        maxlen = max(maxlen, len(vnt[example_vnt]))
+
+    # vntmat = sparse.lil_matrix((len(qids) * (maxlen+1), max(tgtdict.values())+1), dtype="int32")
+    vntmat = np.zeros((len(qids), (maxlen + 1), max(tgtdict.values()) + 1), dtype="int32")
+    for i, qid in enumerate(qids):
+        for j, timestep_vnt in enumerate(vnt[qid]):
+            for timestep_vnt_element in timestep_vnt:
+                k = tgtdict[timestep_vnt_element]
+                # print(i, j, k)
+                vntmat[i, j, k] = 1
+                # vntmat[i * (maxlen + 1) + j, k] = 1
+    # return vntmat, (len(qids), maxlen+1, vntmat.shape[1])
+
+    return vntmat, vntmat.shape
+
