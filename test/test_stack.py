@@ -10,10 +10,10 @@ class TestStack(TestCase):
         data = q.var(np.random.random((3,5)).astype(dtype="float32")).v
         stack = q.Stack(
             q.Forward(5, 5),
-            q.argsave.from_spec(a=0),
+            q.argsave.spec(a=0),
             q.Forward(5, 5),
             q.Forward(5, 5),
-            q.argmap.from_spec(0, ["a"]),
+            q.argmap.spec(0, ["a"]),
             q.Lambda(lambda x, y: torch.cat([x, y], 1)),
             q.Forward(10, 7)
             )
@@ -27,10 +27,10 @@ class TestStack(TestCase):
         nlayers = 5
         for i in range(nlayers):
             stack.add(
-                q.argsave.from_spec(a=0),
+                q.argsave.spec(a=0),
                 q.Forward(5, 5),
                 q.Forward(5, 5),
-                q.argmap.from_spec(0, ["a"]),
+                q.argmap.spec(0, ["a"]),
                 q.Lambda(lambda x, y: x+y)
             )
         out = stack(data)

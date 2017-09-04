@@ -56,7 +56,7 @@ class argmap(StackSpecFunction):
         return self.fn(args, kwargs, saved_slots)
 
     @classmethod
-    def from_spec(cls, *argspec, **kwargspec):
+    def spec(cls, *argspec, **kwargspec):
         """
         Specs for args and kwargs for next layer
         Values from the sequence output of previous layer (args) can
@@ -112,7 +112,7 @@ class argsave(StackSpecFunction):
         return saved_slots
 
     @classmethod
-    def from_spec(cls, **savespec):
+    def spec(cls, **savespec):
         """
         Specs for saving some current stack variables
         (previous layer sequence outputs (args), kwargs, and saved stack globals)

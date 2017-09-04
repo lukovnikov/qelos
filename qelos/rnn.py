@@ -824,7 +824,7 @@ class RecurrentStack(RecStack):
         super(RecurrentStack, self).__init__(*newlayers)
         self.return_ = "all"
 
-    def last_timestep(self):
+    def return_final(self):
         if self.return_ == "all":
             self.add(LastTimestepGetter())
         return self

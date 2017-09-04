@@ -389,6 +389,7 @@ class AttentionDecoderCell(DecoderCell):
                  decinp_to_smo=False,
                  return_out=True,
                  return_att=False,
+                 state_split=False,
                  **kw):
         """
         Initializes attention-based decoder cell
@@ -406,6 +407,7 @@ class AttentionDecoderCell(DecoderCell):
         :param decinp_to_smo:       feed embedding to smo
         :param return_out:          return output probabilities
         :param return_att:          return attention weights over input sequence
+        :param state_split:       split core's state, first half goes to attention (which might also be split), second half goes to smo
         :param kw:
         """
         super(AttentionDecoderCell, self).__init__(**kw)
@@ -423,11 +425,13 @@ class AttentionDecoderCell(DecoderCell):
         self.state_to_smo = state_to_smo
         self.decinp_to_att = decinp_to_att
         self.decinp_to_smo = decinp_to_smo
+        self.state_split = state_split
         # returns
         self.return_out = return_out
         self.return_att = return_att
         # states
         self._state = [None]
+
 
     # region implement DecoderCell signature
     def forward(self, x_t, ctx, ctxmask=None, t=None, **kw):
@@ -452,7 +456,8 @@ class AttentionDecoderCell(DecoderCell):
             i_t = torch.cat([x_t_emb, ctx_t], 1) if self.ctx_to_decinp else x_t_emb
             o_t = self.core(i_t, t=t)
         cat_to_smo = []
-        if self.state_to_smo:   cat_to_smo.append(o_t)
+        o_to_smo = o_t[:, o_t.size(1)//2:] if self.state_split else o_t      # first half is split off in _get_ctx_t()
+        if self.state_to_smo:   cat_to_smo.append(o_to_smo)
         if self.ctx_to_smo:     cat_to_smo.append(ctx_t)
         if self.decinp_to_smo:  cat_to_smo.append(x_t_emb)
         smoinp_t = torch.cat(cat_to_smo, 1) if len(cat_to_smo) > 1 else cat_to_smo[0]
@@ -482,6 +487,8 @@ class AttentionDecoderCell(DecoderCell):
         """
         assert(ctx.dim() == 3)
         assert(ctxmask is None or ctxmask.dim() == 2)
+        if self.state_split:
+            h = h[:, :h.size(1)//2]
         if self.decinp_to_att:
             h = torch.cat([h, x_emb], 1)
         if self.att_transform is not None:

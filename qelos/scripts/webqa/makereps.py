@@ -120,10 +120,10 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     ent_name_inner_emb = ent_name_base_inner_emb.override(gloveemb)
     ent_name_inner_enc = q.RecurrentStack(
         ent_name_inner_emb,
-        q.argmap.from_spec(0, mask=1),
+        q.argmap.spec(0, mask=1),
         q.GRUCell(embdim, dim).to_layer(),
         #q.GRUCell(dim, dim).to_layer(),
-    ).last_timestep()
+    ).return_final()
     ent_name_emb_computer = ent_name_inner_enc
     ent_name_emb = computedwhat(data=entinfo.names_word.matrix, computer=ent_name_emb_computer, worddic=entdic)
     # 2. encode entity notable type
@@ -131,10 +131,10 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     ent_notabletype_inner_emb = ent_notabletype_base_inner_emb.override(gloveemb)
     ent_notabletype_inner_enc = q.RecurrentStack(
         ent_notabletype_inner_emb,
-        q.argmap.from_spec(0, mask=1),
+        q.argmap.spec(0, mask=1),
         q.GRUCell(embdim, dim).to_layer(),
         #q.GRUCell(dim, dim).to_layer(),
-    ).last_timestep()
+    ).return_final()
     ent_notabletype_emb_computer = ent_notabletype_inner_enc
     ent_notabletype_emb = computedwhat(data=entinfo.notabletypes_word.matrix, computer=ent_notabletype_emb_computer, worddic=entdic)
     # 3. merge
@@ -157,10 +157,10 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
         rel_name_inner_emb = rel_name_base_inner_emb.override(gloveemb)
         rel_name_inner_enc = q.RecurrentStack(
             rel_name_inner_emb,
-            q.argmap.from_spec(0, mask=1),
+            q.argmap.spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             #q.GRUCell(dim, dim).to_layer(),
-        ).last_timestep()
+        ).return_final()
         rel_name_emb = computedwhat(data=relinfo.names.matrix, computer=rel_name_inner_enc, worddic=reldic)
         tomerge.append(rel_name_emb)
 
@@ -170,10 +170,10 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
         rel_urlwords_inner_emb = rel_urlwords_base_inner_emb.override(gloveemb)
         rel_urlwords_inner_enc = q.RecurrentStack(
             rel_urlwords_inner_emb,
-            q.argmap.from_spec(0, mask=1),
+            q.argmap.spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-        ).last_timestep()
+        ).return_final()
         rel_urlwords_emb = computedwhat(data=relinfo.urlwords.matrix, computer=rel_urlwords_inner_enc, worddic=reldic)
         tomerge.append(rel_urlwords_emb)
 
@@ -182,10 +182,10 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
         rel_urltokens_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.urltokens.D)
         rel_urltokens_comp = q.RecurrentStack(
             rel_urltokens_inner_emb,
-            q.argmap.from_spec(0, mask=1),
+            q.argmap.spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-        ).last_timestep()
+        ).return_final()
         rel_urltokens_emb = computedwhat(data=relinfo.urltokens.matrix, computer=rel_urltokens_comp, worddic=reldic)
         tomerge.append(rel_urltokens_emb)
 
@@ -210,10 +210,10 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
         rel_domainwords_inner_emb = rel_domainwords_base_inner_emb.override(gloveemb)
         rel_domainwords_inner_enc = q.RecurrentStack(
             rel_domainwords_inner_emb,
-            q.argmap.from_spec(0, mask=1),
+            q.argmap.spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-        ).last_timestep()
+        ).return_final()
         rel_domainwords_emb = computedwhat(data=relinfo.domainwords.matrix, computer=rel_domainwords_inner_enc, worddic=reldic)
 
         tomerge.append(rel_domainwords_emb)
@@ -224,10 +224,10 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
         rel_rangewords_inner_emb = rel_rangewords_base_inner_emb.override(gloveemb)
         rel_rangewords_inner_enc = q.RecurrentStack(
             rel_rangewords_inner_emb,
-            q.argmap.from_spec(0, mask=1),
+            q.argmap.spec(0, mask=1),
             q.GRUCell(embdim, dim).to_layer(),
             # q.GRUCell(dim, dim).to_layer(),
-        ).last_timestep()
+        ).return_final()
         rel_rangewords_emb = computedwhat(data=relinfo.rangewords.matrix, computer=rel_rangewords_inner_enc, worddic=reldic)
 
         tomerge.append(rel_rangewords_emb)
