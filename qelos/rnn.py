@@ -580,14 +580,57 @@ class RNNLayer(nn.Module, Recurrent):
             return
         else:
             return ret
+        
+        
+def _reverse_seq(x, mask=None):
+    if mask is None:
+        cum = torch.arange(0, x.size(1)).unsqueeze(0).repeat(0, x.size(0))
+    else:
+        cum = torch.cumsum(mask, 1)
+    idx = torch.max(cum, 1, keepdim=True)[0] - cum
+    idx = idx.long().repeat(1, 1, x.size(2))
+    retx = torch.gather(x, 1, idx)
+    return retx
 
 
 class GRULayer(RNUBase, Recurrent):
-    def __init__(self, indim, outdim, use_bias=True, bidirectional=False):
+    def __init__(self, indim, outdim, use_bias=True, reverse=False, bidirectional=False):
         super(GRULayer, self).__init__()
         self.indim, self.outdim, self.use_bias, self.bidirectional = indim, outdim, use_bias, bidirectional
-        self.nnlayer = self._nn_unit()(indim, outdim, bias=use_bias, batch_first=True, bidirectional=bidirectional, num_layers=1)
+        self.nnlayer = self._nn_unit()(indim, outdim, bias=use_bias, batch_first=True, bidirectional=False, num_layers=1)
+        self._return_final = False
+        self._return_all = True
+        self._return_mask = False
+        self._reverse = reverse
+        self._reverse_net = None
+        if self.bidirectional:
+            assert(not self._reverse)
+            self._reverse_net = self.__class__(indim, outdim, use_bias=use_bias, reverse=True, bidirectional=False)
 
+    def return_all(self, truth=True):
+        if truth == "only":
+            self._return_final = False
+            truth = True
+        self._return_all = truth
+        if self._reverse_net is not None:
+            self._reverse_net.return_all(truth)
+        return self
+
+    def return_final(self, truth=True):
+        if truth == "only":
+            self._return_all = False
+            truth = True
+        self._return_final = truth
+        if self._reverse_net is not None:
+            self._reverse_net.return_final(truth)
+        return self
+
+    def return_mask(self, truth=True):
+        self._return_mask = truth
+        if self._reverse_net is not None:
+            self._reverse_net.return_mask(truth)
+        return self
+    
     @property
     def h_0(self):
         return self.get_init_states(0)[0]
@@ -599,12 +642,55 @@ class GRULayer(RNUBase, Recurrent):
     def _nn_unit(self):
         return nn.GRU
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         self.reset_state()
         h_0 = self._get_init_states(x.size(0))
+        if self._reverse:       # TODO: test
+            x = _reverse_seq(x, mask=mask)
+            x = x * mask.unsqueeze(2).float()
         y, s_t = self.nnlayer(x, h_0)
-        self.set_states(s_t)
-        return y
+        self.set_states(s_t)        # DON'T TRUST FINAL STATES WHEN MASK IS NOT NONE
+        #return y
+        ret = tuple()
+        if self._return_final:
+            if self._reverse:
+                y_t = y[:, 0, :]    # can't have completely masked sequence
+            else:
+                if mask is None:
+                    y_t = y[:, -1, :]
+                else:   # TODO test
+                    cum = (torch.cumsum(mask, 1)[:, -1] - 1).long()             # (batsize): lengths of sequences - 1
+                    rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
+                    y_t = y[rng, cum, :]
+            ret += (y_t,)
+        if self._return_all:
+            if self._reverse:
+                y = _reverse_seq(y, mask=mask)
+            if mask is not None:
+                y = y * mask.unsqueeze(2).float()
+            ret += (y,)
+        if self._return_mask:
+            ret += (mask,)
+           
+        # reverse net
+        if self._reverse_net is not None:       # TODO test
+            ret_rev = self._reverse_net(x, mask=mask)
+            mergefn = lambda x, y: torch.cat([x, y], -1)
+            if self._return_mask:
+                maskret = ret[-1]
+                ret = ret[:-1]
+                ret_rev = ret_rev[:-1]
+            ret = tuple([mergefn(x,y) for x, y in zip(ret, ret_rev)])
+            if self._return_mask:
+                ret += (maskret,)
+                
+        if len(ret) == 1:
+            return ret[0]
+        elif len(ret) == 0:
+            print("no output specified")
+            return
+        else:
+            return ret
 
     @property
     def state_spec(self):
@@ -613,6 +699,7 @@ class GRULayer(RNUBase, Recurrent):
         else:
             return (self.outdim,)
 
+    # TODO: managing _reverse_net's states from here
     def _get_init_states(self, arg):
         initstates = super(GRULayer, self).get_init_states(arg)
         l = []
