@@ -651,9 +651,9 @@ class GRULayer(RNUBase, Recurrent):
                 if mask is None:
                     y_t = y[:, -1, :]
                 else:
-                    cum = (torch.cumsum(mask, 1)[:, -1] - 1).long()             # (batsize): lengths of sequences - 1
+                    last = (torch.sum(mask, 1) - 1).long()             # (batsize): lengths of sequences - 1
                     rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
-                    y_t = y[rng.data, cum.data, :]
+                    y_t = y[rng.data, last.data, :]
             ret += (y_t,)
         if self._return_all:
             if self._reverse:
