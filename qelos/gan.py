@@ -85,6 +85,7 @@ class GANTrainer(object):
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
               data_gen=None, valid_data_gen=None, cuda=False):
+        print("status: dragan fix")
         data_gen = data_gen if data_gen is not None else self.data_iter
         valid_data_gen = valid_data_gen if valid_data_gen is not None else self.valid_data_iter
         if cuda:
