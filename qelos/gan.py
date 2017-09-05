@@ -5,7 +5,7 @@ import scipy as sp
 from scipy import optimize as spopt
 
 class GANTrainer(object):
-    def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG
+    def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG, PAGAN
                         modeD="critic",  # disc or critic
                         one_sided=False,
                         penalty_weight=None,
@@ -20,7 +20,8 @@ class GANTrainer(object):
                         valid_data_iter=None,
                         validation_metrics=[],  # fnr, emd
                         notgan=False,
-                        validinter=1):
+                        validinter=1,
+                        paganP=1):
         if one_sided:
             self.clip_fn = lambda x: x.clamp(min=0)
         else:
@@ -44,6 +45,9 @@ class GANTrainer(object):
         self.notgan = notgan
         # cache
         self.validdata = None
+        # PAGAN
+        self.paganP = paganP      # NOT THE P OF NORM!!
+        self.pagandist = q.LNormDistance(2)
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -85,7 +89,7 @@ class GANTrainer(object):
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
               data_gen=None, valid_data_gen=None, cuda=False):
-        print("status: dragan fix")
+        print("status: pagan added")
         data_gen = data_gen if data_gen is not None else self.data_iter
         valid_data_gen = valid_data_gen if valid_data_gen is not None else self.valid_data_iter
         if cuda:
@@ -128,6 +132,13 @@ class GANTrainer(object):
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
                 if self.mode == "WGAN":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
+                elif self.mode == "PAGAN":
+                    errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
+                    lip_loss = (scoreD_real_vec - scoreD_fake_vec).squeeze()
+                    lip_loss_p = self.pagandist(real, fake) ** self.paganP
+                    lip_loss = lip_loss / lip_loss_p
+                    lip_loss = self.penalty_weight * (self.clip_fn(lip_loss - 1)).mean()
+                    errD = errD + lip_loss
                 elif self.mode == "WGAN-GP":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     interp_alpha = real.data.new(num_examples, 1)
