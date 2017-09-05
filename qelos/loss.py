@@ -44,7 +44,7 @@ class SeqNLLLoss(nn.NLLLoss):
         return loss
 
 
-class SeqAccuracy(nn.Module):
+class SeqAccuracy(nn.Module):       # TODO test
     def __init__(self, size_average=True, ignore_index=0):
         super(SeqAccuracy, self).__init__()
         self.size_average = size_average
@@ -67,7 +67,7 @@ class SeqAccuracy(nn.Module):
         return acc
 
 
-class SeqElemAccuracy(SeqAccuracy):
+class SeqElemAccuracy(SeqAccuracy):     # TODO: test
     def forward(self, probs, gold):
         mask = None
         if self.ignore_index is not None:

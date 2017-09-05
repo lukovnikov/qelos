@@ -1,6 +1,54 @@
 import qelos as q
 from qelos.scripts.webqa.load import load_all
 import torch
+from torch import nn
+
+
+def make_encoder(src_emb, embdim=100, dim=100, **kw):
+    """ make encoder
+    # concatenating bypass encoder:
+    #       embedding  --> top GRU
+    #                  --> 1st BiGRU
+    #       1st BiGRU  --> top GRU
+    #                  --> 2nd BiGRU
+    #       2nd BiGRU  --> top GRU
+    """
+    encoder = q.RecurrentStack(
+        src_emb,        # embs, masks
+        q.argsave.spec(emb=0, mask=1),
+        q.argmap.spec(0, mask=["mask"]),
+        q.BidirGRULayer(embdim, dim),
+        q.argsave.spec(bypass=0),
+        q.argmap.spec(0, mask=["mask"]),
+        q.BidirGRULayer(dim * 2, dim),
+        q.argmap.spec(0, ["bypass"], ["emb"]),
+        q.Lambda(lambda x, y, z: torch.cat([x, y, z], 2)),
+        q.argmap.spec(0, mask=["mask"]),
+        q.GRULayer(dim * 4 + embdim, dim).return_final(True),
+        q.argmap.spec(1, ["mask"], 0),
+    )   # returns (all_states, mask, final_state)
+    return encoder
+
+
+def make_decoder(emb, lin, embdim=100, dim=100, **kw):
+    """ makes decoder
+    # attention cell decoder that accepts VNT !!!
+    """
+    pass        # TODO
+
+
+class Model(nn.Module):
+    def __init__(self, encoder, decoder):
+        super(Model, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def forward(self, srcseq, tgtseq):
+        enc = self.encoder(srcseq)
+        encstates = self.encoder.get_states(srcseq.size(0))
+        self.decoder.set_init_states(encstates[-1], encstates[-1])
+        dec = self.decoder(tgtseq, enc)
+        return dec
 
 
 def run(lr=0.1,
@@ -8,6 +56,8 @@ def run(lr=0.1,
         epochs=100,
         wreg=1e-6,
         glovedim=50,
+        encdim=100,
+        decdim=100,
         merge_mode="cat",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
         rel_embdim=-1,
@@ -48,11 +98,15 @@ def run(lr=0.1,
     # endregion
 
     # make main model
-    m = make_model(src_emb, tgt_emb, tgt_lin, **model_options)
+    src_emb_dim = glovedim
+    tgt_emb_dim = glovedim
+    encoder = make_encoder(src_emb, embdim=src_emb_dim, dim=encdim)
+    decoder = make_decoder(tgt_emb, tgt_lin, embdim=tgt_emb_dim, dim=decdim)
+    m = Model(encoder, decoder)
 
     # training settings
-    losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy())
-    validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy())
+    losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
+    validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
 
     optimizer = torch.optim.Adadelta(m.parameters(), lr=lr, weight_decay=wreg)
 
@@ -64,6 +118,7 @@ def run(lr=0.1,
         .train(epochs)
 
     # test
+    # TODO
 
 
 if __name__ == "__main__":
