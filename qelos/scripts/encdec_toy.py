@@ -34,7 +34,7 @@ class EncDec(nn.Module):
 
 def main(
         lr=0.5,
-        epochs=7,
+        epochs=30,
         batsize=32,
         embdim=50,
         encdim=90,
@@ -102,8 +102,8 @@ def main(
 
     m = EncDec(encoder, decoder, mode=mode)
 
-    losses = q.lossarray(q.SeqNLLLoss())
-    validlosses = q.lossarray(q.SeqNLLLoss())
+    losses = q.lossarray(q.SeqNLLLoss(ignore_index=None), q.SeqAccuracy(ignore_index=None), q.SeqElemAccuracy(ignore_index=None))
+    validlosses = q.lossarray(q.SeqNLLLoss(ignore_index=None), q.SeqAccuracy(ignore_index=None), q.SeqElemAccuracy(ignore_index=None))
 
     optimizer = torch.optim.Adadelta(m.parameters(), lr=lr, weight_decay=wreg)
     tt.tock("model built")

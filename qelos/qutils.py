@@ -3,6 +3,7 @@ from torch import nn
 from torch.autograd import Variable
 import numpy as np
 import qelos as q
+from torch.utils.data import DataLoader
 
 
 class var(object):
@@ -59,3 +60,9 @@ def seq_pack(x, mask):  # mask: (batsize, seqlen)
 def seq_unpack(x):
     return x, mask
 
+
+def dataload(*tensors, **kw):
+    if "shuffle" not in kw:
+        kw["shuffle"] = True
+    tensordataset = q.TensorDataset(*tensors)
+    dataloader = DataLoader(tensordataset, **kw)
