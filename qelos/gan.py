@@ -152,14 +152,14 @@ class GANTrainer(object):
                     errD_real_perturbed_vec = netD(real_perturbed)
                     errD_gradient, = torch.autograd.grad(
                         errD_real_perturbed_vec.sum(), real_perturbed, create_graph=True)
-                    lip_grad_norm = errD_gradient.norm(2)
+                    lip_grad_norm = errD_gradient.norm(2, dim=1)
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_grad_norm - 1) ** 2).mean()
                     if self.perturb_both:
                         fake_perturbed = self.perturb(fake)
                         errD_fake_perturbed_vec = netD(fake_perturbed)
                         errD_fake_gradient, = torch.autograd.grad(
                             errD_fake_perturbed_vec.sum(), fake_perturbed, create_graph=True)
-                        lip_fake_grad_norm = errD_fake_gradient.norm(2)
+                        lip_fake_grad_norm = errD_fake_gradient.norm(2, dim=1)
                         lip_fake_loss = self.penalty_weight * (self.clip_fn(lip_fake_grad_norm - 1) ** 2).mean()
                         lip_loss = lip_loss * 0.5 + lip_fake_loss * 0.5
                     errD = errD + lip_loss

@@ -278,13 +278,53 @@ class TestGRULayer(TestCase):
 
     def test_shapes_bidir(self):
         batsize, seqlen, indim = 5, 3, 4
-        m = q.GRULayer(indim, 6, bidirectional=True)
+        m = q.BidirGRULayer(indim, 6)
         data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
         pred = m(data)
         print(pred)
         self.assertEqual((batsize, seqlen, 6*2), pred.size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.layer_rev.get_states(0)[0].size())
+
+    def test_mask(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.GRULayer(indim, 6).return_final()
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        mask = Variable(torch.LongTensor([[1, 1, 0], [1, 1, 0], [1, 1, 0], [1, 1, 1], [1, 0, 0], ]))
+        final, pred = m(data, mask=mask)
+        print(pred)
+        # self.assertFalse(True)
+        self.assertEqual((batsize, seqlen, 6), pred.size())
         self.assertEqual((batsize, 6), m.get_states(0)[0].size())
-        self.assertEqual((batsize, 6), m.get_states(0)[1].size())
+        pred = pred.data.numpy()
+        final = final.data.numpy()
+
+        self.assertTrue(np.allclose(pred[0, 2, :], np.zeros_like(pred[0, 2, :])))
+        self.assertTrue(np.allclose(pred[4, 1:, :], np.zeros_like(pred[4, 1:, :])))
+
+        self.assertTrue(np.allclose(final[0, :], pred[0, 1, :]))
+        self.assertTrue(np.allclose(final[4, :], pred[4, 0, :]))
+        self.assertTrue(np.allclose(final[3, :], pred[3, 2, :]))
+
+    def test_mask_bidir(self):
+        batsize, seqlen, indim = 5, 3, 4
+        m = q.BidirGRULayer(indim, 6).return_final()
+        data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
+        mask = Variable(torch.LongTensor([[1, 1, 0], [1, 1, 0], [1, 1, 0], [1, 1, 1], [1, 0, 0], ]))
+        final, pred = m(data, mask=mask)
+        print(pred)
+        # self.assertFalse(True)
+        self.assertEqual((batsize, seqlen, 6*2), pred.size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[0].size())
+        pred = pred.data.numpy()
+        final = final.data.numpy()
+
+        self.assertTrue(np.allclose(pred[0, 2, :], np.zeros_like(pred[0, 2, :])))
+        self.assertTrue(np.allclose(pred[4, 1:, :], np.zeros_like(pred[4, 1:, :])))
+
+        self.assertTrue(np.allclose(final[0, :], pred[0, 1, :]))
+        self.assertTrue(np.allclose(final[4, :], pred[4, 0, :]))
+        self.assertTrue(np.allclose(final[3, :], pred[3, 2, :]))
 
 
 class TestLSTMLayer(TestCase):
@@ -300,15 +340,15 @@ class TestLSTMLayer(TestCase):
 
     def test_shapes_bidir(self):
         batsize, seqlen, indim = 5, 3, 4
-        m = q.LSTMLayer(indim, 6, bidirectional=True)
+        m = q.BidirLSTMLayer(indim, 6)
         data = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, indim))))
         pred = m(data)
         print(pred)
         self.assertEqual((batsize, seqlen, 6*2), pred.size())
-        self.assertEqual((batsize, 6), m.get_states(0)[0].size())
-        self.assertEqual((batsize, 6), m.get_states(0)[1].size())
-        self.assertEqual((batsize, 6), m.get_states(0)[2].size())
-        self.assertEqual((batsize, 6), m.get_states(0)[3].size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[1].size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[0].size())
+        self.assertEqual((batsize, 6), m.layer_fwd.get_states(0)[1].size())
 
 
 class TestRecurrentStack(TestCase):

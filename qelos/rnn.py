@@ -584,11 +584,11 @@ class RNNLayer(nn.Module, Recurrent):
         
 def _reverse_seq(x, mask=None):
     if mask is None:
-        cum = torch.arange(0, x.size(1)).unsqueeze(0).repeat(0, x.size(0))
+        cum = q.var(torch.arange(0, x.size(1)).unsqueeze(0).repeat(x.size(0), 1)).cuda(x).v
     else:
         cum = torch.cumsum(mask, 1)
     idx = torch.max(cum, 1, keepdim=True)[0] - cum
-    idx = idx.long().repeat(1, 1, x.size(2))
+    idx = idx.long().unsqueeze(2).repeat(1, 1, x.size(2))
     retx = torch.gather(x, 1, idx)
     return retx
 
@@ -636,9 +636,10 @@ class GRULayer(RNUBase, Recurrent):
     def forward(self, x, mask=None):
         self.reset_state()
         h_0 = self._get_init_states(x.size(0))
-        if self._reverse:       # TODO: test reversed
+        if self._reverse:
             x = _reverse_seq(x, mask=mask)
-            x = x * mask.unsqueeze(2).float()
+            if mask is not None:
+                x = x * mask.unsqueeze(2).float()
         y, s_t = self.nnlayer(x, h_0)
         self.set_states(s_t)        # DON'T TRUST FINAL STATES WHEN MASK IS NOT NONE
         #return y
@@ -649,10 +650,10 @@ class GRULayer(RNUBase, Recurrent):
             else:
                 if mask is None:
                     y_t = y[:, -1, :]
-                else:   # TODO test masked final
+                else:
                     cum = (torch.cumsum(mask, 1)[:, -1] - 1).long()             # (batsize): lengths of sequences - 1
                     rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
-                    y_t = y[rng, cum, :]
+                    y_t = y[rng.data, cum.data, :]
             ret += (y_t,)
         if self._return_all:
             if self._reverse:
@@ -722,29 +723,18 @@ class LSTMLayer(GRULayer):
         super(LSTMLayer, self).set_states(state)
         
 
-class BidirGRULayer(_BidirRNNLayer):    # TODO: test bidirectional
-    def __init__(self, indim, outdim, use_bias=True):
-        super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias)
-        
-        
-class BidirLSTMLayer(_BidirRNNLayer):
-    def __init__(self, indim, outdim, use_bias=True):
-        super(BidirLSTMLayer, self).__init__(LSTMLayer, indim, outdim, use_bias=use_bias)
-        
-       
 class _BidirRNNLayer(nn.Module, Recurrent):
     """ For creating bidir layers from layer class.
         Initial states must be set on fwd and rev layers individually. TODO
     """
     def __init__(self, layercls, indim, outdim, use_bias=True, mode="cat"):
-        super(BidirRNNLayer, self).__init__()
+        super(_BidirRNNLayer, self).__init__()
         self.layer_fwd = layercls(indim, outdim, use_bias=use_bias, reverse=False)
         self.layer_rev = layercls(indim, outdim, use_bias=use_bias, reverse=True)
         self.mode = mode        
         self._return_final = False
         self._return_all = True
         self._return_mask = False
-        self._reverse = reverse
         self._reverse_net = None
 
     def return_all(self, truth=True):
@@ -773,8 +763,12 @@ class _BidirRNNLayer(nn.Module, Recurrent):
         fwd_ret = self.layer_fwd(x, mask=mask)
         rev_ret = self.layer_rev(x, mask=mask)
         
-        merge_fn = (lambda x, y: torch.cat([x, y], -1)) if self.mode == "cat" else (lambda x, y: x + y)
-        
+        merge_fn = (lambda a, b: torch.cat([a, b], -1)) if self.mode == "cat" else (lambda a, b: a + b)
+
+        if not issequence(fwd_ret):
+            fwd_ret = [fwd_ret]
+        if not issequence(rev_ret):
+            rev_ret = [rev_ret]
         ret = tuple()
         if self._return_final:
             ret += (merge_fn(fwd_ret[0], rev_ret[0]),)
@@ -794,7 +788,15 @@ class _BidirRNNLayer(nn.Module, Recurrent):
             return ret
         
     # Setting initial states must be done in layers separately TODO: make proxy here
-    
+
+class BidirGRULayer(_BidirRNNLayer):
+    def __init__(self, indim, outdim, use_bias=True):
+        super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias)
+
+class BidirLSTMLayer(_BidirRNNLayer):
+    def __init__(self, indim, outdim, use_bias=True):
+        super(BidirLSTMLayer, self).__init__(LSTMLayer, indim, outdim, use_bias=use_bias)
+
 
 class BiRNNLayer(nn.Module, Recurrent):
     """ Creates bidirectional RNN layer from two cells """
