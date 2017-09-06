@@ -5,8 +5,6 @@ import torch
 from torch.autograd import Variable
 import numpy as np
 
-from teafacto.core.base import tensorops as T, Val
-
 
 class TestSoftmax(TestCase):
     def test_softmax_normal(self):
