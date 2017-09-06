@@ -2,6 +2,7 @@ import qelos as q
 from qelos.scripts.webqa.load import load_all
 import torch
 from torch import nn
+import sys
 
 
 def make_encoder(src_emb, embdim=100, dim=100, **kw):
@@ -80,8 +81,8 @@ def run(lr=0.1,
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")
     # train/valid/test split:
-    train_questions, test_questions = question_sm.matrix[:tx_sep], question_sm[tx_sep:]
-    train_queries, test_queries = query_sm.matrix[:tx_sep], query_sm[tx_sep:]
+    train_questions, test_questions = question_sm.matrix[:tx_sep], question_sm.matrix[tx_sep:]
+    train_queries, test_queries = query_sm.matrix[:tx_sep], query_sm.matrix[tx_sep:]
     train_vnt, test_vnt = vnt_mat[:tx_sep], vnt_mat[tx_sep:]
 
     validportion = .2
@@ -108,7 +109,13 @@ def run(lr=0.1,
     losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
     validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
 
-    optimizer = torch.optim.Adadelta(m.parameters(), lr=lr, weight_decay=wreg)
+    params = []
+    for param in m.parameters():
+        if param.requires_grad:
+            params.append(param)
+    optimizer = torch.optim.Adadelta(params, lr=lr, weight_decay=wreg)
+
+    sys.exit()
 
     # train
     q.train(m).cuda(cuda).train_on(train_dataloader, losses)\

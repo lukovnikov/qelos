@@ -119,11 +119,12 @@ class Decoder(nn.Module):
         y_t = None
         for t in range(maxtime):
             #x_t = [x_e[:, t] if x_e.sequence else x_e for x_e in x]
-            x_t = self.block._get_inputs_t(t=t, x=x, y_t=y_t)        # let the Rec definition decide what to input
+            x_t, x_t_kw = self.block._get_inputs_t(t=t, x=x, xkw=kw, y_t=y_t)        # let the Rec definition decide what to input
             if not issequence(x_t):
                 x_t = [x_t]
             x_t = tuple(x_t)
-            blockret = self.block(*x_t, t=t)
+            x_t_kw["t"] = t
+            blockret = self.block(*x_t, **x_t_kw)
             if not issequence(blockret):
                 blockret = [blockret]
             y_t = blockret
@@ -307,13 +308,13 @@ class DecoderCell(RecStatefulContainer):
         assert(isinstance(reccable, RecStateful))
         self.core = reccable
 
-    def _get_inputs_t(self, t, x, y_t):
+    def _get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
         if self._inputs_t_getter is None:
-            return self.get_inputs_t(t, x, y_t)
+            return self.get_inputs_t(t=t, x=x, xkw=xkw, y_t=y_t)
         else:
-            return self._inputs_t_getter(t, x, y_t)
+            return self._inputs_t_getter(t=t, x=x, xkw=xkw, y_t=y_t)
 
-    def get_inputs_t(self, t, x, y_t):
+    def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
         """
         Make the inputs to cell from timestep, inputs to decoder and previous outputs of cell.
         Called before every call to .forward() and must compute all arguments for .forward() for given timestep.
@@ -322,11 +323,12 @@ class DecoderCell(RecStatefulContainer):
         enable official teacher forcing support).
         This method could also be used for computing dynamic contexts (attention)
         :param t: timestep (integer)
-        :param x: original inputs to decoder (list of tensors)
+        :param x: original arguments to decoder (list of tensors)
+        :param xkw: original kwargs to decoder
         :param y_t: previous outputs of this cell (list of tensors or None). If None, no previous outputs have been output yet
-        :return: actual inputs to .forward() of this decoder cell (list of tensors)
+        :return: actual (inputs, kwinpts) to .forward() of this decoder cell (list of tensors)
         """
-        return x[0][:, t]
+        return x[0][:, t], {"t": t}
 
     def set_inputs_t_getter(self, callabla):
         self._inputs_t_getter = callabla
@@ -367,8 +369,8 @@ class ContextDecoderCell(DecoderCell):
         ret = self.core(inp)
         return ret
 
-    def get_inputs_t(self, t, x, y_t):
-        return x[0][:, t], x[1]
+    def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
+        return (x[0][:, t], x[1]), {}
 
 
 class AttentionDecoderCell(DecoderCell):
@@ -434,7 +436,7 @@ class AttentionDecoderCell(DecoderCell):
 
 
     # region implement DecoderCell signature
-    def forward(self, x_t, ctx, ctxmask=None, t=None, **kw):
+    def forward(self, x_t, ctx, ctxmask=None, t=None, outmask_t=None, **kw):
         """
         :param x_t:     (batsize,...) input for current timestep
         :param ctx:     (batsize, inpseqlen, dim) whole context
@@ -461,7 +463,10 @@ class AttentionDecoderCell(DecoderCell):
         if self.ctx_to_smo:     cat_to_smo.append(ctx_t)
         if self.decinp_to_smo:  cat_to_smo.append(x_t_emb)
         smoinp_t = torch.cat(cat_to_smo, 1) if len(cat_to_smo) > 1 else cat_to_smo[0]
-        y_t = self.smo(smoinp_t) if self.smo is not None else smoinp_t
+        smokw = {}
+        if outmask_t is not None:
+            smokw["outmask"] = outmask_t
+        y_t = self.smo(smoinp_t, **kw) if self.smo is not None else smoinp_t
         # returns
         ret = tuple()
         if self.return_out:
@@ -497,11 +502,14 @@ class AttentionDecoderCell(DecoderCell):
         res = self.attention.attcon(ctx, att_weights)
         return res, att_weights
 
-    def get_inputs_t(self, t, x, y_t):      # TODO implement teacher forcing
-        if len(x) == 2:     # no mask
-            return x[0][:, t], x[1]
-        elif len(x) == 3:   # with mask
-            return x[0][:, t], x[1], x[2]
+    def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):      # TODO implement teacher forcing
+        outargs = (x[0][:, t], x[1])    # (prev_token, ctx)
+        outkwargs = {"t": t}
+        if "ctxmask" in xkw:        # copy over ctxmask (shared over decoder steps)
+            outkwargs["ctxmask"] = xkw["ctxmask"]
+        if "outmask" in xkw:        # slice out the time from outmask
+            outkwargs["outmask_t"] = xkw["outmask"][:, t]
+        return outargs, outkwargs
     # endregion
 
     # region RecStatefulContainer signature

@@ -137,7 +137,8 @@ class TestAttentionDecoder(TestCase):
             smo=q.Stack(
                 q.Forward(encdim+inpdim, encdim),
                 q.Forward(encdim, vocsize),
-                q.Softmax()
+                q.Softmax(),
+                q.argmap.spec(0),
             ),
             ctx_to_smo=True,
             state_to_smo=True,

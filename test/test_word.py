@@ -219,7 +219,8 @@ class TestPretrainedWordLinout(TestCase):
 
     def test_loaded(self):
         thevector = self.glove % "the"
-        truevector = np.asarray([  4.18000013e-01,   2.49679998e-01,  -4.12420005e-01,
+        truevector = np.asarray([
+         4.18000013e-01,   2.49679998e-01,  -4.12420005e-01,
          1.21699996e-01,   3.45270008e-01,  -4.44569997e-02,
         -4.96879995e-01,  -1.78619996e-01,  -6.60229998e-04,
         -6.56599998e-01,   2.78430015e-01,  -1.47670001e-01,

@@ -314,6 +314,16 @@ class PretrainedWordVec(object):
         else:
             W = self.loadcache[path][0]
 
+        # load words
+        if path not in self.loadcache:
+            words = pkl.load(open(path+".words"))
+        else:
+            words = self.loadcache[path][1]
+
+        # cache
+        if self.useloadcache:
+            self.loadcache[path] = (W, words)
+
         # adapt
         if indim is not None:
             W = W[:indim, :]
@@ -323,16 +333,6 @@ class PretrainedWordVec(object):
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
         tt.tock("vectors loaded")
         tt.tick()
-
-        # load words
-        if path not in self.loadcache:
-            words = pkl.load(open(path+".words"))
-        else:
-            words = self.loadcache[path]
-
-        # cache
-        if self.useloadcache:
-            self.loadcache[path] = (W, words)
 
         # dictionary
         D = OrderedDict()

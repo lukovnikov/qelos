@@ -458,7 +458,7 @@ class TestDistance(TestCase):
             npd[i] = x
         print(d)
         print(npd)
-        self.assertTrue(np.allclose(-d, npd))
+        self.assertTrue(np.allclose(d, npd))
 
     def test_lnorm_same_as_numpy_3D2D(self):
         a = Variable(torch.FloatTensor(np.random.random((20, 5, 2))))
@@ -474,7 +474,7 @@ class TestDistance(TestCase):
                 npd[i, j] = x
         print(d)
         print(npd)
-        self.assertTrue(np.allclose(-d, npd))
+        self.assertTrue(np.allclose(d, npd))
 
     def test_lnorm_same_as_numpy_3D3D(self):
         a = Variable(torch.FloatTensor(np.random.random((20, 5, 2))))
@@ -491,7 +491,7 @@ class TestDistance(TestCase):
                     npd[i, j, k] = x
         print(d[0])
         print(npd[0])
-        self.assertTrue(np.allclose(-d, npd))
+        self.assertTrue(np.allclose(d, npd))
 
     def test_lnorm_linear_sum_assignment(self):
         from scipy import optimize as spopt

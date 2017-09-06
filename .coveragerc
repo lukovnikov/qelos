@@ -1,0 +1,17 @@
+[run]
+omit =
+    */__init__.py
+    qelos/scripts/*
+    test
+branch = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+omit =
+    */__init__.py
+    qelos/scripts/*
+    test

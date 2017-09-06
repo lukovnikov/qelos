@@ -942,7 +942,10 @@ class RecurrentWrapper(Recurrent, nn.Module):
         for ye in y:
             ye = ye.view(batsize, seqlen, *ye.size()[1:])
             yo.append(ye)
-        return tuple(yo)
+        if len(yo) == 1:
+            return yo[0]
+        else:
+            return tuple(yo)
 
 
 class LastTimestepGetter(nn.Module):

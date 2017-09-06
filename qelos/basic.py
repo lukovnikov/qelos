@@ -333,7 +333,7 @@ class LNormDistance(Distance):
     def forward(self, data, crit):      # (batsize, [lseqlen,] dim), (batsize, [rseqlen,], dim)
         if data.dim() == 3 and crit.dim() == 2:
             crit = crit.unsqueeze(1)
-        if data.dim() == 3 and crit.dim() == 3:
+        elif data.dim() == 3 and crit.dim() == 3:
             data = data.unsqueeze(2)
             crit = crit.unsqueeze(1)
         temp = torch.abs(data - crit)
