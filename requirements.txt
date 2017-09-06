@@ -7,4 +7,3 @@ pympler==0.4.3
 enum34==1.1.2
 Unidecode==0.4.19
 seaborn==0.7.1
-torch==0.2.0.post2
