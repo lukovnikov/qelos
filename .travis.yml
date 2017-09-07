@@ -1,31 +1,20 @@
 language: python
+sudo: false
 python:
-  - 2.7
+  - "2.7"
+before_install:
+  - pip install -U pip
+install:
+  - travis_wait travis_retry pip install -r requirements.txt
+  - travis_retry pip install coveralls
+  - travis_retry pip install --quiet http://download.pytorch.org/whl/cu80/torch-0.2.0.post3-cp27-cp27mu-manylinux1_x86_64.whl
+  - travis_retry python setup.py develop
+script: nosetests --with-coverage --cover-package=qelos
+after_success:
+  - coveralls
+cache:
+  - apt
+  - directories:
+    - $HOME/.cache/pip
 notifications:
   email: false
-
-# Setup anaconda
-before_install:
-  - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
-  - chmod +x miniconda.sh
-  - ./miniconda.sh -b
-  - export PATH=/home/travis/miniconda/bin:$PATH
-  - conda update --yes conda
-  # The next couple lines fix a crash with multiprocessing on Travis and are not specific to using Miniconda
-  - sudo rm -rf /dev/shm
-  - sudo ln -s /run/shm /dev/shm
-# Install packages
-install:
-  - conda install --yes python=$TRAVIS_PYTHON_VERSION atlas numpy scipy matplotlib nose dateutil pandas statsmodels
-  # Coverage packages are on my binstar channel
-  - conda install --yes -c dan_blanchard python-coveralls nose-cov
-  - conda install pytorch torchvision -c soumith
-  - python setup.py install
-
-# Run test
-script:
-  - nosetests --with-cov --cov qelos --cov-config .coveragerc --logging-level=INFO
-
-# Calculate coverage
-after_success:
-  - coveralls --config_file .coveragerc
