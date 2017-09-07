@@ -62,11 +62,13 @@ class ImageGenerator:
             pyplot.contour(x, y, disc_map)
 
             true_dist = true_dist.cpu().numpy()
-            perturbed = perturbed.cpu().numpy()
+            if perturbed is not None:
+                perturbed = perturbed.cpu().numpy()
 
             # plot scatter
             pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='orange',marker='+')
-            pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
+            if perturbed is not None:
+                pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
             pyplot.scatter(samples[:, 0],   samples[:, 1],   c='green', marker='*')
 
             pyplot.subplot(gs[1])

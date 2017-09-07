@@ -132,6 +132,7 @@ class GANTrainer(object):
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
                 if self.mode == "WGAN":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
+                    grad_points = None
                 elif self.mode == "PAGAN":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     lip_loss = (scoreD_real_vec - scoreD_fake_vec).squeeze()
@@ -139,6 +140,7 @@ class GANTrainer(object):
                     lip_loss = lip_loss / lip_loss_p
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_loss - 1)).mean()
                     errD = errD + lip_loss
+                    grad_points = None
                 elif self.mode == "WGAN-GP":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     interp_alpha = real.data.new(num_examples, 1)
