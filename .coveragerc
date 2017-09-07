@@ -1,17 +1,12 @@
 [run]
+source = qelos
 omit =
     */__init__.py
     qelos/scripts/*
     test
-branch = True
-
-[report]
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    raise NotImplementedError
-    if __name__ == .__main__.:
-omit =
-    */__init__.py
-    qelos/scripts/*
-    test
+    */python?.?/*
+    */lib-python/?.?/*.py
+    */lib_pypy/_*.py
+    */site-packages/ordereddict.py
+    */site-packages/nose/*
+    */unittest2/*
