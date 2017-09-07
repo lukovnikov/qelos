@@ -59,19 +59,6 @@ class TestSoftmax(TestCase):
         predsums = np.sum(pred, axis=-1)
         self.assertTrue(np.allclose(predsums, np.ones_like(predsums)))
 
-    def test_softmax_3D_masked_equals_teafacto(self):       # TODO remove
-        torch_model = Softmax()
-        torch_data = Variable(torch.FloatTensor(np.random.random((5, 4, 3))))
-        teafa_data = Val(torch_data.data.numpy())
-        m = np.ones_like(torch_data.data.numpy())
-        m[:, :, 2] = 0
-        torch_mask = Variable(torch.FloatTensor(m))
-        teafa_mask = Val(m)
-        torch_pred, _ = torch_model(torch_data, torch_mask)
-        torch_pred = torch_pred.data.numpy()
-        teafa_pred = T.softmax(teafa_data, teafa_mask).eval()
-        self.assertTrue(np.allclose(torch_pred, teafa_pred))
-
     def test_softmax_3D_prop_seq_mask(self):
         b = Softmax()
         d = Variable(torch.FloatTensor(np.random.random((5, 4, 3))))
@@ -283,12 +270,12 @@ class TestDistance(TestCase):
         self.assertTrue(np.allclose(d, npd))
 
     def test_cos_same_as_numpy_3D3D(self):
-        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
-        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
+        a = Variable(torch.FloatTensor(np.random.random((10, 50, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((10, 40, 20))))
         d = CosineDistance()(a, b).data.numpy()
         a = a.data.numpy()
         b = b.data.numpy()
-        npd = np.zeros((100, 50, 40))
+        npd = np.zeros((10, 50, 40))
         for i in range(a.shape[0]):
             for j in range(a.shape[1]):
                 for k in range(b.shape[1]):
@@ -355,15 +342,15 @@ class TestDistance(TestCase):
         self.assertTrue(np.allclose(d, npd, atol=1e-6))
 
     def test_fwd_same_as_numpy_3D3D_memsave(self):
-        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
-        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
-        dist = ForwardDistance(200, 200, 100, activation=None, use_bias=False)
+        a = Variable(torch.FloatTensor(np.random.random((10, 5, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((10, 4, 20))))
+        dist = ForwardDistance(20, 20, 10, activation=None, use_bias=False)
         dist.memsave = True
         d = dist(a, b).data.numpy()
         lw, rw, aggw = dist.lblock.weight.data.numpy(), dist.rblock.weight.data.numpy(), dist.agg.data.numpy()
         a = a.data.numpy()
         b = b.data.numpy()
-        npd = np.zeros((100, 50, 40))
+        npd = np.zeros((10, 5, 4))
         for i in range(a.shape[0]):
             for j in range(a.shape[1]):
                 for k in range(b.shape[1]):
@@ -410,14 +397,14 @@ class TestDistance(TestCase):
         self.assertTrue(np.allclose(d, npd, atol=1e-5))
 
     def test_bilin_same_as_numpy_3D3D(self):
-        a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
-        b = Variable(torch.FloatTensor(np.random.random((100, 40, 200))))
-        dist = BilinearDistance(200, 200)
+        a = Variable(torch.FloatTensor(np.random.random((10, 5, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((10, 4, 20))))
+        dist = BilinearDistance(20, 20)
         d = dist(a, b).data.numpy()
         w = dist.block.weight.squeeze().data.numpy()
         a = a.data.numpy()
         b = b.data.numpy()
-        npd = np.zeros((100, 50, 40))
+        npd = np.zeros((10, 5, 4))
         for i in range(a.shape[0]):
             for j in range(a.shape[1]):
                 for k in range(b.shape[1]):
@@ -426,8 +413,8 @@ class TestDistance(TestCase):
         self.assertTrue(np.allclose(d, npd, atol=1e-5))
 
     def test_trilin_same_as_numpy_3D3D(self):
-        a = Variable(torch.FloatTensor(np.random.random((100, 50, 20))))
-        b = Variable(torch.FloatTensor(np.random.random((100, 40, 20))))
+        a = Variable(torch.FloatTensor(np.random.random((10, 50, 20))))
+        b = Variable(torch.FloatTensor(np.random.random((10, 40, 20))))
         dist = TrilinearDistance(20, 20, 10, activation=None, use_bias=False)
         dist.memsave = False
         d = dist(a, b).data.numpy()
@@ -435,7 +422,7 @@ class TestDistance(TestCase):
         aggw = dist.agg.data.numpy()
         a = a.data.numpy()
         b = b.data.numpy()
-        npd = np.zeros((100, 50, 40))
+        npd = np.zeros((10, 50, 40))
         for i in range(a.shape[0]):
             for j in range(a.shape[1]):
                 for k in range(b.shape[1]):
