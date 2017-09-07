@@ -412,6 +412,7 @@ class TestDistance(TestCase):
                     npd[i, j, k] = x
         self.assertTrue(np.allclose(d, npd, atol=1e-5))
 
+
     def test_trilin_same_as_numpy_3D3D(self):
         a = Variable(torch.FloatTensor(np.random.random((10, 50, 20))))
         b = Variable(torch.FloatTensor(np.random.random((10, 40, 20))))
