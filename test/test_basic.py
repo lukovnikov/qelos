@@ -379,7 +379,7 @@ class TestDistance(TestCase):
         for i in range(a.shape[0]):
             x = np.dot(np.dot(a[i].T, w), b[i])
             npd[i] = x
-        self.assertTrue(np.allclose(d, npd, atol=1e-5))
+        self.assertTrue(np.allclose(d, npd, atol=1e-6))
 
     def test_bilin_same_as_numpy_3D2D(self):
         a = Variable(torch.FloatTensor(np.random.random((100, 50, 200))))
