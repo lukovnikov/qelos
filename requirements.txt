@@ -8,4 +8,4 @@ enum34==1.1.2
 Unidecode==0.4.19
 seaborn==0.7.1
 numpy==1.13.1
-scipy==0.18.1
+scipy==0.19.1
