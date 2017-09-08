@@ -497,17 +497,24 @@ class ComputedWordLinout(WordLinoutBase):
             # select data, compute vectors, build switcher
             msk = mask.sum(0)       # --> (outdim,)
             msk = (msk > 0).long()
-            compute_ids = msk.data.nonzero().squeeze(1)
-            # TODO: WHAT IF NO NONZEROS
-            data_select = self.data[compute_ids]
-            comp_weight = self.computer(data_select)        # (num_data_select, indim)
-            comp_weight = comp_weight.contiguous()
-            indim = comp_weight.size(1)
-            if self.base_weight is None or self.base_weight.size(1) != indim:
-                self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
-            weight = torch.cat([self.base_weight, comp_weight], 0)
-            index_transform = (torch.cumsum(msk, 0) * msk).long()
-            weight = weight.index_select(0, index_transform)
+            compute_ids = msk.data.nonzero()
+            if len(compute_ids.size()) > 0:    # not all zeros
+                compute_ids = compute_ids.squeeze(1)
+                data_select = self.data[compute_ids]
+                comp_weight = self.computer(data_select)        # (num_data_select, indim)
+                comp_weight = comp_weight.contiguous()
+                indim = comp_weight.size(1)
+                if self.base_weight is None or self.base_weight.size(1) != indim:
+                    self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
+                weight = torch.cat([self.base_weight, comp_weight], 0)
+                index_transform = (torch.cumsum(msk, 0) * msk).long()
+                weight = weight.index_select(0, index_transform)
+            else:
+                data_select = self.data[0:1]
+                comp_weight = self.computer(data_select)        # (num_data_select, indim)
+                comp_weight = comp_weight.contiguous()
+                indim = comp_weight.size(1)
+                weight = q.var(torch.zeros(mask.size(1), indim)).cuda(x).v
         else:
             weight = self.computer(self.data)
             weight = weight.contiguous()
