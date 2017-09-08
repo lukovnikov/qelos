@@ -469,6 +469,7 @@ class ComputedWordLinout(WordLinoutBase):
         super(ComputedWordLinout, self).__init__(worddic)
         self.data = q.val(torch.from_numpy(data)).v
         self.computer = computer
+        # TODO: batches for computer???
 
         wdvals = worddic.values()
         assert(min(wdvals) >= 0)     # word ids must be positive
@@ -492,9 +493,12 @@ class ComputedWordLinout(WordLinoutBase):
 
     def forward(self, x, mask=None):        # (batsize, indim), (batsize, outdim)
         if mask is not None:
+            mask = mask.long()
             # select data, compute vectors, build switcher
             msk = mask.sum(0)       # --> (outdim,)
-            compute_ids = msk.data.nonzero()
+            msk = (msk > 0).long()
+            compute_ids = msk.data.nonzero().squeeze(1)
+            # TODO: WHAT IF NO NONZEROS
             data_select = self.data[compute_ids]
             comp_weight = self.computer(data_select)        # (num_data_select, indim)
             comp_weight = comp_weight.contiguous()
@@ -503,14 +507,15 @@ class ComputedWordLinout(WordLinoutBase):
                 self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
             weight = torch.cat([self.base_weight, comp_weight], 0)
             index_transform = (torch.cumsum(msk, 0) * msk).long()
-            weight = weight.gather(0, index_transform)
+            weight = weight.index_select(0, index_transform)
         else:
             weight = self.computer(self.data)
             weight = weight.contiguous()
-        out = torch.mm(x, weight.t)
+        out = torch.mm(x, weight.t())
         if self.bias:
             bias = self.bias if mask is not None else self.bias * mask
             out += bias
+        out = out * mask.float()
         return out#, mask ?
 
 
@@ -584,6 +589,7 @@ class AdaptedWordLinout(WordLinoutBase):
 
     def forward(self, x, mask=None):       # (batsize, indim), (batsize, outdim)
         innermask = mask.index_select(1, self.old_to_new) if mask is not None else None
+        # TODO: SOMETHING WRONG, innermask is all zero
         baseout = self.inner(x, mask=innermask)     # (batsize, outdim) --> need to permute columns
         out = baseout.index_select(1, self.new_to_old)
         return out#, mask?
