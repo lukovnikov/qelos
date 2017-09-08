@@ -616,12 +616,15 @@ class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
 
 class MergedWordLinout(MergedWordVecBase, WordLinoutBase):
     def forward(self, x, mask=None):
-        baseres = self.base(x, mask=mask)
-        mergres = self.merg(x, mask=mask)
-        if self.mode == "sum":
-            res = baseres + mergres
-        elif self.mode == "cat":
-            res = torch.cat([baseres, mergres], 1)
+        if self.mode == "cat":      # need to split up input
+            basex = x[:, :self.base.vecdim]
+            mergx = x[:, self.base.vecdim:]
+            # TODO: not all wordlinouts have .vecdim
+        elif self.mode == "sum":
+            basex, mergx = x, x
         else:
             raise q.SumTingWongException()
+        baseres = self.base(basex, mask=mask)
+        mergres = self.merg(mergx, mask=mask)
+        res = baseres + mergres
         return res

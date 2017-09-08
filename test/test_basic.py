@@ -507,3 +507,66 @@ class TestDistance(TestCase):
         # self.assertTrue(False)
 
 
+from torch import nn
+import qelos as q
+
+class TestGrad(TestCase):
+    def test_multigrad(self):
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.one = nn.Linear(3,3)
+                self.two = nn.Linear(3,3)
+
+            def forward(self, x):
+                return self.two(self.one(x))
+
+        net = Module()
+        inp1 = q.var(torch.randn(3)).v
+        inp2 = q.var(torch.randn(3)).v
+
+
+        lossa = net(inp1).sum()
+        lossa.backward()
+        agrads = []
+        for p in net.parameters():
+            print(p.grad)
+            agrads.append(p.grad.data.numpy()+0)
+
+        net.zero_grad()
+
+        lossb = net(inp2).sum()
+        lossb.backward()
+        bgrads = []
+        for p in net.parameters():
+            print(p.grad)
+            bgrads.append(p.grad.data.numpy()+0)
+
+        net.zero_grad()
+
+        loss = net(inp2).sum() + net(inp1).sum()
+        loss.backward()
+        grads = []
+        for p in net.parameters():
+            print(p.grad)
+            grads.append(p.grad.data.numpy()+0)
+
+        net.zero_grad()
+
+        lossa = net(inp1).sum()
+        lossa.backward()
+        lossb = net(inp2).sum()
+        lossb.backward()
+
+        sgrads = []
+        for p in net.parameters():
+            print(p.grad)
+            sgrads.append(p.grad.data.numpy() + 0)
+
+        for a, b, t, s in zip(agrads, bgrads, grads, sgrads):
+            self.assertTrue(np.allclose(a+b, t))
+            self.assertTrue(np.allclose(t, s))
+
+
+
+        print("qsdf")

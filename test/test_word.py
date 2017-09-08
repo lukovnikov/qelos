@@ -306,7 +306,6 @@ class TestOverriddenWordLinout(TestCase):
         self.assertTrue(np.allclose(pred[:, 6], basepred[:, 6]))
 
 
-
 class TestComputedWordLinout(TestCase):
     def setUp(self):
         data = np.random.random((7, 10)).astype("float32")
@@ -371,6 +370,29 @@ class TestComputedWordLinout(TestCase):
         cout = torch.matmul(x, computer(data).t())
         cout = cout * msk.float()
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
+
+    def test_basic_grad(self):
+        x = Variable(torch.randn(3, 15)).float()
+        y = Variable(torch.randn(3, 15)).float()
+        out = self.linout(x)
+        loss = out.sum()
+        loss.backward()
+
+        agrads = []
+        for p in self.linout.parameters():
+            if p.requires_grad:
+                agrads.append(p.grad.data.numpy() + 0)
+
+        out = self.linout(y)
+        loss = out.sum()
+        loss.backward()
+
+        bgrads = []
+        for p in self.linout.parameters():
+            if p.requires_grad:
+                bgrads.append(p.grad.data.numpy() + 0)
+
+        pass
 
 
 

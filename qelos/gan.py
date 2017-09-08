@@ -131,7 +131,7 @@ class GANTrainer(object):
                 scoreD_real_vec = netD(real)        # (batsize,)
                 #scoreD_real = scoreD_real_vec.mean()
                 # scoreD_real.backward(one, retain_graph=(lc> 0))
-                scoreD_fake_vec = netD(fake)
+                scoreD_fake_vec = netD(fake)        # TODO: netD(fake.detach())  ?
                 #scoreD_fake = scoreD_fake_vec.mean()
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
                 if self.mode == "WGAN":

@@ -3,6 +3,7 @@ from qelos.scripts.webqa.load import load_all
 import torch
 from torch import nn
 import sys
+import numpy as np
 
 
 def test_model(encoder, decoder, m, questions, queries, vnt):
@@ -12,19 +13,45 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
 
     # try encoder
     ctx, ctxmask, finalctx = encoder(questions)
-    print(ctx.size())
+    # print(ctx.size())
     assert(ctx.size(0) == finalctx.size(0))
     assert(ctx.size(1) == ctxmask.float().size(1))
     assert(ctx.size(2) == finalctx.size(1))
     maskedctx = ctx * ctxmask.unsqueeze(2).float()
     assert((ctx.norm(2) == maskedctx.norm(2)).data.numpy()[0])
-    print(ctx.norm(2) - maskedctx.norm(2))
+    # print(ctx.norm(2) - maskedctx.norm(2))
+    loss = finalctx.sum()
+    loss.backward()
+    encoder.zero_grad()
+    ctx, ctxmask, finalctx = encoder(questions)
+    loss = finalctx.sum()
+    loss.backward()
 
+    print("dry run of encoder didn't throw errors")
+    # decoder.block.embedder = nn.Embedding(100000, 200, padding_idx=0)
+    # decoder.block.smo = q.Stack(
+    #                                      q.argsave.spec(mask={"mask"}),
+    #                                      q.argmap.spec(0),
+    #                                      nn.Linear(200, 11075),
+    #                                      q.argmap.spec(0, mask=["mask"]),
+    #                                      q.LogSoftmax(),
+    #                                      q.argmap.spec(0),
+    #                     )
+    # decoder.block.smo = None
     # try decoder cell
-    decoder.set_init_states(finalctx)
-    t = 1
-    y_t = decoder.block(queries[:, t], ctx, ctxmask=ctxmask, t=t, outmask_t=vnt[:, t])
-    # TODO: something goes wrong in adaptedwordlinout, innermask is zeros
+    for t in range(2):
+        # ctx, ctxmask, finalctx = encoder(questions)
+        decoder.block.core.reset_state()        # ESSENTIAL !!! otherwise double .backward() error
+        decoder.set_init_states(finalctx.detach())
+        decoder.block.zero_grad()
+        outmaskt=vnt[:, t]
+        # outmaskt=q.var(np.ones_like(vnt[:, t].data.numpy()).astype("int64")).v
+        y_t = decoder.block(queries[:, t], ctx.detach(), ctxmask=ctxmask.detach(), t=t, outmask_t=outmaskt)
+        loss = y_t.sum()
+        print(loss)
+        loss.backward()
+        print("backward done")
+    print("dry run of decoder cell didn't throw errors")
     q.embed()
 
 
@@ -115,7 +142,7 @@ def run(lr=0.1,
         decdim=100,
         decsplit=False,
         attmode="bilin",        # "bilin" or "fwd"
-        merge_mode="cat",        # "cat" or "sum"
+        merge_mode="sum",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
         batsize=128,
         cuda=False,
