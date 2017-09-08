@@ -148,6 +148,10 @@ class WordEmb(WordEmbBase):
         if fixed is True:
             self.embedding.weight.requires_grad = False
 
+        self.indim = indim
+        self.outdim = dim
+        self.vecdim = dim
+
     def forward(self, x):
         ret = self.embedding(x)
         mask = None
@@ -248,6 +252,7 @@ class OverriddenWordVecBase(WordVecBase, nn.Module):
 
 class OverriddenWordEmb(OverriddenWordVecBase, WordEmbBase):
     def forward(self, x):
+        x = x.contiguous()
         xshape = x.size()
         x = x.view(-1)
         base_emb, base_msk = self.base(x)
@@ -429,6 +434,7 @@ class WordLinout(WordLinoutBase):
         outdim = max(worddic.values())+1        # to init from worddic
         self.outdim = outdim
         self.indim = indim
+        self.vecdim = indim
         self.lin = nn.Linear(indim, outdim, bias=bias)
 
         if weight is not None:
@@ -488,7 +494,7 @@ class ComputedWordLinout(WordLinoutBase):
         if mask is not None:
             # select data, compute vectors, build switcher
             msk = mask.sum(0)       # --> (outdim,)
-            compute_ids = msk.nonzero()
+            compute_ids = msk.data.nonzero()
             data_select = self.data[compute_ids]
             comp_weight = self.computer(data_select)        # (num_data_select, indim)
             comp_weight = comp_weight.contiguous()

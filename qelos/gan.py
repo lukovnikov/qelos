@@ -4,6 +4,10 @@ import qelos as q
 import scipy as sp
 from scipy import optimize as spopt
 
+
+EPS = 1e-6
+
+
 class GANTrainer(object):
     def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG, PAGAN
                         modeD="critic",  # disc or critic
@@ -137,7 +141,7 @@ class GANTrainer(object):
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     lip_loss = (scoreD_real_vec - scoreD_fake_vec).squeeze()
                     lip_loss_p = self.pagandist(real, fake) ** self.paganP
-                    lip_loss = lip_loss / lip_loss_p
+                    lip_loss = lip_loss / lip_loss_p.clamp(min=EPS)
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_loss - 1)).mean()
                     errD = errD + lip_loss
                     grad_points = None

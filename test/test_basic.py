@@ -85,8 +85,10 @@ class TestSoftmax(TestCase):
         o, _ = Softmax()(d, m)
         pred = o.data.numpy()
         pred2 = Softmax()(d2).data.numpy()
+        pred3 = Softmax()(d).data.numpy()
         print(pred)
         print(pred2)
+        print(pred3)
         self.assertTrue(np.allclose(pred[:, 1], np.zeros_like(pred[:, 1])))
         self.assertTrue(np.allclose(pred[:, [0, 2]], pred2))
 

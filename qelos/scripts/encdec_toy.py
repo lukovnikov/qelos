@@ -34,7 +34,7 @@ class EncDec(nn.Module):
 
 def main(
         lr=0.5,
-        epochs=30,
+        epochs=15,
         batsize=32,
         embdim=50,
         encdim=90,

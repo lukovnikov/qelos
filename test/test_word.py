@@ -211,6 +211,7 @@ class TestWordLinout(TestCase):
         # self.assertTrue(False)
 
 
+
 class TestPretrainedWordLinout(TestCase):
     def setUp(self):
         q.PretrainedWordLinout.defaultpath = "../data/glove/miniglove.%dd"

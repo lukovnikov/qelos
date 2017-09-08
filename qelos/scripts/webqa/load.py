@@ -12,11 +12,13 @@ defaultqp = "../../../datasets/webqsp/webqsp"
 vntcachep = "wholevnt.mat.cache"
 
 
-def load_all(p=defaultp, qp=defaultqp, glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_embdim=None):
+def load_all(p=defaultp, qp=defaultqp, dim=50, glovedim=50,
+             merge_mode="cat", rel_which=("urlwords",)):
     tt = q.ticktock("load")
     tt.tick("loading everything")
     question_sm, query_sm, qids, tx_sep = load_questions_inone(p=qp)
-    src_emb, tgt_emb, tgt_lin = get_all_reps(glovedim=glovedim, merge_mode=merge_mode, rel_which=rel_which, rel_embdim=rel_embdim,
+    src_emb, tgt_emb, tgt_lin = get_all_reps(dim=dim, glovedim=glovedim,
+                                             merge_mode=merge_mode, rel_which=rel_which,
                                              question_sm=question_sm, query_sm=query_sm)
 
     vnt_mat, vnt_mat_shape = load_vnt_mats(qids=qids, p=qp, tgtdict=tgt_emb.D)

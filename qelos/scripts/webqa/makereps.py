@@ -37,22 +37,20 @@ def run(x=0):
     print("same for ent")
 
 
-def get_all_reps(glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_embdim=None,
+def get_all_reps(dim=50, glovedim=50, merge_mode="cat", rel_which=("urlwords",),
                  question_sm=None, query_sm=None):
     gloveemb = q.PretrainedWordEmb(glovedim, incl_maskid=False, incl_rareid=False)
 
-    src_emb = get_nl_emb(question_sm, glovedim, gloveemb)
-    tgt_emb = get_fl_emb(query_sm, glovedim, gloveemb,
+    src_emb = get_nl_emb(question_sm, gloveemb)
+    tgt_emb = get_fl_emb(query_sm, dim, gloveemb,
                          computedwhat=q.ComputedWordEmb,
                          ent_merge_mode=merge_mode,
                          rel_merge_mode=merge_mode,
-                         rel_embdim=rel_embdim,
                          rel_which=rel_which)
-    tgt_lin = get_fl_emb(query_sm, glovedim, gloveemb,
+    tgt_lin = get_fl_emb(query_sm, dim, gloveemb,
                          computedwhat=q.ComputedWordLinout,
                          ent_merge_mode=merge_mode,
                          rel_merge_mode=merge_mode,
-                         rel_embdim=rel_embdim,
                          rel_which=rel_which)
 
     assert(tgt_emb.D == tgt_lin.D)
@@ -61,22 +59,23 @@ def get_all_reps(glovedim=50, merge_mode="cat", rel_which=("urlwords",), rel_emb
     return src_emb, tgt_emb, tgt_lin
 
 
-def get_nl_emb(nl_sm, dim, gloveemb):
+def get_nl_emb(nl_sm, gloveemb):
     """ For questions.
         Takes stringmatrix, builds base emb of dim dim based on its dict
         and overrides by provided glove emb """
-    baseemb = q.WordEmb(dim=dim, worddic=nl_sm.D)
+    glovedim = gloveemb.vecdim
+    baseemb = q.WordEmb(dim=glovedim, worddic=nl_sm.D)
     emb = baseemb.override(gloveemb)
     return emb
 
 
 def get_fl_emb(fl_sm, dim, gloveemb, computedwhat=q.ComputedWordEmb,
                ent_merge_mode="cat",
-               rel_merge_mode="cat", rel_embdim=None, rel_which=("urlwords",)):
+               rel_merge_mode="cat", rel_which=("urlwords",)):
 
     ent_emb, entdic = get_ent_emb(dim, gloveemb, mode=ent_merge_mode, computedwhat=computedwhat)
     rel_emb, reldic = get_rel_emb(dim, gloveemb, mode=rel_merge_mode, computedwhat=computedwhat,
-                          embdim=rel_embdim, which=rel_which)
+                          which=rel_which)
 
     basedict = {}
     basedict.update(fl_sm.D)
@@ -110,29 +109,29 @@ def get_fl_emb(fl_sm, dim, gloveemb, computedwhat=q.ComputedWordEmb,
 
 def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     """ Makes composite computed embeddings for entities """
-    embdim = dim
+    glovedim = gloveemb.vecdim
     if mode == "cat":
         dim = dim // 2
     entdic, entinfo = load_entity_info_mats(p=defaultp)
     # entdic maps ent ids to idx, entinfo contains info about ent ids indexed by entdic's idx
     # 1. encode entity name
-    ent_name_base_inner_emb = q.WordEmb(dim=embdim, worddic=entinfo.names_word.D)
+    ent_name_base_inner_emb = q.WordEmb(dim=glovedim, worddic=entinfo.names_word.D)
     ent_name_inner_emb = ent_name_base_inner_emb.override(gloveemb)
     ent_name_inner_enc = q.RecurrentStack(
         ent_name_inner_emb,
         q.argmap.spec(0, mask=1),
-        q.GRULayer(embdim, dim).return_final("only"),
+        q.GRULayer(glovedim, dim).return_final("only"),
         #q.GRUCell(dim, dim).to_layer(),
     )
     ent_name_emb_computer = ent_name_inner_enc
     ent_name_emb = computedwhat(data=entinfo.names_word.matrix, computer=ent_name_emb_computer, worddic=entdic)
     # 2. encode entity notable type
-    ent_notabletype_base_inner_emb = q.WordEmb(dim=embdim, worddic=entinfo.notabletypes_word.D)
+    ent_notabletype_base_inner_emb = q.WordEmb(dim=glovedim, worddic=entinfo.notabletypes_word.D)
     ent_notabletype_inner_emb = ent_notabletype_base_inner_emb.override(gloveemb)
     ent_notabletype_inner_enc = q.RecurrentStack(
         ent_notabletype_inner_emb,
         q.argmap.spec(0, mask=1),
-        q.GRULayer(embdim, dim).return_final("only"),
+        q.GRULayer(glovedim, dim).return_final("only"),
         #q.GRUCell(dim, dim).to_layer(),
     )
     ent_notabletype_emb_computer = ent_notabletype_inner_enc
@@ -142,10 +141,11 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     return ent_emb, entdic
 
 
-def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), computedwhat=q.ComputedWordEmb):
+def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.ComputedWordEmb):
     """ Makes composite computed embeddings for relations """
-    embdim = dim if embdim is None else embdim
-    if mode == "cat" and embdim is None:
+    glovedim = gloveemb.vecdim
+    embdim = glovedim
+    if mode == "cat":
         dim = dim // len(which)
     reldic, relinfo = load_relation_info_mats(p=defaultp)
 
@@ -153,12 +153,12 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
 
     if "name" in which:
         # 1. encode name
-        rel_name_base_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.names.D)
+        rel_name_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.names.D)
         rel_name_inner_emb = rel_name_base_inner_emb.override(gloveemb)
         rel_name_inner_enc = q.RecurrentStack(
             rel_name_inner_emb,
             q.argmap.spec(0, mask=1),
-            q.GRULayer(embdim, dim).return_final("only"),
+            q.GRULayer(glovedim, dim).return_final("only"),
             #q.GRUCell(dim, dim).to_layer(),
         )
         rel_name_emb = computedwhat(data=relinfo.names.matrix, computer=rel_name_inner_enc, worddic=reldic)
@@ -166,12 +166,12 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
 
     if "urlwords" in which:
         # 2. encode url with words
-        rel_urlwords_base_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.urlwords.D)
+        rel_urlwords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.urlwords.D)
         rel_urlwords_inner_emb = rel_urlwords_base_inner_emb.override(gloveemb)
         rel_urlwords_inner_enc = q.RecurrentStack(
             rel_urlwords_inner_emb,
             q.argmap.spec(0, mask=1),
-            q.GRULayer(embdim, dim).return_final("only"),
+            q.GRULayer(glovedim, dim).return_final("only"),
             # q.GRUCell(dim, dim).to_layer(),
         )
         rel_urlwords_emb = computedwhat(data=relinfo.urlwords.matrix, computer=rel_urlwords_inner_enc, worddic=reldic)
@@ -191,14 +191,14 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
 
     if "domainids" in which:
         # 4. embed domain ids and range ids
-        rel_domainids_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.domainids.D)
+        rel_domainids_inner_emb = q.WordEmb(dim=dim, worddic=relinfo.domainids.D)
         rel_domainids_emb = computedwhat(data=relinfo.domainids.matrix[:, 0],
                                               computer=rel_domainids_inner_emb,
                                               worddic=reldic)
         tomerge.append(rel_domainids_emb)
 
     if "rangeids" in which:
-        rel_rangeids_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.rangeids.D)
+        rel_rangeids_inner_emb = q.WordEmb(dim=dim, worddic=relinfo.rangeids.D)
         rel_rangeids_emb = computedwhat(data=relinfo.rangeids.matrix[:, 0],
                                              computer=rel_rangeids_inner_emb,
                                              worddic=reldic)
@@ -206,12 +206,12 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
 
     if "domainwords" in which:
         # 5. encode domain words
-        rel_domainwords_base_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.domainwords.D)
+        rel_domainwords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.domainwords.D)
         rel_domainwords_inner_emb = rel_domainwords_base_inner_emb.override(gloveemb)
         rel_domainwords_inner_enc = q.RecurrentStack(
             rel_domainwords_inner_emb,
             q.argmap.spec(0, mask=1),
-            q.GRULayer(embdim, dim).return_final("only"),
+            q.GRULayer(glovedim, dim).return_final("only"),
             # q.GRUCell(dim, dim).to_layer(),
         )
         rel_domainwords_emb = computedwhat(data=relinfo.domainwords.matrix, computer=rel_domainwords_inner_enc, worddic=reldic)
@@ -220,12 +220,12 @@ def get_rel_emb(dim, gloveemb, embdim=None, mode="cat", which=("urlwords",), com
 
     if "rangewords" in which:
         # 6. encode range words
-        rel_rangewords_base_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.rangewords.D)
+        rel_rangewords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.rangewords.D)
         rel_rangewords_inner_emb = rel_rangewords_base_inner_emb.override(gloveemb)
         rel_rangewords_inner_enc = q.RecurrentStack(
             rel_rangewords_inner_emb,
             q.argmap.spec(0, mask=1),
-            q.GRULayer(embdim, dim).return_final("only"),
+            q.GRULayer(glovedim, dim).return_final("only"),
             # q.GRUCell(dim, dim).to_layer(),
         )
         rel_rangewords_emb = computedwhat(data=relinfo.rangewords.matrix, computer=rel_rangewords_inner_enc, worddic=reldic)

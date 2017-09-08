@@ -322,9 +322,14 @@ class TestGRULayer(TestCase):
         self.assertTrue(np.allclose(pred[0, 2, :], np.zeros_like(pred[0, 2, :])))
         self.assertTrue(np.allclose(pred[4, 1:, :], np.zeros_like(pred[4, 1:, :])))
 
-        self.assertTrue(np.allclose(final[0, :], pred[0, 1, :]))
-        self.assertTrue(np.allclose(final[4, :], pred[4, 0, :]))
-        self.assertTrue(np.allclose(final[3, :], pred[3, 2, :]))
+        # first half of final state must be equal to last (non-masked) element of allstates
+        self.assertTrue(np.allclose(final[0, :6], pred[0, 1, :6]))
+        self.assertTrue(np.allclose(final[4, :6], pred[4, 0, :6]))
+        self.assertTrue(np.allclose(final[3, :6], pred[3, 2, :6]))
+        # second half of final state must be equal to first element of allstates
+        self.assertTrue(np.allclose(final[0, 6:], pred[0, 0, 6:]))
+        self.assertTrue(np.allclose(final[4, 6:], pred[4, 0, 6:]))
+        self.assertTrue(np.allclose(final[3, 6:], pred[3, 0, 6:]))
 
 
 class TestLSTMLayer(TestCase):

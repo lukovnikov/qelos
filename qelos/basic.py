@@ -24,7 +24,8 @@ class Lambda(nn.Module):
             self.extra_params = nn.ParameterList(register_params)
 
     def forward(self, *x, **kwargs):
-        return self.fn(*x, **kwargs)
+        ret = self.fn(*x, **kwargs)
+        return ret
 
 
 class StackSpecFunction(Lambda):
@@ -148,10 +149,14 @@ class argsave(StackSpecFunction):
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
-        self.layers = q.ModuleList(list(layers))
+        self.layers = q.ModuleList()
+        self.add(*layers)
         self._saved_slots = {}      # not for params
 
     def add(self, *layers):
+        self._add(*layers)
+
+    def _add(self, *layers):
         self.layers.extend(list(layers))
 
     def forward(self, *x, **kw):
@@ -212,6 +217,7 @@ class Softmax(nn.Module):
     def forward(self, x, mask=None, temperature=None):
         temperature = temperature if temperature is not None else self.temperature
         mask = mask if mask is not None else x.mask if hasattr(x, "mask") else None
+        mask = mask.float() if mask is not None else mask
         xndim = x.dim()
         s = x.size()
         seqmask = None
@@ -399,7 +405,7 @@ class BilinearDistance(Distance):
         if data.dim() == 3:
             l = data.view(-1, data.size(-1))        # (batsize * lseqlen, dim)
             if crit.dim() == 2:
-                r = crit.unsqueeze(1).expand_as(data).contiguous().view(-1, crit.size(-1))  # (batsize * lseqlen, dim)
+                r = crit.unsqueeze(1).repeat(1, data.size(1), 1).contiguous().view(-1, crit.size(-1))  # (batsize * lseqlen, dim)
             else:       # crit.dim() == 3
                 l = l.unsqueeze(1).expand(l.size(0), r.size(1), data.size(-1)).contiguous().view(-1, data.size(-1))     # (batsize * lseqlen * rseqlen, dim)
                 r = r.unsqueeze(1).repeat(1, data.size(1), 1, 1).view(-1, crit.size(-1))                                # (batsize * rseqlen * lseqlen, dim)

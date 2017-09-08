@@ -643,17 +643,19 @@ class GRULayer(RNUBase, Recurrent):
         y, s_t = self.nnlayer(x, h_0)
         self.set_states(s_t)        # DON'T TRUST FINAL STATES WHEN MASK IS NOT NONE
         #return y
+
+        if mask is None:
+            y_t = y[:, -1, :]
+        else:
+            last = (torch.sum(mask, 1) - 1).long()             # (batsize): lengths of sequences - 1
+            rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
+            y_t = y[rng.data, last.data, :]
+
+        # if mask is not None:
+        #     self.set_states(y_t)
+
         ret = tuple()
         if self._return_final:
-            if self._reverse:
-                y_t = y[:, 0, :]    # can't have completely masked sequence
-            else:
-                if mask is None:
-                    y_t = y[:, -1, :]
-                else:
-                    last = (torch.sum(mask, 1) - 1).long()             # (batsize): lengths of sequences - 1
-                    rng = q.var(torch.arange(0, x.size(0)).long()).cuda(x).v    # (batsize)
-                    y_t = y[rng.data, last.data, :]
             ret += (y_t,)
         if self._return_all:
             if self._reverse:
@@ -867,13 +869,11 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
     """
     Module containing multiple rec modules (modules that can operate on a single time step)
     """
-    def __init__(self, *layers):
-        newlayers = []
+    def add(self, *layers):
         for layer in layers:
-            if not isinstance(layer, (Reccable, q.argmap)):
+            if not isinstance(layer, (Reccable, q.argmap, q.argsave)):
                 layer = ReccableWrap(layer)
-            newlayers.append(layer)
-        super(RecStack, self).__init__(*newlayers)
+            self._add(layer)
 
     @property
     def state_spec(self):
@@ -931,11 +931,12 @@ class RecurrentWrapper(Recurrent, nn.Module):
         super(RecurrentWrapper, self).__init__()
         self.block = block
 
-    def forward(self, x):       # TODO: multiple inputs and outputs
-        x = x.contiguous()
-        batsize, seqlen = x.size(0), x.size(1)
-        i = x.view(batsize * seqlen, *x.size()[2:])
-        y = self.block(i)
+    def forward(self, *x):       # TODO: multiple inputs and outputs
+        x = [xe.contiguous() for xe in x]
+        x0 = x[0]
+        batsize, seqlen = x0.size(0), x0.size(1)
+        i = [xe.view(batsize * seqlen, *xe.size()[2:]) for xe in x]
+        y = self.block(*i)
         if not issequence(y):
             y = (y,)
         yo = []
@@ -956,13 +957,14 @@ class LastTimestepGetter(nn.Module):
 
 class RecurrentStack(RecStack):
     def __init__(self, *layers):
-        newlayers = []
-        for layer in layers:
-            if not isinstance(layer, (Recurrent, q.argmap)):
-                layer = RecurrentWrapper(layer)
-            newlayers.append(layer)
-        super(RecurrentStack, self).__init__(*newlayers)
+        super(RecurrentStack, self).__init__(*layers)
         self.return_ = "all"
+
+    def add(self, *layers):
+        for layer in layers:
+            if not isinstance(layer, (Recurrent, q.argmap, q.argsave)):
+                layer = RecurrentWrapper(layer)
+            self._add(layer)
 
     def return_final(self):
         if self.return_ == "all":
