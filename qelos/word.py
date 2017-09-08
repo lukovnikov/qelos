@@ -515,7 +515,8 @@ class ComputedWordLinout(WordLinoutBase):
         if self.bias:
             bias = self.bias if mask is not None else self.bias * mask
             out += bias
-        out = out * mask.float()
+        if mask is not None:
+            out = out * mask.float()
         return out#, mask ?
 
 

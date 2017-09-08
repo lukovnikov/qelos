@@ -22,8 +22,9 @@ class AttentionGenerator(nn.Module):
             scores = scores.permute(0, 2, 1)        # because scores for 3D3D are given from data to crit, here we need from crit to data
             if mask is not None:
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
-        weights, retmask = self.normalizer(scores, mask=mask)
-        weights = weights[0] if mask is not None else weights
+        weights = self.normalizer(scores, mask=mask)
+        if mask is not None:
+            weights, retmask = weights
         return weights      # (batsize, dseqlen) or (batsize, cseqlen, dseqlen)
 
 
@@ -446,7 +447,9 @@ class AttentionDecoderCell(DecoderCell):
         :return: output probabilities for current timestep and/or attention weights
         """
         batsize = x_t.size(0)
-        x_t_emb, x_t_mask = self.embedder(x_t)
+        x_t_emb = self.embedder(x_t)
+        if len(x_t_emb) == 2 and isinstance(x_t_emb, tuple):
+            x_t_emb, _ = x_t_emb
         if self.att_after_update:
             ctx_tm1 = self._state[0]
             i_t = torch.cat([x_t_emb, ctx_tm1], 1) if self.ctx_to_decinp else x_t_emb
@@ -463,7 +466,11 @@ class AttentionDecoderCell(DecoderCell):
         if self.ctx_to_smo:     cat_to_smo.append(ctx_t)
         if self.decinp_to_smo:  cat_to_smo.append(x_t_emb)
         smoinp_t = torch.cat(cat_to_smo, 1) if len(cat_to_smo) > 1 else cat_to_smo[0]
-        y_t = self.smo(smoinp_t, mask=outmask_t.float(), **kw) if self.smo is not None else smoinp_t
+        smokw = {}
+        smokw.update(kw)
+        if outmask_t is not None:
+            smokw["mask"] = outmask_t.float()
+        y_t = self.smo(smoinp_t, **smokw) if self.smo is not None else smoinp_t
         # returns
         ret = tuple()
         if self.return_out:
