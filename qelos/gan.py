@@ -167,7 +167,7 @@ class GANTrainer(object):
                         real.contiguous().view(batsize, -1).unsqueeze(0),
                         fake.contiguous().view(batsize, -1).unsqueeze(0)).squeeze(0)
                     # get closest real point
-                    _, closest_real = torch.max(distmat, 0)
+                    _, closest_real = torch.min(distmat, 0)
                     closest_real_points = torch.index_select(real, 0, closest_real)
                     interp_alpha = real.data.new(num_examples, 1)
                     interp_alpha.uniform_(0, 1)
