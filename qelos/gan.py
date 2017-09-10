@@ -9,7 +9,7 @@ EPS = 1e-6
 
 
 class GANTrainer(object):
-    def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG, PAGAN
+    def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG, PAGAN, ACHAGAN
                         modeD="critic",  # disc or critic
                         one_sided=False,
                         penalty_weight=None,
@@ -125,6 +125,7 @@ class GANTrainer(object):
                 data = next(data_gen)
                 real = q.var(data).cuda(cuda).v
                 num_examples = data.size(0)
+                batsize = num_examples
                 vnoise = Variable(real.data.new(num_examples, self.noise_dim))
                 vnoise.data.normal_(0, 1)
                 fake = netG(vnoise)
@@ -156,7 +157,30 @@ class GANTrainer(object):
                     errD_gradient, = torch.autograd.grad(errD_interp_vec.sum(),
                                                          interp_points,
                                                          create_graph=True)
-                    lip_grad_norm = errD_gradient.norm(2, dim=1)
+                    lip_grad_norm = errD_gradient.view(batsize, -1).norm(2, dim=1)
+                    assert(lip_grad_norm.size() == (batsize,))
+                    lip_loss = self.penalty_weight * (self.clip_fn(lip_grad_norm - 1) ** 2).mean()
+                    errD = errD + lip_loss
+                elif self.mode == "ACHAGAN":
+                    errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
+                    distmat = q.LNormDistance(2)(       # batid, realid, fakeid?
+                        real.contiguous().view(batsize, -1).unsqueeze(0),
+                        fake.contiguous().view(batsize, -1).unsqueeze(0)).squeeze(0)
+                    # get closest real point
+                    _, closest_real = torch.max(distmat, 1)
+                    closest_real_points = torch.index_select(real, 0, closest_real)
+                    interp_alpha = real.data.new(num_examples, 1)
+                    interp_alpha.uniform_(0, 1)
+                    interp_points = interp_alpha * real.data \
+                        + (1 - interp_alpha) * closest_real_points.data
+                    grad_points = interp_points.clone()
+                    interp_points = Variable(interp_points, requires_grad=True)
+                    errD_interp_vec = netD(interp_points)
+                    errD_gradient, = torch.autograd.grad(errD_interp_vec.sum(),
+                                                         interp_points,
+                                                         create_graph=True)
+                    lip_grad_norm = errD_gradient.view(batsize, -1).norm(2, dim=1)
+                    assert (lip_grad_norm.size() == (batsize,))
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_grad_norm - 1) ** 2).mean()
                     errD = errD + lip_loss
                 elif self.mode == "DRAGAN" or self.mode == "DRAGAN-G" or self.mode == "DRAGAN-LG":
@@ -170,14 +194,16 @@ class GANTrainer(object):
                     errD_real_perturbed_vec = netD(real_perturbed)
                     errD_gradient, = torch.autograd.grad(
                         errD_real_perturbed_vec.sum(), real_perturbed, create_graph=True)
-                    lip_grad_norm = errD_gradient.norm(2, dim=1)
+                    lip_grad_norm = errD_gradient.view(batsize, -1).norm(2, dim=1)
+                    assert(lip_grad_norm.size() == (batsize,))
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_grad_norm - 1) ** 2).mean()
                     if self.perturb_both:
                         fake_perturbed = self.perturb(fake)
                         errD_fake_perturbed_vec = netD(fake_perturbed)
                         errD_fake_gradient, = torch.autograd.grad(
                             errD_fake_perturbed_vec.sum(), fake_perturbed, create_graph=True)
-                        lip_fake_grad_norm = errD_fake_gradient.norm(2, dim=1)
+                        lip_fake_grad_norm = errD_fake_gradient.view(batsize, -1).norm(2, dim=1)
+                        assert(lip_fake_grad_norm.size() == (batsize,))
                         lip_fake_loss = self.penalty_weight * (self.clip_fn(lip_fake_grad_norm - 1) ** 2).mean()
                         lip_loss = lip_loss * 0.5 + lip_fake_loss * 0.5
                     errD = errD + lip_loss

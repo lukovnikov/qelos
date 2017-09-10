@@ -139,7 +139,7 @@ def main(
         batsize=100,
         cuda=False,
         dataset="swissroll",
-        mode="PAGAN"
+        mode="ACHAGAN"
         ):
     netD = ToyGAN_D()
     netG = ToyGAN_G()

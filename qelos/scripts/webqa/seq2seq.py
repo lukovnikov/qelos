@@ -39,7 +39,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
     #                     )
     # decoder.block.smo = None
     # try decoder cell
-    for t in range(2):
+    for t in range(3):
         # ctx, ctxmask, finalctx = encoder(questions)
         decoder.block.core.reset_state()        # ESSENTIAL !!! otherwise double .backward() error
         decoder.set_init_states(finalctx.detach())
@@ -47,7 +47,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
         outmaskt=vnt[:, t]
         # outmaskt=q.var(np.ones_like(vnt[:, t].data.numpy()).astype("int64")).v
         y_t = decoder.block(queries[:, t], ctx.detach(), ctxmask=ctxmask.detach(), t=t, outmask_t=outmaskt)
-        loss = y_t.sum()
+        loss = torch.max(y_t)
         print(loss)
         loss.backward()
         print("backward done")
