@@ -71,8 +71,9 @@ class PackedRNUGates(nn.Module):
         if self.rec_bn is True:
             self._rbn.reset_parameters()
 
-    def forward(self, x, h, t=None):
-        x = torch.cat([x, h], 1)
+    def forward(self, *args, **kw):
+        t = None if "t" not in kw else kw["t"]
+        x = torch.cat(list(args), 1)
         v = torch.mm(x, self.W)
         if self._rbn is not None:
             v = self._rbn(v, t)      # TODO: check masking
@@ -500,6 +501,85 @@ class LSTMCell(GRUCell):
             c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
             y_t = torch.mul(1 - self.shared_zoneouter[1], y_tm1) + torch.mul(self.shared_zoneouter[1], y_t)
         return y_t, c_t, y_t
+
+
+class _SRUCell(nn.Module):
+    def __init__(self, dim, bias=True, gate_activation="sigmoid",
+                 activation="tanh"):
+        super(_SRUCell, self).__init__()
+        self.indim, self.outdim, self.use_bias = dim, dim, bias
+        self.gate_activation, self.activation = gate_activation, activation
+        self.hdim = self.outdim
+        if self.activation == "crelu":
+            self.hdim = self.hdim // 2      # TODO
+        self.gates = PackedRNUGates(self.indim,
+                                    [(self.outdim, self.gate_activation),
+                                     (self.outdim, self.gate_activation),
+                                     (self.outdim, None)])
+        self.activation_fn = name2fn(activation)()
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.gates.reset_parameters()
+
+    def forward(self, x_t, c_tm1, t=None):
+        forget_gate, reset_gate, x_hat = self.gates(x_t, t=t)
+        c_t = forget_gate * c_tm1 + (1 - forget_gate) * x_hat
+        y_t = reset_gate * self.activation_fn(c_t) + (1 - reset_gate) * x_t
+        return y_t, c_t
+
+
+
+class SRUCell(GRUCell):
+    def __init__(self, dim, use_bias=True,
+                 dropout_in=None, dropout_rec=None, zoneout=None,
+                 shared_dropout_rec=None, shared_zoneout=None,
+                 use_cudnn_cell=False, activation="tanh",
+                 gate_activation="sigmoid",
+                 rec_batch_norm=None):  # custom activations have only an effect when not using cudnn cell
+        self.dim = dim
+        super(SRUCell, self).__init__(dim, dim, use_bias=use_bias,
+          dropout_in=dropout_in, dropout_rec=dropout_rec,
+          shared_dropout_rec=shared_dropout_rec,
+          shared_zoneout=shared_zoneout, zoneout=zoneout,
+          use_cudnn_cell=use_cudnn_cell,
+          activation=activation, gate_activation=gate_activation)
+
+    def setcell(self):
+        if self.use_cudnn_cell:
+            raise NotImplemented("TODO: plug in cuda implementation from paper")
+        else:
+            self.nncell = _SRUCell(self.indim, bias=self.use_bias,
+                                    gate_activation=self.gate_activation, activation=self.activation)
+
+    @property
+    def state_spec(self):
+        return self.outdim,
+
+    def _forward(self, x_t, c_tm1, t=None):
+        if self.dropout_in:
+            x_t = self.dropout_in(x_t)
+        if self.dropout_rec:
+            c_tm1 = self.dropout_rec(c_tm1)
+        if self.shared_dropout_rec:
+            if self.shared_dropout_reccer is None:
+                ones = q.var(torch.ones(c_tm1.size())).cuda(crit=c_tm1).v
+                self.shared_dropout_reccer = [self.shared_dropout_rec(ones)]
+            c_tm1 = torch.mul(c_tm1, self.shared_dropout_reccer[0])
+
+        y_t, c_t = self.apply_nncell(x_t, c_tm1, t=t)
+
+        if self.zoneout:
+            if self.zoner is None:
+                self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
+            zoner = self.zoneout(self.zoner)
+            c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
+        if self.shared_zoneout:
+            if self.shared_zoneouter is None:
+                ones = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
+                self.shared_zoneouter = [self.shared_zoneout(ones)]
+            c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
+        return y_t, c_t
 
 # endregion
 

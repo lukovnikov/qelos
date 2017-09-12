@@ -1,5 +1,5 @@
 from qelos.train import lossarray, train, TensorDataset
-from qelos.rnn import GRUCell, LSTMCell, RNU, RecStack, RNNLayer, BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, BidirLSTMLayer
+from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, BidirLSTMLayer
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, CosineDistance, DotDistance, Forward, ForwardDistance, \

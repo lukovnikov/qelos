@@ -171,6 +171,17 @@ class TestLSTM(TestCase):
         self.assertFalse(np.allclose(pred1.data.numpy(), pred2.data.numpy()))
 
 
+class TestSRU(TestCase):
+    def test_sru_shapes(self):
+        batsize = 5
+        sru = q.SRUCell(10)
+        x_t = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        c_tm1 = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
+        sru.set_init_states(c_tm1)
+        y_t = sru(x_t)
+        self.assertEqual((5, 10), y_t.data.numpy().shape)
+
+
 class Test_RNNLayer(TestCase):
     def test_lstm_layer_shapes(self):
         batsize = 5
@@ -181,6 +192,18 @@ class Test_RNNLayer(TestCase):
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         y = lstm(x)
         self.assertEqual((batsize, seqlen, 10), y.data.numpy().shape)
+
+    def test_sru_masked(self):
+        batsize = 3
+        seqlen = 4
+        sru = q.SRUCell(10)
+        sru = sru.to_layer().return_all().return_final()
+        x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 10))))
+        m_val = np.asarray([[1, 1, 1, 0], [1, 0, 0, 0], [1, 1, 1, 1]])
+        m = Variable(torch.FloatTensor(m_val))
+        y_t, y = sru(x, mask=m)
+        pred = y.data.numpy()
+        self.assertTrue(np.allclose(y_t.data.numpy(), y.data.numpy()[:, -1]))
 
     def test_masked_gru(self):
         batsize = 3

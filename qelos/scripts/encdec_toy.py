@@ -22,21 +22,20 @@ class EncDec(nn.Module):
         self.mode = mode
 
     def forward(self, srcseq, tgtseq):
-        enc = self.encoder(srcseq)
-        encstates = self.encoder.get_states(srcseq.size(0))
+        final, enc = self.encoder(srcseq)
         if self.mode == "fast":
-            self.decoder.set_init_states(encstates[-1])
+            self.decoder.set_init_states(final)
         else:
-            self.decoder.set_init_states(encstates[-1], encstates[-1])
+            self.decoder.set_init_states(final, final)
         dec = self.decoder(tgtseq, enc)
         return dec
 
 
 def main(
         lr=0.5,
-        epochs=15,
+        epochs=30,
         batsize=32,
-        embdim=50,
+        embdim=90,
         encdim=90,
         mode="cell",     # "fast" or "cell"
         wreg=0.0001,
@@ -66,8 +65,10 @@ def main(
 
     encoder = q.RecurrentStack(
         embedder,
-        q.GRULayer(embdim, encdim),
-        q.GRULayer(encdim, encdim),
+        q.SRUCell(encdim).to_layer(),
+        q.SRUCell(encdim).to_layer(),
+        q.SRUCell(encdim).to_layer(),
+        q.SRUCell(encdim).to_layer().return_final(),
     )
     if mode == "fast":
         decoder = q.AttentionDecoder(attention=q.Attention().forward_gen(encdim, encdim, encdim),
