@@ -368,3 +368,16 @@ class DictObj(object):
 
 def dtoo(d):
     return DictObj(d)
+
+
+class EmitStorage(object):
+    storage = {}
+
+
+def emit(name, dic):
+    EmitStorage.storage[name] = dic
+
+
+def get_emitted(name):
+    return EmitStorage.storage[name]
+

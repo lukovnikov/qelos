@@ -7,11 +7,14 @@ from qelos.util import issequence
 
 # region attention
 class AttentionGenerator(nn.Module):
-    def __init__(self, dist=None, normalizer=Softmax(), data_selector=None):
+    def __init__(self, dist=None, normalizer=Softmax(),
+                 data_selector=None, scale=1., dropout=0.):
         super(AttentionGenerator, self).__init__()
         self.dist = dist
         self.data_selector = data_selector
         self.normalizer = normalizer
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0. else None
+        self.scale = scale
 
     def forward(self, data, crit, mask=None):   # should work for 3D/2D and 3D/3D
         if self.data_selector is not None:
@@ -22,9 +25,14 @@ class AttentionGenerator(nn.Module):
             scores = scores.permute(0, 2, 1)        # because scores for 3D3D are given from data to crit, here we need from crit to data
             if mask is not None:
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
-        weights = self.normalizer(scores, mask=mask)
         if mask is not None:
-            weights, retmask = weights
+            assert(mask.size() == scores.size(), "mask should be same size as scores")
+            scores.data.masked_fill_((-1*mask+1).byte().data, -float("inf"))
+        if self.scale != 1.:
+            scores = scores / self.scale
+        weights = self.normalizer(scores)
+        if self.dropout is not None:
+            weights = self.dropout(weights)
         return weights      # (batsize, dseqlen) or (batsize, cseqlen, dseqlen)
 
 
@@ -56,6 +64,14 @@ class Attention(nn.Module):
             return data[:, :, data.size(2)//2:]
         self.attgen.data_selector = attgen_ds
         self.attcon.data_selector = attcon_ds
+        return self
+
+    def scale(self, scale):
+        self.attgen.scale = scale
+        return self
+
+    def dropout(self, rate):
+        self.attgen.dropout = nn.Dropout(rate)
         return self
 
     def forward(self, data, crit):

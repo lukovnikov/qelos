@@ -308,6 +308,7 @@ class Distance(nn.Module):
 
 class DotDistance(Distance):
     def forward(self, data, crit):        # (batsize, seqlen, dim), (batsize, dim)
+        datadim, critdim = data.dim(), crit.dim()
         if data.dim() == 2:               # if datasets is (batsize, dim),
             data = data.unsqueeze(1)      #     make (batsize, 1, dim)
         if crit.dim() == 2:               # if crit is (batsize, dim)
@@ -315,7 +316,9 @@ class DotDistance(Distance):
         else:                             # else crit must be (batsize, seqlen, dim)
             crit = crit.permute(0, 2, 1)  #     but we need (batsize, dim, seqlen)
         dist = torch.bmm(data, crit)      # batched mat dot --> (batsize,1,1) or (batsize, lseqlen,1) or (batsize, lseqlen, rseqlen)
-        return dist.squeeze()
+        ret = dist.squeeze(1) if datadim == 2 else dist
+        ret = ret.squeeze(-1) if critdim == 2 else ret
+        return ret
 
 
 class CosineDistance(DotDistance):
@@ -548,3 +551,25 @@ class Identity(nn.Module):
         if len(x) == 1:
             x = x[0]
         return x
+
+
+class LayerNormalization(nn.Module):
+    ''' Layer normalization module '''
+
+    def __init__(self, dim, eps=1e-3):
+        super(LayerNormalization, self).__init__()
+
+        self.eps = eps
+        self.a_2 = nn.Parameter(torch.ones(dim), requires_grad=True)
+        self.b_2 = nn.Parameter(torch.zeros(dim), requires_grad=True)
+
+    def forward(self, z):
+        if z.size(1) == 1:
+            return z
+
+        mu = torch.mean(z, keepdim=True, dim=-1)
+        sigma = torch.std(z, keepdim=True, dim=-1)
+        ln_out = (z - mu.expand_as(z)) / (sigma.expand_as(z) + self.eps)
+        ln_out = ln_out * self.a_2.expand_as(ln_out) + self.b_2.expand_as(ln_out)
+
+        return ln_out
