@@ -23,7 +23,7 @@ class AttentionGenerator(nn.Module):
         if scores.dim() == 3:       # (batsize, dseqlen, cseqlen)
             assert(crit.dim() == 3)
             scores = scores.permute(0, 2, 1)        # because scores for 3D3D are given from data to crit, here we need from crit to data
-            if mask is not None:
+            if mask is not None and mask.dim() == 2:
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
         if mask is not None:
             assert(mask.size() == scores.size(), "mask should be same size as scores")

@@ -393,3 +393,11 @@ class TestRecurrentStack(TestCase):
         print(pred)
         self.assertEqual((batsize, seqlen, vocsize), pred.size())
         self.assertEqual((batsize, encdim), m.get_states(0)[0].size())
+
+
+class BasicRecurrentModules(TestCase):
+    def test_positionwise_forward(self):
+        m = q.PositionwiseForward(10, 12, dropout=0)
+        data = q.var(np.random.random((5,7,10)).astype("float32")).v
+        out = m(data)
+        self.assertEqual(out.size(), (5, 7, 10))

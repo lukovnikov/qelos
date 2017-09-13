@@ -3,12 +3,13 @@
 # adapted from https://github.com/jadore801120/attention-is-all-you-need-pytorch by Yu-Hsiang Huang
 ###################################################################
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 import torch.nn.init as init
-import qelos as q
 
+import qelos as q
+from qelos.rnn import PositionwiseForward
 
 MASKID = 0
 
@@ -49,7 +50,7 @@ def get_attn_subsequent_mask(seq):
 
 #### BASIC ##########################
 class ScaledDotProductAttention(nn.Module):
-    ''' Scaled Dot-Product Attention '''
+    ''' Scaled Dot-Product Attention. Old, don't use '''
 
     def __init__(self, d_model, attn_dropout=0.1):
         super(ScaledDotProductAttention, self).__init__()
@@ -80,11 +81,11 @@ class ScaledDotProductAttention(nn.Module):
 ''' Define the sublayers in encoder/decoder layer '''
 
 
-class MyMultiHeadAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
     def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1):
-        super(MyMultiHeadAttention, self).__init__()
+        super(MultiHeadAttention, self).__init__()
 
         self.n_head = n_head
         self.d_k = d_k
@@ -127,7 +128,11 @@ class MyMultiHeadAttention(nn.Module):
         q.emit("mymha", {"q_s": q_s, "k_s": k_s, "v_s": v_s})
 
         # perform attention, result size = (n_head * mb_size) x len_q x d_v
-        attns = self.attention.attgen(k_s, q_s, mask=attn_mask.repeat(n_head, 1))
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.repeat(n_head, 1)
+        else:
+            attn_mask = attn_mask.repeat(n_head, 1, 1)
+        attns = self.attention.attgen(k_s, q_s, mask=attn_mask)
         outputs = self.attention.attcon(v_s, attns)
 
         # back to original mb_size batch, result size = mb_size x len_q x (n_head*d_v)
@@ -141,11 +146,11 @@ class MyMultiHeadAttention(nn.Module):
         # return outputs + residual, attns
 
 
-class MultiHeadAttention(nn.Module):
+class OriginalMultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
     def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1):
-        super(MultiHeadAttention, self).__init__()
+        super(OriginalMultiHeadAttention, self).__init__()
 
         self.n_head = n_head
         self.d_k = d_k
@@ -204,6 +209,7 @@ class MultiHeadAttention(nn.Module):
         return self.layer_norm(outputs + residual), attns
         # return outputs + residual, attns
 
+
 #### ENCODING #######################
 class EncoderLayer(nn.Module):
     ''' Compose with two layers '''
@@ -212,7 +218,7 @@ class EncoderLayer(nn.Module):
         super(EncoderLayer, self).__init__()
         self.slf_attn = MultiHeadAttention(
             n_head, d_model, d_k, d_v, dropout=dropout)
-        self.pos_ffn = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
+        self.pos_ffn = PositionwiseForward(d_model, d_inner_hid, dropout=dropout)
 
     def forward(self, enc_input, slf_attn_mask=None):
         enc_output, enc_slf_attn = self.slf_attn(
@@ -225,7 +231,7 @@ class Encoder(nn.Module):
     ''' A encoder model with self attention mechanism. '''
 
     def __init__(
-            self, n_src_vocab, n_max_seq, n_layers=6, n_head=8, d_k=64, d_v=64,
+            self, src_emb, n_max_seq, n_layers=6, n_head=8, d_k=64, d_v=64,
             d_word_vec=512, d_model=512, d_inner_hid=1024, dropout=0.1):
 
         super(Encoder, self).__init__()
@@ -237,7 +243,7 @@ class Encoder(nn.Module):
         self.position_enc = nn.Embedding(n_position, d_word_vec, padding_idx=MASKID)
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
 
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=MASKID)
+        self.src_word_emb = src_emb     #nn.Embedding(n_src_vocab, d_word_vec, padding_idx=MASKID)
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
@@ -245,21 +251,24 @@ class Encoder(nn.Module):
 
     def forward(self, src_seq, src_pos):
         # Word embedding look up
+        enc_slf_attn_mask = None
         enc_input = self.src_word_emb(src_seq)
+        if isinstance(enc_input, tuple) and len(enc_input) == 2:
+            enc_input, enc_slf_attn_mask = enc_input
 
         # Position Encoding addition
         enc_input += self.position_enc(src_pos)
         enc_outputs, enc_slf_attns = [], []
 
         enc_output = enc_input
-        enc_slf_attn_mask = get_attn_padding_mask(src_seq, src_seq)
+        # enc_slf_attn_mask = get_attn_padding_mask(src_seq, src_seq)
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(
                 enc_output, slf_attn_mask=enc_slf_attn_mask)
             enc_outputs += [enc_output]
             enc_slf_attns += [enc_slf_attn]
 
-        return enc_outputs, enc_slf_attns
+        return enc_output       # enc_outputs, enc_slf_attns
 
 
 #### DECODING ######################
@@ -270,7 +279,7 @@ class DecoderLayer(nn.Module):
         super(DecoderLayer, self).__init__()
         self.slf_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
         self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.pos_ffn = PositionwiseFeedForward(d_model, d_inner_hid, dropout=dropout)
+        self.pos_ffn = PositionwiseForward(d_model, d_inner_hid, dropout=dropout)
 
     def forward(self, dec_input, enc_output, slf_attn_mask=None, dec_enc_attn_mask=None):
         dec_output, dec_slf_attn = self.slf_attn(
@@ -282,10 +291,10 @@ class DecoderLayer(nn.Module):
         return dec_output, dec_slf_attn, dec_enc_attn
 
 
-class Decoder(nn.Module):
+class Decoder(nn.Module):       # This decoder is teacher forced, non-reccable TODO: make proper decoder
     ''' A decoder model with self attention mechanism. '''
     def __init__(
-            self, n_tgt_vocab, n_max_seq, n_layers=6, n_head=8, d_k=64, d_v=64,
+            self, tgt_emb, n_max_seq, n_layers=6, n_head=8, d_k=64, d_v=64,
             d_word_vec=512, d_model=512, d_inner_hid=1024, dropout=0.1):
 
         super(Decoder, self).__init__()
@@ -297,17 +306,20 @@ class Decoder(nn.Module):
             n_position, d_word_vec, padding_idx=MASKID)
         self.position_enc.weight.data = position_encoding_init(n_position, d_word_vec)
 
-        self.tgt_word_emb = nn.Embedding(
-            n_tgt_vocab, d_word_vec, padding_idx=MASKID)
+        self.tgt_word_emb = tgt_emb
         self.dropout = nn.Dropout(dropout)
 
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, tgt_seq, tgt_pos, src_seq, enc_outputs):
+    def forward(self, tgt_seq, tgt_pos, src_enc, src_mask=None):
         # Word embedding look up
-        dec_input = self.tgt_word_emb(tgt_seq)
+        dec_input, dec_mask = self.tgt_word_emb(tgt_seq)
+        if dec_mask is not None:
+            dec_mask = dec_mask.unsqueeze(1).repeat(1, dec_input.size(1), 1)
+        else:
+            dec_mask = q.var(np.ones((tgt_seq.size(0), tgt_seq.size(1), tgt_seq.size(1)))).v
 
         # Position Encoding addition
         dec_input += self.position_enc(tgt_pos)
@@ -315,43 +327,41 @@ class Decoder(nn.Module):
         dec_outputs, dec_slf_attns, dec_enc_attns = [], [], []
 
         # Decode
-        dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq, tgt_seq)
-        dec_slf_attn_sub_mask = get_attn_subsequent_mask(tgt_seq)
-        dec_slf_attn_mask = torch.gt(dec_slf_attn_pad_mask + dec_slf_attn_sub_mask, 0)
-
-        dec_enc_attn_pad_mask = get_attn_padding_mask(tgt_seq, src_seq)
+        # dec_slf_attn_pad_mask = get_attn_padding_mask(tgt_seq, tgt_seq)
+        dec_slf_attn_sub_mask = -1*get_attn_subsequent_mask(tgt_seq)+1
+        dec_slf_attn_mask = q.var(torch.gt(dec_mask.data.byte() + dec_slf_attn_sub_mask, 0)).v
 
         dec_output = dec_input
-        for dec_layer, enc_output in zip(self.layer_stack, enc_outputs):
+        for dec_layer in self.layer_stack:
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
-                dec_output, enc_output, slf_attn_mask=dec_slf_attn_mask,
-                dec_enc_attn_mask=dec_enc_attn_pad_mask)
+                dec_output, src_enc, slf_attn_mask=dec_slf_attn_mask,
+                dec_enc_attn_mask=src_mask)
 
             dec_outputs += [dec_output]
             dec_slf_attns += [dec_slf_attn]
             dec_enc_attns += [dec_enc_attn]
 
-        return dec_outputs, dec_slf_attns, dec_enc_attns
+        return dec_output       #dec_outputs, dec_slf_attns, dec_enc_attns
 
 
 class Transformer(nn.Module):
     ''' A sequence to sequence model with attention mechanism. '''
 
     def __init__(
-            self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=6, n_head=8,
+            self, src_emb, tgt_emb, tgt_lin, n_max_seq, n_layers=6, n_head=8,
             d_word_vec=512, d_model=512, d_inner_hid=1024, d_k=64, d_v=64,
             dropout=0.1, proj_share_weight=True, embs_share_weight=True):
 
         super(Transformer, self).__init__()
         self.encoder = Encoder(
-            n_src_vocab, n_max_seq, n_layers=n_layers, n_head=n_head,
+            src_emb, n_max_seq, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
             d_inner_hid=d_inner_hid, dropout=dropout)
         self.decoder = Decoder(
-            n_tgt_vocab, n_max_seq, n_layers=n_layers, n_head=n_head,
+            tgt_emb, n_max_seq, n_layers=n_layers, n_head=n_head,
             d_word_vec=d_word_vec, d_model=d_model,
             d_inner_hid=d_inner_hid, dropout=dropout)
-        self.tgt_word_proj = Linear(d_model, n_tgt_vocab, bias=False)
+        self.tgt_word_proj = tgt_lin
         self.dropout = nn.Dropout(dropout)
 
         assert d_model == d_word_vec, \
@@ -383,10 +393,9 @@ class Transformer(nn.Module):
         tgt_seq = tgt_seq[:, :-1]
         tgt_pos = tgt_pos[:, :-1]
 
-        enc_outputs, enc_slf_attns = self.encoder(src_seq, src_pos)
-        dec_outputs, dec_slf_attns, dec_enc_attns = self.decoder(
-            tgt_seq, tgt_pos, src_seq, enc_outputs)
-        dec_output = dec_outputs[-1]
+        enc_output = self.encoder(src_seq, src_pos)
+        dec_output = self.decoder(
+            tgt_seq, tgt_pos, src_seq, enc_output)
 
         seq_logit = self.tgt_word_proj(dec_output)
 
@@ -404,6 +413,8 @@ class Linear(nn.Module):
         return self.linear(x)
 
 
+
+#### BOTTLES #######################
 class Bottle(nn.Module):
     ''' Perform the reshape routine before and after an operation '''
 
@@ -441,20 +452,3 @@ class BottleLayerNormalization(BatchBottle, q.LayerNormalization):
     pass
 
 
-class PositionwiseFeedForward(nn.Module):
-    ''' A two-feed-forward-layer module '''
-
-    def __init__(self, d_hid, d_inner_hid, dropout=0.1):
-        super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Conv1d(d_hid, d_inner_hid, 1) # position-wise
-        self.w_2 = nn.Conv1d(d_inner_hid, d_hid, 1) # position-wise
-        self.layer_norm = q.LayerNormalization(d_hid)
-        self.dropout = nn.Dropout(dropout)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        residual = x
-        output = self.relu(self.w_1(x.transpose(1, 2)))
-        output = self.w_2(output).transpose(2, 1)
-        output = self.dropout(output)
-        return self.layer_norm(output + residual)

@@ -71,7 +71,7 @@ from qelos.aiayn import ScaledDotProductAttention
 class TestScaledDotProductAttention(TestCase):
     def test_equivalent_to_qelos(self):
         m = ScaledDotProductAttention(10, attn_dropout=0)
-        refm = q.Attention().dot_gen().scale_pow(0.5)
+        refm = q.Attention().dot_gen().scale(10**0.5)
 
         Q = q.var(np.random.random((5,4,10)).astype("float32")).v
         K = q.var(np.random.random((5,6,10)).astype("float32")).v
@@ -89,7 +89,7 @@ class TestScaledDotProductAttention(TestCase):
 
     def test_equivalent_to_qelos_masked(self):
         m = ScaledDotProductAttention(10, attn_dropout=0)
-        refm = q.Attention().dot_gen().scale_pow(0.5)
+        refm = q.Attention().dot_gen().scale(10**0.5)
 
         Q = q.var(np.random.random((5, 1, 10)).astype("float32")).v
         K = q.var(np.random.random((5, 6, 10)).astype("float32")).v
@@ -112,12 +112,12 @@ class TestScaledDotProductAttention(TestCase):
         self.assertTrue(np.allclose(ctx.data.numpy(), refctx.data.numpy()))
 
 
-from qelos.aiayn import MultiHeadAttention
+from qelos.aiayn import OriginalMultiHeadAttention
 
 
 class TestMultiHeadAttention(TestCase):
     def test_equivalent_to_qelos(self):
-        m = MultiHeadAttention(4, 16, 10, 12, 0)
+        m = OriginalMultiHeadAttention(4, 16, 10, 12, 0)
         mym = q.MultiHeadAttention(4, 16, 10, 12, 0)
         mym.w_qs, mym.w_ks, mym.w_vs = m.w_qs, m.w_ks, m.w_vs
         mym.proj, mym.layer_norm = m.proj, m.layer_norm
@@ -137,7 +137,7 @@ class TestMultiHeadAttention(TestCase):
         self.assertEqual(outs.size(), (5, 1, 16))
         self.assertEqual(atts.size(), (20, 1, 6))
 
-        myouts, myatts = mym(Q, K, V, M)
+        myouts, myatts = mym(Q, K, V, M.unsqueeze(1))
 
         m_em = q.get_emitted("mha")
         mym_em = q.get_emitted("mymha")

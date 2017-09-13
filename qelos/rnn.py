@@ -1,10 +1,8 @@
 import torch
 from torch.autograd import Variable
 from torch import nn
-from qelos.util import issequence, isnumber
-from qelos.qutils import name2fn
-from qelos.basic import Stack
 import qelos as q
+from qelos.basic import Stack
 
 
 # region I. RNN cells
@@ -13,7 +11,7 @@ class RNUGate(nn.Module):
     def __init__(self, indim, outdim, hdim=None, activation="sigmoid", use_bias=True):
         super(RNUGate, self).__init__()
         self.indim, self.outdim, self.activation, self.use_bias = indim, outdim, activation, use_bias
-        self.activation_fn = name2fn(self.activation)()
+        self.activation_fn = q.name2fn(self.activation)()
         self.W = nn.Parameter(torch.FloatTensor(self.indim, self.outdim))
         udim = self.outdim if hdim is None else hdim
         self.U = nn.Parameter(torch.FloatTensor(udim, self.outdim))
@@ -50,7 +48,7 @@ class PackedRNUGates(nn.Module):
         for outgatespec in outgatespecs:
             gateoutdim = outgatespec[0]
             gateact = outgatespec[1]
-            gateact_fn = name2fn(gateact)()
+            gateact_fn = q.name2fn(gateact)()
             self.outgates.append(((self.outdim, self.outdim+gateoutdim), gateact_fn))
             self.outdim += gateoutdim
         self.W = nn.Parameter(torch.FloatTensor(self.indim, self.outdim))
@@ -174,7 +172,7 @@ class RNUBase(RecStateful):
         """
         if arg is None:
             return self._init_states
-        assert(isnumber(arg) or arg is None)       # is batch size
+        assert(q.isnumber(arg) or arg is None)       # is batch size
         if self._init_states is None:       # no states have been set using .set_init_states()
             _init_states = [None] * self.numstates
         else:
@@ -306,7 +304,7 @@ class _GRUCell(nn.Module):      # TODO: test rbn
                                         [(self.hdim, None)],
                                         use_bias=self.use_bias,
                                         rec_bn=self._rbn_main)
-        self.activation_fn = name2fn(activation)()
+        self.activation_fn = q.name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -438,7 +436,7 @@ class _LSTMCell(nn.Module):
                                      (self.hdim, None)],
                                     use_bias=self.use_bias,
                                     rec_bn=self._rbn_gates)
-        self.activation_fn = name2fn(activation)()
+        self.activation_fn = q.name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -516,7 +514,7 @@ class _SRUCell(nn.Module):
                                     [(self.outdim, self.gate_activation),
                                      (self.outdim, self.gate_activation),
                                      (self.outdim, None)])
-        self.activation_fn = name2fn(activation)()
+        self.activation_fn = q.name2fn(activation)()
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -619,7 +617,7 @@ class RNNLayer(nn.Module, Recurrent):
     def forward(self, x, mask=None, init_states=None, reverse=False):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
         batsize = x.size(0)
         if init_states is not None:
-            if not issequence(init_states):
+            if not q.issequence(init_states):
                 init_states = (init_states,)
             self.cell.set_init_states(*init_states)
         self.cell.reset_state()
@@ -847,9 +845,9 @@ class _BidirRNNLayer(nn.Module, Recurrent):
         
         merge_fn = (lambda a, b: torch.cat([a, b], -1)) if self.mode == "cat" else (lambda a, b: a + b)
 
-        if not issequence(fwd_ret):
+        if not q.issequence(fwd_ret):
             fwd_ret = [fwd_ret]
-        if not issequence(rev_ret):
+        if not q.issequence(rev_ret):
             rev_ret = [rev_ret]
         ret = tuple()
         if self._return_final:
@@ -1017,7 +1015,7 @@ class RecurrentWrapper(Recurrent, nn.Module):
         batsize, seqlen = x0.size(0), x0.size(1)
         i = [xe.view(batsize * seqlen, *xe.size()[2:]) for xe in x]
         y = self.block(*i)
-        if not issequence(y):
+        if not q.issequence(y):
             y = (y,)
         yo = []
         for ye in y:
@@ -1050,3 +1048,24 @@ class RecurrentStack(RecStack):
         if self.return_ == "all":
             self.add(LastTimestepGetter())
         return self
+
+
+class PositionwiseForward(nn.Module, Recurrent):       # TODO: make Recurrent
+    ''' A two-feed-forward-layer module '''
+
+    def __init__(self, d_hid, d_inner_hid, activation="relu", dropout=0.1):
+        super(PositionwiseForward, self).__init__()
+        self.w_1 = nn.Conv1d(d_hid, d_inner_hid, 1) # position-wise
+        self.w_2 = nn.Conv1d(d_inner_hid, d_hid, 1) # position-wise
+        self.layer_norm = q.LayerNormalization(d_hid)
+        self.dropout = nn.Dropout(dropout)
+        self.activation_fn = q.name2fn(activation)()
+
+    def forward(self, x):
+        residual = x
+        output = self.activation_fn(self.w_1(x.transpose(1, 2)))
+        output = self.w_2(output).transpose(2, 1)
+        output = self.dropout(output)
+        return self.layer_norm(output + residual)
+
+

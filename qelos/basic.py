@@ -1,11 +1,13 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+
 import qelos as q
+
+
 # from qelos.util import issequence
 # from qelos import name2fn
 # from qelos.containers import ModuleList
-import numpy as np
 
 
 class Lambda(nn.Module):
@@ -573,3 +575,5 @@ class LayerNormalization(nn.Module):
         ln_out = ln_out * self.a_2.expand_as(ln_out) + self.b_2.expand_as(ln_out)
 
         return ln_out
+
+
