@@ -307,6 +307,7 @@ class Encoder(nn.Module):
 
         self.position_enc = nn.Embedding(n_position, d_pos_vec, padding_idx=MASKID)
         self.position_enc.weight.data = position_encoding_init(n_position, d_pos_vec)
+        self.position_enc.weight.requires_grad = False
 
         self.src_word_emb = src_emb     #nn.Embedding(n_src_vocab, d_word_vec, padding_idx=MASKID)
 
@@ -381,6 +382,7 @@ class Decoder(nn.Module):       # This decoder is teacher forced, non-reccable T
         self.position_enc = nn.Embedding(
             n_position, d_pos_vec, padding_idx=MASKID)
         self.position_enc.weight.data = position_encoding_init(n_position, d_pos_vec)
+        self.position_enc.weight.requires_grad = False
 
         self.tgt_word_emb = tgt_emb
         self.dropout = nn.Dropout(dropout)
@@ -435,41 +437,26 @@ class Transformer(nn.Module):
     def __init__(
             self, src_emb, tgt_emb, tgt_lin, n_max_seq, n_layers=6, n_head=8,
             d_word_vec=512, d_model=512, d_inner_hid=1024, d_k=64, d_v=64,
-            dropout=0.1, proj_share_weight=True, embs_share_weight=True):
+            dropout=0.1, proj_share_weight=True):
 
         super(Transformer, self).__init__()
         self.encoder = Encoder(
             src_emb, n_max_seq, n_layers=n_layers, n_head=n_head,
-            d_pos_vec=d_word_vec, d_model=d_model,
+            d_pos_vec=d_word_vec, d_model=d_model, d_k=d_k, d_v=d_v,
             d_inner_hid=d_inner_hid, dropout=dropout)
         self.decoder = Decoder(
             tgt_emb, n_max_seq, n_layers=n_layers, n_head=n_head,
-            d_pos_vec=d_word_vec, d_model=d_model,
+            d_pos_vec=d_word_vec, d_model=d_model, d_k=d_k, d_v=d_v,
             d_inner_hid=d_inner_hid, dropout=dropout)
         self.tgt_word_proj = tgt_lin
         self.dropout = nn.Dropout(dropout)
 
-        assert d_model == d_word_vec, \
-        'To facilitate the residual connections, the dimensions of all module output shall be the same.'
-
-        if proj_share_weight:
-            # Share the weight matrix between tgt word embedding/projection
-            assert d_model == d_word_vec
-            self.tgt_word_proj.weight = self.decoder.tgt_word_emb.weight
-
-        if embs_share_weight:
-            # Share the weight matrix between src/tgt word embeddings
-            # assume the src/tgt word vec size are the same
-            assert n_src_vocab == n_tgt_vocab, \
-            "To share word embedding table, the vocabulary size of src/tgt shall be the same."
-            self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
-
-    def get_trainable_parameters(self):
-        ''' Avoid updating the position encoding '''
-        enc_freezed_param_ids = set(map(id, self.encoder.position_enc.parameters()))
-        dec_freezed_param_ids = set(map(id, self.decoder.position_enc.parameters()))
-        freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
-        return (p for p in self.parameters() if id(p) not in freezed_param_ids)
+    # def get_trainable_parameters(self):
+    #     ''' Avoid updating the position encoding '''
+    #     enc_freezed_param_ids = set(map(id, self.encoder.position_enc.parameters()))
+    #     dec_freezed_param_ids = set(map(id, self.decoder.position_enc.parameters()))
+    #     freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
+    #     return (p for p in self.parameters() if id(p) not in freezed_param_ids)
 
     def forward(self, src, tgt):
         src_seq, src_pos = src
