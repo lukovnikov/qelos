@@ -6,9 +6,9 @@
 [![pytorch](https://img.shields.io/badge/has-transformer-blue.svg?style=flat-square)]()
 
 
-| master | [![Travis](https://img.shields.io/travis/lukovnikov/qelos.svg?branch=dev&style=flat-square)](https://travis-ci.org/lukovnikov/qelos)   | [![Codecov branch](https://img.shields.io/codecov/c/github/lukovnikov/qelos/master.svg?style=flat-square)](https://codecov.io/gh/lukovnikov/qelos/branch/master/graph/badge.svg)  |
+| master | [![Travis](https://img.shields.io/travis/lukovnikov/qelos.svg?branch=master&style=flat-square)](https://travis-ci.org/lukovnikov/qelos)   | [![Codecov branch](https://img.shields.io/codecov/c/github/lukovnikov/qelos/master.svg?style=flat-square)](https://codecov.io/gh/lukovnikov/qelos/branch/master/graph/badge.svg)  |
 |--------|---|---|
-| dev    | [![Travis](https://img.shields.io/travis/lukovnikov/qelos.svg?branch=dev&style=flat-square)](https://travis-ci.org/lukovnikov/qelos)  | [![Codecov branch](https://img.shields.io/codecov/c/github/lukovnikov/qelos/master.svg?style=flat-square)](https://codecov.io/gh/lukovnikov/qelos/branch/dev/graph/badge.svg)  |
+| dev    | [![Travis](https://img.shields.io/travis/lukovnikov/qelos.svg?branch=dev&style=flat-square)](https://travis-ci.org/lukovnikov/qelos)  | [![Codecov branch](https://img.shields.io/codecov/c/github/lukovnikov/qelos/dev.svg?style=flat-square)](https://codecov.io/gh/lukovnikov/qelos/branch/dev/graph/badge.svg)  |
 
 
 PyTorch stuff
