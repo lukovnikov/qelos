@@ -116,13 +116,20 @@ from qelos.aiayn import OriginalMultiHeadAttention
 
 
 class TestMultiHeadAttention(TestCase):
+    def test_own_equi_to_original(self):
+        m = OriginalMultiHeadAttention(4,16,10,12,0)
+        mym = q.MultiHeadAttention(4, 16, 10, 12, 0)
+
     def test_equivalent_to_qelos(self):
         m = OriginalMultiHeadAttention(4, 16, 10, 12, 0)
         mym = q.MultiHeadAttention(4, 16, 10, 12, 0)
-        mym.w_qs, mym.w_ks, mym.w_vs = m.w_qs, m.w_ks, m.w_vs
+        mym.w_qs.data = m.w_qs.permute(1,0,2).contiguous().view(16, -1).data
+        mym.w_ks.data = m.w_ks.permute(1,0,2).contiguous().view(16, -1).data
+        mym.w_vs.data = m.w_vs.permute(1,0,2).contiguous().view(16, -1).data
+        # mym.w_qs, mym.w_ks, mym.w_vs = m.w_qs, m.w_ks, m.w_vs
         mym.proj, mym.layer_norm = m.proj, m.layer_norm
 
-        Q = q.var(np.random.random((5, 1, 16)).astype("float32")).v
+        Q = q.var(np.random.random((5, 2, 16)).astype("float32")).v
         K = q.var(np.random.random((5, 6, 16)).astype("float32")).v
         M = q.var(np.asarray([
                               [1, 0, 0, 0, 0, 0],
@@ -132,18 +139,20 @@ class TestMultiHeadAttention(TestCase):
                               [1, 1, 1, 1, 1, 1],])).v
         V = q.var(np.random.random((5, 6, 16)).astype("float32")).v
 
-        outs, atts = m(Q, K, V, (-1*M+1).byte().data.unsqueeze(1))
+        outs, atts = m(Q, K, V, (-1*M+1).byte().data.unsqueeze(1).repeat(1, 2, 1))
 
-        self.assertEqual(outs.size(), (5, 1, 16))
-        self.assertEqual(atts.size(), (20, 1, 6))
+        self.assertEqual(outs.size(), (5, 2, 16))
+        self.assertEqual(atts.size(), (20, 2, 6))
 
-        myouts, myatts = mym(Q, K, V, M.unsqueeze(1))
+        myouts, myatts = mym(Q, K, V, M)
 
         m_em = q.get_emitted("mha")
         mym_em = q.get_emitted("mymha")
-        for k in m_em:
-            self.assertTrue(np.allclose(m_em[k].data.numpy(), mym_em[k].data.numpy()))
+        # for k in m_em:
+        #     self.assertTrue(np.allclose(m_em[k].data.numpy(), mym_em[k].data.numpy()))
 
-        self.assertTrue(np.allclose(myouts.data.numpy(), outs.data.numpy()))
         self.assertTrue(np.allclose(myatts.data.numpy(), atts.data.numpy()))
+        print(myouts[0])
+        print(outs[0])
+        self.assertTrue(np.allclose(myouts.data.numpy(), outs.data.numpy(), atol=1e-7))
 

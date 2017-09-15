@@ -12,4 +12,4 @@ from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, WordLinout, 
 from qelos.gan import GANTrainer
 from qelos.exceptions import SumTingWongException, HoLeePhukException, BaDumTssException
 from IPython import embed
-from qelos.aiayn import MultiHeadAttention as MultiHeadAttention, Encoder as AYNEncoder, Decoder as AYNDecoder
+from qelos.aiayn import MultiHeadAttention as MultiHeadAttention, Encoder as AYNEncoder, Decoder as AYNDecoder, Transformer as AYNTransformer
