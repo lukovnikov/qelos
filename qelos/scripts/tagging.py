@@ -359,9 +359,19 @@ def run(
         # enc = RNNSeqEncoder.fluent().setembedder(emb)\
         #     .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
         #     .all_outputs()
-        enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
-                           d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
-                           dropout=dropout, cat_pos_enc=True)
+
+        # enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
+        #                    d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
+        #                    dropout=dropout, cat_pos_enc=True)
+
+        enc = q.RecurrentStack(
+            emb,
+            q.argmap.spec(0, mask=1),
+            q.BidirGRULayer(embdim, encdim),
+            nn.Dropout(dropout),
+            q.BidirGRULayer(encdim*2, encdim),
+            nn.Dropout(dropout),
+        )
     else:
         raise NotImplemented()
         emb = g
@@ -389,7 +399,7 @@ def run(
     # output tagging model
     encoutdim = encdim if not bidir else encdim * 2
     out = q.RecurrentStack(
-        nn.Linear(encdim, len(tdic), bias=False),
+        nn.Linear(encoutdim, len(tdic), bias=False),
         nn.LogSoftmax())
 
     # final
