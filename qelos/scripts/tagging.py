@@ -290,7 +290,7 @@ def run(
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
         gpu=1,
-        mode="ayn"          # rnn or ayn
+        mode="rnn"          # rnn or ayn
     ):
     if cuda:
         torch.cuda.set_device(gpu)
