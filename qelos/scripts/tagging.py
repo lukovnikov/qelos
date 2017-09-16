@@ -290,7 +290,7 @@ def run(
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
         gpu=1,
-        mode="rnn"          # rnn or ayn
+        mode="ayn"          # rnn or ayn
     ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -319,16 +319,14 @@ def run(
     # BUILD MODEL
     emb = g
 
-    # tagging model
-    maxlen = max(traindata.shape[1], testdata.shape[1])
-    # enc = RNNSeqEncoder.fluent().setembedder(emb)\
-    #     .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
-    #     .all_outputs()
     if mode == "ayn":
+        maxlen = max(traindata.shape[1], testdata.shape[1])
         enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
                            d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim,
                            dropout=dropout, cat_pos_enc=True)
+        encoutdim = encdim
     elif mode == "rnn":
+        encoutdim = encdim * 2
         if bidir:
             enc = q.RecurrentStack(
                 emb,
@@ -358,7 +356,7 @@ def run(
 
     # output tagging model
     out = q.RecurrentStack(
-        nn.Linear(encdim*2, len(tdic), bias=False),
+        nn.Linear(encoutdim, len(tdic), bias=False),
         nn.LogSoftmax())
 
     # final
