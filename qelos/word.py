@@ -318,12 +318,15 @@ class PretrainedWordVec(object):
             W = np.load(open(path+".npy"))
         else:
             W = self.loadcache[path][0]
+        tt.tock("vectors loaded")
 
         # load words
+        tt.tick()
         if path not in self.loadcache:
             words = pkl.load(open(path+".words"))
         else:
             words = self.loadcache[path][1]
+        tt.tock("words loaded")
 
         # cache
         if self.useloadcache:
@@ -336,7 +339,7 @@ class PretrainedWordVec(object):
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
         if maskid:
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
-        tt.tock("vectors loaded")
+
         tt.tick()
 
         # dictionary

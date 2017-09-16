@@ -373,7 +373,7 @@ def run(
         trainloader = q.dataload(traindata, traingold, shuffle=True, batch_size=100)
         validloader = q.dataload(validdata, validgold, batch_size=100)
 
-        losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
+        losses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
         validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy(), extvalid)
 
         optim = torch.optim.Adadelta(q.params_of(m), lr=lr)
