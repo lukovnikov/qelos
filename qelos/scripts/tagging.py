@@ -208,6 +208,9 @@ class F1Eval(q.LossWithAgg):
         _, _, f1 = eval_reduce(self.tp, self.fp, self.fn)
         return f1
 
+    def cuda(self, *a, **kw):
+        pass
+
 
 # POS EVAL
 def tokenacceval(pred, gold):
