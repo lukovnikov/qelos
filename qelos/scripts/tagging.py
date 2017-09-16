@@ -305,7 +305,7 @@ def run(
     else:
         (traindata, traingold), (testdata, testgold), (wdic, tdic) = loaddata(task=task)
     tt.tock("data loaded")
-    g = q.PretrainedWordEmb(embdim)
+    g = q.PretrainedWordEmb(embdim, fixed=embtrainfrac == 0)
     if True:
         tt.tick("rebasing to glove dic")
         traindata = rebase(traindata, wdic, g.D)
