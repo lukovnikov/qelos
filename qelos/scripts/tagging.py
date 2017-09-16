@@ -285,7 +285,7 @@ def run(
         embtrainfrac=1.,
         inspectdata=False,
         gradnorm=5.,
-        skiptraining=True,
+        skiptraining=False,
         debugvalid=False,
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
