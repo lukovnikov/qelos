@@ -322,8 +322,8 @@ def run(
     if mode == "ayn":
         maxlen = max(traindata.shape[1], testdata.shape[1])
         enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
-                           d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim,
-                           dropout=dropout, cat_pos_enc=True)
+                           d_pos_vec=embdim, d_model=encdim, d_inner_hid=encdim,
+                           dropout=dropout, cat_pos_enc=False)
         encoutdim = encdim
     elif mode == "rnn":
         encoutdim = encdim * 2
@@ -372,7 +372,7 @@ def run(
         raise Exception("unknown task")
 
     if not skiptraining:
-        print(m)
+        # print(m)
         traingold = traingold.astype("int64")
         (traindata, traingold), (validdata, validgold) \
             = q.split([traindata, traingold], splits=(90, 10), random=True)
