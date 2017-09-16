@@ -328,19 +328,28 @@ def run(
     #                    d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
     #                    dropout=dropout, cat_pos_enc=True)
 
-    enc = q.RecurrentStack(
-        emb,
-        q.argmap.spec(0, mask=1),
-        q.BidirGRULayer(embdim, encdim),
-        nn.Dropout(dropout),
-        q.BidirGRULayer(encdim*2, encdim),
-        nn.Dropout(dropout),
-    )
+    if bidir:
+        enc = q.RecurrentStack(
+            emb,
+            q.argmap.spec(0, mask=1),
+            q.BidirGRULayer(embdim, encdim),
+            nn.Dropout(dropout),
+            q.BidirGRULayer(encdim*2, encdim),
+            nn.Dropout(dropout),
+        )
+    else:
+        enc = q.RecurrentStack(
+            emb,
+            q.argmap.spec(0, mask=1),
+            q.GRULayer(embdim, encdim*2),
+            nn.Dropout(dropout),
+            q.GRULayer(encdim*2, encdim*2),
+            nn.Dropout(dropout),
+        )
 
     # output tagging model
-    encoutdim = encdim if not bidir else encdim * 2
     out = q.RecurrentStack(
-        nn.Linear(encoutdim, len(tdic), bias=False),
+        nn.Linear(encdim*2, len(tdic), bias=False),
         nn.LogSoftmax())
 
     # final
