@@ -382,7 +382,7 @@ def run(
     if task == "chunk":
         testlosses = q.lossarray(extvalid)
         testloader = q.dataload(testdata, testgold, batch_size=100)
-        fscores = q.test(m).on(testloader, testlosses).run()
+        fscores = q.test(m).on(testloader, testlosses).cuda(cuda).run()
         #prec, rec, f1 = evaluate(m, testdata, testgold, tdic)
         print("F-score: {}".format(fscores))
     elif task == "pos":
