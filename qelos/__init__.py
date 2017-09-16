@@ -1,4 +1,4 @@
-from qelos.train import lossarray, train, TensorDataset, LossWithAgg
+from qelos.train import lossarray, train, test, TensorDataset, LossWithAgg
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, BidirLSTMLayer, Recurrent, Reccable, PositionwiseForward
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder

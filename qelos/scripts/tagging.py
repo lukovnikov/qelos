@@ -12,8 +12,8 @@ def loaddata(p="../../datasets/pos/", rarefreq=1, task="chunk"):
     testp = p + "test.txt"
     traindata, traingold, wdic, tdic = loadtxt(trainp, task=task)
     testdata, testgold, wdic, tdic = loadtxt(testp, task=task, wdic=wdic, tdic=tdic)
-    traindata = q.wordmat2wordchartensor(traindata, worddic=wdic, maskid=0)
-    testdata = q.wordmat2wordchartensor(testdata, worddic=wdic, maskid=0)
+    # traindata = q.wordmat2wordchartensor(traindata, worddic=wdic, maskid=0)
+    # testdata = q.wordmat2wordchartensor(testdata, worddic=wdic, maskid=0)
     return (traindata, traingold), (testdata, testgold), (wdic, tdic)
 
 
@@ -173,9 +173,9 @@ def eval_map(pred, gold, tdic, verbose=True):
 def eval_reduce(tp, fp, fn):
     if tp + fp == 0. or tp + fn == 0.:
         return -0., -0., -0.
-    prec = tp / (tp + fp)
-    rec = tp / (tp + fn)
-    f1 = 2. * prec * rec / (prec + rec)
+    prec = tp / max((tp + fp), 1e-6)
+    rec = tp / max((tp + fn), 1e-6)
+    f1 = 2. * prec * rec / max((prec + rec), 1e-6)
     return prec, rec, f1
 
 
@@ -284,9 +284,8 @@ def run(
         dropout=0.3,
         embtrainfrac=1.,
         inspectdata=False,
-        mode="words",       # words or concat or gate or ctxgate or flatcharword
         gradnorm=5.,
-        skiptraining=False,
+        skiptraining=True,
         debugvalid=False,
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
@@ -297,13 +296,7 @@ def run(
     # MAKE DATA
     tt = q.ticktock("script")
     tt.tick("loading data")
-    if mode == "flatcharword":
-        (traindata, trainchars, trainslice, traingold),\
-        (testdata, testchars, testslice, testgold),\
-        (wdic, cdic, tdic) \
-            = loaddata_flatcharword(task=task)
-    else:
-        (traindata, traingold), (testdata, testgold), (wdic, tdic) = loaddata(task=task)
+    (traindata, traingold), (testdata, testgold), (wdic, tdic) = loaddata(task=task)
     tt.tock("data loaded")
     g = q.PretrainedWordEmb(embdim, fixed=embtrainfrac == 0)
     if True:
@@ -323,78 +316,26 @@ def run(
         embed()
 
     # BUILD MODEL
-    # Choice of word representation
-    if mode != "words" and mode != "flatcharword":
-        raise NotImplemented()
-        numchars = traindata[:, :, 1:].max() + 1
-        charenc = RNNSeqEncoder.fluent()\
-            .vectorembedder(numchars, charembdim, maskid=0)\
-            .addlayers(embdim, bidir=True)\
-            .make()
-        charenc = CharEncWrap(charenc, embdim * 2, embdim)
-    if mode == "words":
-        emb = g
-    elif mode == "concat":
-        raise NotImplemented()
-        emb = WordEmbCharEncConcat(g, charenc)
-    elif mode == "gate":
-        raise NotImplemented()
-        emb = WordEmbCharEncGate(g, charenc, gatedim=embdim, dropout=dropout)
-    elif mode == "ctxgate":
-        raise NotImplemented()
-        gate_enc = RNNSeqEncoder.fluent()\
-            .noembedder(embdim * 2)\
-            .addlayers(embdim, bidir=True)\
-            .add_forward_layers(embdim, activation=Sigmoid)\
-            .make().all_outputs()
-        emb = WordEmbCharEncCtxGate(g, charenc, gate_enc=gate_enc)
-    elif mode == "flatcharword":
-        pass
-    else:
-        raise Exception("unknown mode in script")
+    emb = g
 
     # tagging model
-    if not mode == "flatcharword":
-        maxlen = max(traindata.shape[1], testdata.shape[1])
-        # enc = RNNSeqEncoder.fluent().setembedder(emb)\
-        #     .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
-        #     .all_outputs()
+    maxlen = max(traindata.shape[1], testdata.shape[1])
+    # enc = RNNSeqEncoder.fluent().setembedder(emb)\
+    #     .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
+    #     .all_outputs()
 
-        # enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
-        #                    d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
-        #                    dropout=dropout, cat_pos_enc=True)
+    # enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
+    #                    d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
+    #                    dropout=dropout, cat_pos_enc=True)
 
-        enc = q.RecurrentStack(
-            emb,
-            q.argmap.spec(0, mask=1),
-            q.BidirGRULayer(embdim, encdim),
-            nn.Dropout(dropout),
-            q.BidirGRULayer(encdim*2, encdim),
-            nn.Dropout(dropout),
-        )
-    else:
-        raise NotImplemented()
-        emb = g
-        numchars = max(cdic.values()) + 1
-        charenc = RNNSeqEncoder.fluent()\
-            .vectorembedder(numchars, charembdim, maskid=cdic["<MASK>"])\
-            .addlayers(embdim, bidir=False).make().all_outputs()
-        topenc = RNNSeqEncoder.fluent().noembedder(embdim*2)\
-            .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
-            .all_outputs()
-
-        def blockfunc(wordids, charids, slicer):
-            wordembs = emb(wordids)     # (batsize, wordseqlen, wordembdim)
-            charencs = charenc(charids) # (batsize, charseqlen, charencdim)
-            charslic = charencs[
-                T.arange(slicer.shape[0]).dimshuffle(0, "x")
-                    .repeat(slicer.shape[1], axis=1),
-                slicer]   # (batsize, wordseqlen, charencdim)
-            wordvecs = T.concatenate([wordembs, charslic], axis=2)  # (batsize, wordseqlen, wordembdim + charencdim)
-            wordvecs.mask = wordembs.mask
-            enco = topenc(wordvecs)     # (batsize, seqlen, encdim)
-            return enco
-        enc = asblock(blockfunc)
+    enc = q.RecurrentStack(
+        emb,
+        q.argmap.spec(0, mask=1),
+        q.BidirGRULayer(embdim, encdim),
+        nn.Dropout(dropout),
+        q.BidirGRULayer(encdim*2, encdim),
+        nn.Dropout(dropout),
+    )
 
     # output tagging model
     encoutdim = encdim if not bidir else encdim * 2
@@ -406,15 +347,6 @@ def run(
     m = SeqTagger(enc, out)
     #charencs[np.arange(5)[:, np.newaxis].repeat(slicer.shape[1], axis=1), slicer].shape
     # TRAINING
-    if mode == "words":
-        traindata = traindata[:, :, 0]
-        testdata = testdata[:, :, 0]
-    elif mode == "concat" or mode == "gate" or mode == "ctxgate":
-        tt.msg("character-level included")
-    elif mode == "flatcharword":
-        pass
-    else:
-        raise Exception("unknown mode in script")
 
     if task == "chunk":
         extvalid = F1Eval(tdic)
@@ -422,13 +354,6 @@ def run(
         extvalid = TokenAccEval()
     else:
         raise Exception("unknown task")
-
-    # if mode == "flatcharword":
-    #     traindata = [traindata, trainchars, trainslice]
-    #     testdata = [testdata, testchars, testslice]
-    # else:
-    #     traindata = [traindata]
-    #     testdata = [testdata]
 
     if not skiptraining:
         print(m)
@@ -451,20 +376,15 @@ def run(
             .optimizer(optim)\
             .cuda(cuda)\
             .train(epochs)
-        # m = m.train(traindata, traingold)\
-        #     .cross_entropy().seq_accuracy()\
-        #     .adadelta(lr=lr).grad_total_norm(gradnorm)\
-        #     .split_validate(splits=10)\
-        #     .cross_entropy().seq_accuracy().extvalid(extvalid)\
-        #     .earlystop(select=lambda x: -x[3],
-        #                stopcrit=7)\
-        #     .train(numbats=numbats, epochs=epochs, _skiptrain=debugvalid)
     else:
         tt.msg("skipping training")
 
     if task == "chunk":
-        prec, rec, f1 = evaluate(m, testdata, testgold, tdic)
-        print("Precision: {} \n Recall: {} \n F-score: {}".format(prec, rec, f1))
+        testlosses = q.lossarray(extvalid)
+        testloader = q.dataload(testdata, testgold, batch_size=100)
+        fscores = q.test(m).on(testloader, testlosses).run()
+        #prec, rec, f1 = evaluate(m, testdata, testgold, tdic)
+        print("F-score: {}".format(fscores))
     elif task == "pos":
         acc, num = tokenacceval(m, testdata, testgold)
         print("Token Accuracy: {}".format(1. * acc / num))

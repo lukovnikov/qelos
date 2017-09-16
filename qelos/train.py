@@ -156,6 +156,79 @@ class lossarray(object):
             loss._reset()
 
 
+class test(object):
+    def __init__(self, model):
+        super(test, self).__init__()
+        self.model = model
+        self.metrics = None
+        self.usecuda = False
+        self.cudaargs = ([], {})
+        self.transform_batch = None
+        self.dataloader = None
+        self.tt = ticktock("tester")
+
+    def cuda(self, usecuda, *args, **kwargs):
+        self.usecuda = usecuda
+        self.cudaargs = (args, kwargs)
+        return self
+
+    def initialize(self):
+        if self.usecuda:
+            self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
+            self.metrics.cuda(*self.cudaargs[0], **self.cudaargs[1])
+
+    def on(self, dataloader, lossarray):
+        self.dataloader = dataloader
+        self.metrics = lossarray
+        return self
+
+    def set_batch_transformer(self, f):
+        self.transform_batch = f
+        return self
+
+    def reset(self):
+        if self.metrics is not None:
+            self.metrics.reset()
+        return self
+
+    def run(self):
+        self.reset()
+        self.initialize()
+        ret = self.testloop()
+        return ret
+
+    def testloop(self):
+        self.tt.tick("testing")
+        tt = ticktock("-")
+        totaltestbats = len(self.dataloader)
+        self.model.eval()
+        for i, batch in enumerate(self.dataloader):
+            batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
+            if self.transform_batch is not None:
+                batch = self.transform_batch(*batch)
+            modelouts = self.model(*batch[:-1])
+            if not issequence(modelouts):
+                modelouts = [modelouts]
+            metrics = self.metrics(modelouts[0], batch[-1])
+
+            tt.live("test - [{}/{}]: {}"
+                .format(
+                i + 1,
+                totaltestbats,
+                self.metrics.pp()
+            )
+            )
+        ttmsg = "test: {}" \
+            .format(
+            self.metrics.pp()
+        )
+        metricnumbers = self.metrics.get_agg_errors()
+        tt.stoplive()
+        tt.tock(ttmsg)
+        self.tt.tock("tested")
+        return metricnumbers
+
+
 class train(object):
     def __init__(self, model):
         super(train, self).__init__()
