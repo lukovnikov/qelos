@@ -539,12 +539,13 @@ def split(npmats, splits=(80, 20), random=True):
         a, b = splits[i-1], splits[i]
         whatsplit[a:b] = i
 
-    if isinstance(random, int):
-        np.random.seed(random)
-        random = True
+    if random is not False and random is not None:
+        if isinstance(random, int):
+            np.random.seed(random)
+            random = True
 
-    if random is True:
-        np.random.shuffle(whatsplit)
+        if random is True:
+            np.random.shuffle(whatsplit)
 
     ret = []
     for i in range(0, len(splits)):

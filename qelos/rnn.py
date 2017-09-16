@@ -718,7 +718,8 @@ class GRULayer(RNUBase, Recurrent):
             x = _reverse_seq(x, mask=mask)
             if mask is not None:
                 x = x * mask.unsqueeze(2).float()
-        y, s_t = self.nnlayer(x, h_0.contiguous())
+        h_0 = [h_0_e.contiguous() for h_0_e in h_0] if q.issequence(h_0) else h_0.contiguous()
+        y, s_t = self.nnlayer(x, h_0)
         self.set_states(s_t)        # DON'T TRUST FINAL STATES WHEN MASK IS NOT NONE
         #return y
 
