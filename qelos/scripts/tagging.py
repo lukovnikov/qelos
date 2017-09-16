@@ -290,6 +290,7 @@ def run(
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
         gpu=1,
+        mode="rnn"          # rnn or ayn
     ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -323,35 +324,37 @@ def run(
     # enc = RNNSeqEncoder.fluent().setembedder(emb)\
     #     .addlayers([encdim]*layers, bidir=bidir, dropout_in=dropout).make()\
     #     .all_outputs()
-
-    # enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
-    #                    d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim*2,
-    #                    dropout=dropout, cat_pos_enc=True)
-
-    if bidir:
-        enc = q.RecurrentStack(
-            emb,
-            q.argsave.spec(mask=1),
-            q.argmap.spec(0),
-            q.TimesharedDropout(dropout),
-            q.argmap.spec(0, mask=["mask"]),
-            q.BidirGRULayer(embdim, encdim),
-            q.TimesharedDropout(dropout),
-            q.argmap.spec(0, mask=["mask"]),
-            q.BidirGRULayer(encdim*2, encdim),
-        )
+    if mode == "ayn":
+        enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
+                           d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim,
+                           dropout=dropout, cat_pos_enc=True)
+    elif mode == "rnn":
+        if bidir:
+            enc = q.RecurrentStack(
+                emb,
+                q.argsave.spec(mask=1),
+                q.argmap.spec(0),
+                q.TimesharedDropout(dropout),
+                q.argmap.spec(0, mask=["mask"]),
+                q.BidirGRULayer(embdim, encdim),
+                q.TimesharedDropout(dropout),
+                q.argmap.spec(0, mask=["mask"]),
+                q.BidirGRULayer(encdim*2, encdim),
+            )
+        else:
+            enc = q.RecurrentStack(
+                emb,
+                q.argsave.spec(mask=1),
+                q.argmap.spec(0),
+                q.TimesharedDropout(dropout),
+                q.argmap.spec(0, mask=["mask"]),
+                q.GRULayer(embdim, encdim*2),
+                q.TimesharedDropout(dropout),
+                q.argmap.spec(0, mask=["mask"]),
+                q.GRULayer(encdim*2, encdim*2),
+            )
     else:
-        enc = q.RecurrentStack(
-            emb,
-            q.argsave.spec(mask=1),
-            q.argmap.spec(0),
-            q.TimesharedDropout(dropout),
-            q.argmap.spec(0, mask=["mask"]),
-            q.GRULayer(embdim, encdim*2),
-            q.TimesharedDropout(dropout),
-            q.argmap.spec(0, mask=["mask"]),
-            q.GRULayer(encdim*2, encdim*2),
-        )
+        raise q.SumTingWongException("unknown mode")
 
     # output tagging model
     out = q.RecurrentStack(
