@@ -7,14 +7,14 @@ import numpy as np
 class TestSplit(TestCase):
     def test_split(self):
         data = np.arange(0, 100)
-        splits = q.split([data], splits=(80,20), random=False)
+        splits = q.split([data], splits=(80, 20), random=False)
         print(splits)
         self.assertTrue(np.allclose(splits[0][0], np.arange(0, 80)))
         self.assertTrue(np.allclose(splits[1][0], np.arange(80, 100)))
 
     def test_split_random(self):
         data = np.arange(0, 100)
-        splits = q.split([data], splits=(80,20), random=True)
+        splits = q.split([data], splits=(80, 20), random=True)
         print(splits)
         self.assertEqual(splits[0][0].shape, (80,))
         self.assertEqual(splits[1][0].shape, (20,))
