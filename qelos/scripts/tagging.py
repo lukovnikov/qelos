@@ -286,7 +286,11 @@ def run(
         skiptraining=False,
         debugvalid=False,
         task="chunk",       # chunk or pos #TODO ner
+        cuda=False,
+        gpu=1,
     ):
+    if cuda:
+        torch.cuda.set_device(gpu)
     # MAKE DATA
     tt = q.ticktock("script")
     tt.tick("loading data")
@@ -432,6 +436,7 @@ def run(
             .valid_on(validloader, validlosses)\
             .clip_grad_norm(gradnorm)\
             .optimizer(optim)\
+            .cuda(cuda)\
             .train(epochs)
         # m = m.train(traindata, traingold)\
         #     .cross_entropy().seq_accuracy()\
