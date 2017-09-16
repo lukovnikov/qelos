@@ -30,11 +30,34 @@ class TensorDataset(Dataset):      # TODO
         return self.tensors[0].size(0)
 
 
-class Aggregator(object):
+class HistoryAggregator(object):
+    """ Keeps history """
+    def __init__(self):
+        super(HistoryAggregator, self).__init__()
+        self.agg_history = []
+
+    def push_agg_to_history(self):
+        self.agg_history.append(self.get_agg_error())
+
+    def get_agg_error_history(self):
+        return self.agg_history
+
+    def _reset(self):  # full reset
+        self.reset_agg()
+        self.agg_history = []
+
+    def reset_agg(self):
+        raise NotImplemented()
+
+    def get_agg_error(self):
+        raise NotImplemented()
+
+
+class Aggregator(HistoryAggregator):
+    """ Normalizes current running numbers """
     def __init__(self, mode="mean"):
         super(Aggregator, self).__init__()
         self.aggmode = mode
-        self.agg_history = []
         self.current_agg_error = 0.
         self.current_agg_norma = 0.
 
@@ -50,41 +73,69 @@ class Aggregator(object):
         err = err * numex if self.aggmode == "mean" else err
         self.current_agg_error += err
 
-    def _reset(self):  # full reset
-        self.reset_agg()
-        self.agg_history = []
-
-    def get_agg_error_history(self):
-        return self.agg_history
-
     def reset_agg(self):
         self.current_agg_error = 0.
         self.current_agg_norma = 0.
 
-    def push_agg_to_history(self):
-        self.agg_history.append(self.get_agg_error())
+
+class LossWithAgg(HistoryAggregator):
+    def __call__(self, pred, gold):
+        raise NotImplemented()
+
+    def get_agg_error(self):
+        raise NotImplemented()
+
+    def reset_agg(self):
+        raise NotImplemented()
+
+    def cuda(self, *a, **kw):
+        raise NotImplemented()
+
+
+class LossAndAgg(LossWithAgg):
+    def __init__(self, loss, agg):
+        super(LossAndAgg, self).__init__()
+        self.loss = loss
+        self.agg = agg
+
+    def __call__(self, pred, gold):
+        l = self.loss(pred, gold)
+        numex = pred.size(0)
+        if len(l) == 2:     # loss returns numex too
+            numex = l[1]
+            l = l[0]
+        self.agg.update_agg(l.data[0], numex)
+        return l
+
+    def get_agg_error(self):
+        return self.agg.get_agg_error()
+
+    def reset_agg(self):
+        return self.agg.reset_agg()
+
+    def cuda(self, *a, **kw):
+        self.loss.cuda(*a, **kw)
 
 
 class lossarray(object):
     def __init__(self, trainloss, *losses):
         super(lossarray, self).__init__()
-        self.losses = (trainloss,) + losses
-        self.lossaggs = [Aggregator(mode="mean") for loss in self.losses]
+        self.losses = []
+        for loss in (trainloss,) + losses:
+            if isinstance(loss, LossWithAgg):
+                self.losses.append(loss)
+            else:
+                self.losses.append(LossAndAgg(loss, Aggregator(mode="mean")))
 
     def __call__(self, prediction, gold):
         outl = []
-        for loss, lossagg in zip(self.losses, self.lossaggs):
+        for loss in self.losses:
             l = loss(prediction, gold)
-            numex = prediction.size(0)
-            if len(l) == 2:
-                numex = l[1]
-                l = l[0]
-            lossagg.update_agg(l.data[0], numex)
             outl.append(l)
         return outl
 
     def get_agg_errors(self):
-        return [agg.get_agg_error() for agg in self.lossaggs]
+        return [loss.get_agg_error() for loss in self.losses]
 
     def pp(self):
         aggouts = self.get_agg_errors()
@@ -96,12 +147,12 @@ class lossarray(object):
             loss.cuda(*a, **kw)
 
     def push_and_reset(self):
-        for loss in self.lossaggs:
+        for loss in self.losses:
             loss.push_agg_to_history()
             loss.reset_agg()
 
     def reset(self):
-        for loss in self.lossaggs:
+        for loss in self.losses:
             loss._reset()
 
 
@@ -208,7 +259,7 @@ class train(object):
             self.model.train()
             for i, batch in enumerate(self.traindataloader):
                 self.optim.zero_grad()
-                params = self.model.parameters()
+                params = q.params_of(self.model)
                 batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
                 if self.transform_batch is not None:
                     batch = self.transform_batch(*batch)

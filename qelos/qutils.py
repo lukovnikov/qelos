@@ -66,3 +66,10 @@ def dataload(*tensors, **kw):
         kw["shuffle"] = True
     tensordataset = q.TensorDataset(*tensors)
     dataloader = DataLoader(tensordataset, **kw)
+    return dataloader
+
+
+def params_of(module):
+    params = module.parameters()
+    params = filter(lambda x: x.requires_grad == True, params)
+    return params
