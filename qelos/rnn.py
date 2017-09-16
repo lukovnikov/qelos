@@ -1075,7 +1075,7 @@ class TimesharedDropout(nn.Module, Recurrent):
         self.d = nn.Dropout(p=p, inplace=False)
 
     def forward(self, x):   # (batsize, seqlen, ndim)
-        shareddropoutmask = self.d(torch.ones(x[:, 0, :].size()))
+        shareddropoutmask = self.d(x.data.new(x[:, 0, :].size()).fill_(1))
         shareddropoutmask = shareddropoutmask.unsqueeze(1).repeat(1, x.size(1), 1)
         ret = x * shareddropoutmask
         return ret
