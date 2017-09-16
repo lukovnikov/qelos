@@ -325,7 +325,7 @@ class Encoder(nn.Module):
         if src_pos is None:
             src_pos = torch.arange(0, src_seq.size(1))\
                 .unsqueeze(0).repeat(src_seq.size(0), 1).long()
-            src_pos = q.var(src_pos).v
+            src_pos = q.var(src_pos).cuda(src_seq).v
 
         # Position Encoding addition
         pos_input = self.position_enc(src_pos)
