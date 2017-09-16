@@ -296,7 +296,7 @@ class PretrainedWordVec(object):
     masktoken = "<MASK>"
     raretoken = "<RARE>"
 
-    trylowercase=True
+    trylowercase = True
 
     loadcache = {}
     useloadcache = True

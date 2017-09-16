@@ -1069,3 +1069,15 @@ class PositionwiseForward(nn.Module, Recurrent):       # TODO: make Recurrent
         return self.layer_norm(output + residual)
 
 
+class TimesharedDropout(nn.Module, Recurrent):
+    def __init__(self, p=0.5):
+        super(TimesharedDropout, self).__init__()
+        self.d = nn.Dropout(p=p, inplace=False)
+
+    def forward(self, x):   # (batsize, seqlen, ndim)
+        shareddropoutmask = self.d(torch.ones(x[:, 0, :].size()))
+        shareddropoutmask = shareddropoutmask.unsqueeze(1).repeat(1, x.size(1), 1)
+        ret = x * shareddropoutmask
+        return ret
+
+

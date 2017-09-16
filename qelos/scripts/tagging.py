@@ -331,20 +331,26 @@ def run(
     if bidir:
         enc = q.RecurrentStack(
             emb,
-            q.argmap.spec(0, mask=1),
+            q.argsave.spec(mask=1),
+            q.argmap.spec(0),
+            q.TimesharedDropout(dropout),
+            q.argmap.spec(0, mask=["mask"]),
             q.BidirGRULayer(embdim, encdim),
-            nn.Dropout(dropout),
+            q.TimesharedDropout(dropout),
+            q.argmap.spec(0, mask=["mask"]),
             q.BidirGRULayer(encdim*2, encdim),
-            nn.Dropout(dropout),
         )
     else:
         enc = q.RecurrentStack(
             emb,
-            q.argmap.spec(0, mask=1),
+            q.argsave.spec(mask=1),
+            q.argmap.spec(0),
+            q.TimesharedDropout(dropout),
+            q.argmap.spec(0, mask=["mask"]),
             q.GRULayer(embdim, encdim*2),
-            nn.Dropout(dropout),
+            q.TimesharedDropout(dropout),
+            q.argmap.spec(0, mask=["mask"]),
             q.GRULayer(encdim*2, encdim*2),
-            nn.Dropout(dropout),
         )
 
     # output tagging model
