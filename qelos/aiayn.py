@@ -278,11 +278,11 @@ class OriginalMultiHeadAttention(nn.Module):
 class EncoderLayer(nn.Module, q.Recurrent):
     ''' Compose with two layers '''
 
-    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, dropout=0.1):
+    def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, dropout=0.1, activation="relu"):
         super(EncoderLayer, self).__init__()
         self.slf_attn = MultiHeadAttention(
             n_head, d_model, d_k, d_v, dropout=dropout)
-        self.pos_ffn = PositionwiseForward(d_model, d_inner_hid, dropout=dropout)
+        self.pos_ffn = PositionwiseForward(d_model, d_inner_hid, dropout=dropout, activation=activation)
 
     def forward(self, enc_input, slf_attn_mask=None):
         enc_output, enc_slf_attn = self.slf_attn(
@@ -328,7 +328,7 @@ class Encoder(nn.Module):
 
     def __init__(
             self, src_emb, n_max_seq, n_layers=6, n_head=8, d_k=64, d_v=64,
-            d_pos_vec=212, d_model=512, d_inner_hid=1024, dropout=0.1, cat_pos_enc=True):
+            d_pos_vec=212, d_model=512, d_inner_hid=1024, dropout=0.1, cat_pos_enc=True, activation="relu"):
 
         super(Encoder, self).__init__()
         self.cat_pos_enc = cat_pos_enc
@@ -342,7 +342,7 @@ class Encoder(nn.Module):
         self.src_word_emb = src_emb     #nn.Embedding(n_src_vocab, d_word_vec, padding_idx=MASKID)
 
         self.layer_stack = nn.ModuleList([
-            EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout)
+            EncoderLayer(d_model, d_inner_hid, n_head, d_k, d_v, dropout=dropout, activation=activation)
             for _ in range(n_layers)])
 
     def forward(self, src_seq, src_pos=None):

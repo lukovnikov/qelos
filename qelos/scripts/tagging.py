@@ -354,6 +354,7 @@ def run(
             q.argmap.spec(0, mask=["mask"]),
             q.SeqConv(embdim, embdim, 2),
             nn.Tanh(),
+            q.TimesharedDropout(dropout),
             q.argmap.spec(0, mask=["mask"]),
             q.AddSinPositionVectors(encdim-embdim, maxlen, mode="cat"),
             q.argmap.spec(0, slf_attn_mask=["mask"]),
@@ -420,7 +421,7 @@ def run(
         validloader = q.dataload(validdata, validgold, batch_size=100)
 
         losses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
-        validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy(), extvalid)
+        validlosses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy(), extvalid)
 
         optim = torch.optim.Adadelta(q.params_of(m), lr=lr)
 
