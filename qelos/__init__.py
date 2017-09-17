@@ -22,6 +22,8 @@ from qelos.aiayn import MultiHeadAttention as MultiHeadAttention, \
     Transformer as AYNTransformer, AddSinPositionVectors, \
     EncoderLayer as AynEncoderLayer
 
+from qelos.cnn import SeqConv
+
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo, emit, get_emitted, \
