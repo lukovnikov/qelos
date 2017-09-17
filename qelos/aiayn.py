@@ -19,7 +19,7 @@ def position_encoding_init(n_position, d_pos_vec):
 
     # keep dim 0 for padding token position encoding zero vector
     position_enc = np.array([
-        [pos / np.power(10000, 2*i/d_pos_vec) for i in range(d_pos_vec)]
+        [pos / (10000 ** ((2.*i)/d_pos_vec)) for i in range(d_pos_vec)]
         if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
 
     position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2]) # dim 2i
@@ -323,7 +323,7 @@ class Encoder(nn.Module):
             enc_input, enc_slf_attn_mask = enc_input
 
         if src_pos is None:
-            src_pos = torch.arange(0, src_seq.size(1))\
+            src_pos = torch.arange(1, src_seq.size(1) + 1)\
                 .unsqueeze(0).repeat(src_seq.size(0), 1).long()
             src_pos = q.var(src_pos).cuda(src_seq).v
 
@@ -400,9 +400,9 @@ class Decoder(nn.Module):       # This decoder is teacher forced, non-reccable T
             dec_mask = q.var(np.ones((tgt_seq.size(0), tgt_seq.size(1), tgt_seq.size(1)))).v
 
         if tgt_pos is None:
-            tgt_pos = torch.arange(0, tgt_seq.size(1)) \
+            tgt_pos = torch.arange(1, tgt_seq.size(1) + 1) \
                 .unsqueeze(0).repeat(tgt_seq.size(0), 1).long()
-            tgt_pos = q.var(tgt_pos).v
+            tgt_pos = q.var(tgt_pos).cuda(tgt_seq).v
 
         # Position Encoding addition
         pos_input = self.position_enc(tgt_pos)
