@@ -342,7 +342,7 @@ def run(
             q.AynEncoderLayer(encdim, encdim, 8, 32, 32, dropout=dropout),
             q.argmap.spec(0),
         )
-        print(enc)
+        # print(enc)
         encoutdim = encdim
     elif mode == "ayncnn":
         maxlen = max(traindata.shape[1], testdata.shape[1])
@@ -352,7 +352,8 @@ def run(
             q.argmap.spec(0),
             q.TimesharedDropout(dropout),
             q.argmap.spec(0, mask=["mask"]),
-            q.SeqConv(embdim, embdim, 3),
+            q.SeqConv(embdim, embdim, 2),
+            nn.Tanh(),
             q.argmap.spec(0, mask=["mask"]),
             q.AddSinPositionVectors(encdim-embdim, maxlen, mode="cat"),
             q.argmap.spec(0, slf_attn_mask=["mask"]),
@@ -361,7 +362,7 @@ def run(
             q.AynEncoderLayer(encdim, encdim, 8, 32, 32, dropout=dropout),
             q.argmap.spec(0),
         )
-        print(enc)
+        # print(enc)
         encoutdim = encdim
     elif mode == "rnn":
         encoutdim = encdim * 2
