@@ -290,7 +290,7 @@ def run(
         task="chunk",       # chunk or pos #TODO ner
         cuda=False,
         gpu=1,
-        mode="ayn"          # rnn or ayn
+        mode="aynrnn"          # rnn or ayn
     ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -324,6 +324,25 @@ def run(
         enc = q.AYNEncoder(emb, maxlen, n_layers=layers, n_head=8, d_k=32, d_v=32,
                            d_pos_vec=encdim-embdim, d_model=encdim, d_inner_hid=encdim,
                            dropout=dropout, cat_pos_enc=True)
+        encoutdim = encdim
+    elif mode == "aynrnn":
+        maxlen = max(traindata.shape[1], testdata.shape[1])
+        enc = q.RecurrentStack(
+            emb,
+            q.argsave.spec(mask=1),
+            q.argmap.spec(0),
+            q.TimesharedDropout(dropout),
+            q.argmap.spec(0, mask=["mask"]),
+            q.BidirGRULayer(embdim, embdim//2),
+            q.argmap.spec(0, mask=["mask"]),
+            q.AddSinPositionVectors(encdim-embdim, maxlen, mode="cat"),
+            q.argmap.spec(0, slf_attn_mask=["mask"]),
+            q.AynEncoderLayer(encdim, encdim, 8, 32, 32, dropout=dropout),
+            q.argmap.spec(0, slf_attn_mask=["mask"]),
+            q.AynEncoderLayer(encdim, encdim, 8, 32, 32, dropout=dropout),
+            q.argmap.spec(0),
+        )
+        print(enc)
         encoutdim = encdim
     elif mode == "rnn":
         encoutdim = encdim * 2

@@ -275,7 +275,7 @@ class OriginalMultiHeadAttention(nn.Module):
 
 
 #### ENCODING #######################
-class EncoderLayer(nn.Module):
+class EncoderLayer(nn.Module, q.Recurrent):
     ''' Compose with two layers '''
 
     def __init__(self, d_model, d_inner_hid, n_head, d_k, d_v, dropout=0.1):
@@ -289,6 +289,38 @@ class EncoderLayer(nn.Module):
             enc_input, enc_input, enc_input, attn_mask=slf_attn_mask)
         enc_output = self.pos_ffn(enc_output)
         return enc_output, enc_slf_attn
+
+
+class SinPositionEmbedding(nn.Module, q.Recurrent):
+    def __init__(self, dim, maxlen):
+        super(SinPositionEmbedding, self).__init__()
+        self.emb = nn.Embedding(maxlen + 1, dim, padding_idx=MASKID)
+        self.emb.weight.data = position_encoding_init(maxlen+1, dim)
+        self.emb.weight.requires_grad = False
+
+    def forward(self, x):
+        return self.emb(x)
+
+
+class AddSinPositionVectors(SinPositionEmbedding):
+    def __init__(self, dim, maxlen, mode="sum"):    # mode "sum" or "cat"
+        super(AddSinPositionVectors, self).__init__(dim, maxlen)
+        self.mode = mode
+
+    def forward(self, x, mask=None, pos=None):       # x is actual input (batsize, seqlen, dim)
+        if pos is None:
+            pos = torch.arange(1, x.size(1) + 1).unsqueeze(0).repeat(x.size(0), 1).long()
+            pos = q.var(pos).cuda(x).v
+            if mask is not None:
+                pos = pos * mask.long()
+        posvectors = super(AddSinPositionVectors, self).forward(pos)
+        if self.mode == "sum":
+            ret = posvectors + x
+        elif self.mode == "cat":
+            ret = torch.cat([x, posvectors], 2)
+        else:
+            raise q.SumTingWongException("unknown mode {}".format(self.mode))
+        return ret
 
 
 class Encoder(nn.Module):
@@ -305,10 +337,8 @@ class Encoder(nn.Module):
         self.n_max_seq = n_max_seq
         self.d_model = d_model
 
-        self.position_enc = nn.Embedding(n_position, d_pos_vec, padding_idx=MASKID)
-        self.position_enc.weight.data = position_encoding_init(n_position, d_pos_vec)
-        self.position_enc.weight.requires_grad = False
-
+        self.addposition = AddSinPositionVectors(d_pos_vec, n_position,
+                                        mode="cat" if cat_pos_enc else "sum")
         self.src_word_emb = src_emb     #nn.Embedding(n_src_vocab, d_word_vec, padding_idx=MASKID)
 
         self.layer_stack = nn.ModuleList([
@@ -322,17 +352,8 @@ class Encoder(nn.Module):
         if isinstance(enc_input, tuple) and len(enc_input) == 2:
             enc_input, enc_slf_attn_mask = enc_input
 
-        if src_pos is None:
-            src_pos = torch.arange(1, src_seq.size(1) + 1)\
-                .unsqueeze(0).repeat(src_seq.size(0), 1).long()
-            src_pos = q.var(src_pos).cuda(src_seq).v
-
-        # Position Encoding addition
-        pos_input = self.position_enc(src_pos)
-        if not self.cat_pos_enc:
-            enc_input = enc_input + pos_input           # does the paper add position encodings? --> yes
-        else:
-            enc_input = torch.cat([enc_input, pos_input], 2)
+        enc_input = self.addposition(enc_input,
+                                     mask=enc_slf_attn_mask, pos=src_pos)
 
         enc_outputs, enc_slf_attns = [], []
 

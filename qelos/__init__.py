@@ -19,7 +19,8 @@ from qelos.exceptions import SumTingWongException, HoLeePhukException, \
 from IPython import embed
 from qelos.aiayn import MultiHeadAttention as MultiHeadAttention, \
     Encoder as AYNEncoder, Decoder as AYNDecoder, \
-    Transformer as AYNTransformer
+    Transformer as AYNTransformer, AddSinPositionVectors, \
+    EncoderLayer as AynEncoderLayer
 
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
