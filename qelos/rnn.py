@@ -144,6 +144,7 @@ class RNUBase(RecStateful):
         resets states and shared dropout masks.
         """
         self._states = None
+        self._y_tm1 = None
 
     def get_states(self, arg):
         if self._states is None:    # states don't exist yet
@@ -1028,7 +1029,7 @@ class RecurrentWrapper(Recurrent, nn.Module):
             return tuple(yo)
 
 
-class LastTimestepGetter(nn.Module):
+class LastTimestepGetter(nn.Module, Recurrent):
     def forward(self, *x):
         ret = [x_e[:, -1] for x_e in x]
         return ret
