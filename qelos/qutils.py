@@ -62,8 +62,6 @@ def seq_unpack(x):
 
 
 def dataload(*tensors, **kw):
-    if "shuffle" not in kw:
-        kw["shuffle"] = True
     tensordataset = q.TensorDataset(*tensors)
     dataloader = DataLoader(tensordataset, **kw)
     return dataloader

@@ -105,6 +105,7 @@ def load_questions_inone(p=defaultqp):
     tt.tick("loading questions")
     questions, queries = q.StringMatrix(), q.StringMatrix()
     qids = []
+    questions.tokenize = lambda x: x.split()
     queries.tokenize = lambda x: x.split()
 
     with open(p+".train.butd") as f:

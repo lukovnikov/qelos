@@ -7,11 +7,12 @@ import numpy as np
 
 
 def test_model(encoder, decoder, m, questions, queries, vnt):
-    questions = q.var(questions[:10]).v
-    queries = q.var(queries[:10]).v
-    vnt = q.var(vnt[:10]).v
+    batsize = 100
+    questions = q.var(questions[:batsize]).v
+    queries = q.var(queries[:batsize]).v
+    vnt = q.var(vnt[:batsize]).v
 
-    # try encoder
+    # region try encoder
     ctx, ctxmask, finalctx = encoder(questions)
     # print(ctx.size())
     assert(ctx.size(0) == finalctx.size(0))
@@ -26,8 +27,11 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
     ctx, ctxmask, finalctx = encoder(questions)
     loss = finalctx.sum()
     loss.backward()
+    encparams = q.params_of(encoder)
 
     print("dry run of encoder didn't throw errors")
+    # endregion
+    # region try decoder
     # decoder.block.embedder = nn.Embedding(100000, 200, padding_idx=0)
     # decoder.block.smo = q.Stack(
     #                                      q.argsave.spec(mask={"mask"}),
@@ -50,8 +54,23 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
         loss = torch.max(y_t)
         print(loss)
         loss.backward()
+        decparams = q.params_of(decoder)
         print("backward done")
     print("dry run of decoder cell didn't throw errors")
+    # endregion
+
+    # region whole model
+    m.zero_grad()
+    dec = m(questions, queries[:, :-1], vnt)
+    assert(dec.size(0) == questions.size(0))
+    assert(dec.size(1) == queries.size(1) - 1)
+    # assert(dec.size(2) == 11075)
+    loss = dec.sum()
+    loss.backward()
+    allparams = q.params_of(m)
+    assert(len(set(allparams) - set(decparams) - set(encparams)) == 0)
+    print("dry run of whole model didn't throw errors")
+    # endregion
     q.embed()
 
 
@@ -143,10 +162,11 @@ def run(lr=0.1,
         decsplit=False,
         attmode="bilin",        # "bilin" or "fwd"
         merge_mode="sum",        # "cat" or "sum"
-        rel_which="urlwords",     # "urlwords ... ..."
+        rel_which="urlwords urltokens",     # "urlwords ... ..."
         batsize=128,
         cuda=False,
         gpu=1,
+        inspectdata=False,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -165,21 +185,39 @@ def run(lr=0.1,
                    rel_which=rel_which)
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")
-    # train/valid/test split:
+    # train/test split:
     train_questions, test_questions = question_sm.matrix[:tx_sep], question_sm.matrix[tx_sep:]
     train_queries, test_queries = query_sm.matrix[:tx_sep], query_sm.matrix[tx_sep:]
     train_vnt, test_vnt = vnt_mat[:tx_sep], vnt_mat[tx_sep:]
 
-    validportion = .2
-    tv_sep = int(len(train_questions) * (1 - validportion))
-    train_questions, valid_questions = train_questions[:tv_sep], train_questions[tv_sep:]
-    train_queries, valid_queries = train_queries[:tv_sep], train_queries[tv_sep:]
-    train_vnt, valid_vnt = train_vnt[:tv_sep], train_vnt[tv_sep:]
+    # train/valid split
+    (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
+        = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
+
+    for k, v in query_sm.D.items():
+        assert(tgt_emb.D[k] == v)
+    tt.msg("tgt_emb uses the same ids as query_sm")
+
+    if inspectdata:
+        def pp(i, which="train"):
+            questionsmat = train_questions if which=="train" else valid_questions if which == "valid" else test_questions
+            queriesmat = train_queries if which=="train" else valid_queries if which == "valid" else test_queries
+            question = question_sm.pp(questionsmat[i])
+            query = query_sm.pp(queriesmat[i])
+            print("{}\n{}".format(question, query))
+
+        tgt_emb(q.var(np.asarray([[0, 1, 21, 201]])).v)
+
+        q.embed()
+
 
     # make data loaders
-    train_dataloader = q.dataload(train_questions, train_vnt, train_queries, batch_size=batsize)
-    valid_dataloader = q.dataload(valid_questions, valid_vnt, valid_queries, batch_size=batsize)
-    test_dataloader = q.dataload(test_questions, test_vnt, test_queries, batch_size=batsize)
+    train_dataloader = q.dataload(train_questions, train_vnt, train_queries,
+                                  batch_size=batsize, shuffle=True)
+    valid_dataloader = q.dataload(valid_questions, valid_vnt, valid_queries,
+                                  batch_size=batsize, shuffle=False)
+    test_dataloader = q.dataload(test_questions, test_vnt, test_queries,
+                                 batch_size=batsize, shuffle=False)
     tt.tock("made data loaders")
     # endregion
 
@@ -199,17 +237,13 @@ def run(lr=0.1,
     losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
     validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
 
-    params = []
-    for param in m.parameters():
-        if param.requires_grad:
-            params.append(param)
-    optimizer = torch.optim.Adadelta(params, lr=lr, weight_decay=wreg)
+    optimizer = torch.optim.Adadelta(q.params_of(m), lr=lr, weight_decay=wreg)
 
-    sys.exit()
+    # sys.exit()
 
     # train
     q.train(m).cuda(cuda).train_on(train_dataloader, losses)\
-        .set_batch_transformer(lambda a, b, c: (a, b, c[:, :-1], c[:, 1:]))\
+        .set_batch_transformer(lambda a, b, c: (a, c[:, :-1], b, c[:, 1:]))\
         .valid_on(valid_dataloader, validlosses)\
         .optimizer(optimizer).clip_grad_norm(gradnorm)\
         .clip_grad_norm(gradnorm)\
