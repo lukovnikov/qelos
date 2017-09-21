@@ -455,7 +455,7 @@ class WordLinout(WordLinoutBase):
 
     def forward(self, x, mask=None):
         ret = self.lin(x)
-        ret = ret.mul(mask if mask is not None else 1)
+        ret = ret.mul(mask.float() if mask is not None else 1)
         return ret#, mask ?
 
 
@@ -487,7 +487,7 @@ class ComputedWordLinout(WordLinoutBase):
         else:
             self.register_parameter("bias", None)
         self.reset_parameters()
-        self.base_weight = None
+        self.base_weight = None     # zero weight
 
     def reset_parameters(self):
         if self.bias is not None:
@@ -500,20 +500,21 @@ class ComputedWordLinout(WordLinoutBase):
             # select data, compute vectors, build switcher
             msk = mask.sum(0)       # --> (outdim,)
             msk = (msk > 0).long()
-            compute_ids = msk.data.nonzero()
+            compute_ids = msk.data.nonzero()    # which ids to compute
             if len(compute_ids.size()) > 0:    # not all zeros
                 compute_ids = compute_ids.squeeze(1)
                 data_select = self.data[compute_ids]
                 comp_weight = self.computer(data_select)        # (num_data_select, indim)
                 comp_weight = comp_weight.contiguous()
                 indim = comp_weight.size(1)
-                if self.base_weight is None or self.base_weight.size(1) != indim:
-                    self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
-                weight = torch.cat([self.base_weight, comp_weight], 0)
+                # if self.base_weight is None or self.base_weight.size(1) != indim:
+                #     self.base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
+                base_weight = q.var(torch.zeros(1, indim)).cuda(x).v
+                weight = torch.cat([base_weight, comp_weight], 0)      # prepend a zero vector for masked ones
                 index_transform = (torch.cumsum(msk, 0) * msk).long()
                 weight = weight.index_select(0, index_transform)
             else:
-                data_select = self.data[0:1]
+                data_select = self.data[0:1]        # this computing is done to get dimensions
                 comp_weight = self.computer(data_select)        # (num_data_select, indim)
                 comp_weight = comp_weight.contiguous()
                 indim = comp_weight.size(1)
@@ -613,7 +614,7 @@ class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
         res = self.overridemask.unsqueeze(0) * overres \
               + (1 - self.overridemask.unsqueeze(0)) * baseres
         if mask is not None:
-            res = res * mask
+            res = res * mask.float()
         return res#, mask
 
 

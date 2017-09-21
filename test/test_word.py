@@ -339,6 +339,31 @@ class TestComputedWordLinout(TestCase):
         cout = cout * msk.float()
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
 
+    def test_masked_with_rnn_computer(self):
+        data = np.random.random((7, 5, 10)).astype("float32")
+        computer = q.RecurrentStack(
+            q.GRULayer(10, 15)
+        ).return_final()
+        worddic = "<MASK> <RARE> first second third fourth fifth"
+        worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
+        linout = q.ComputedWordLinout(data=data, computer=computer, worddic=worddic)
+
+        x = Variable(torch.randn(3, 15)).float()
+        msk_nonzero_batches = [0, 0, 0, 1, 1, 2]
+        msk_nonzero_values = [0, 2, 3, 2, 6, 5]
+        msk = np.zeros((3, 7)).astype("int32")
+        msk[msk_nonzero_batches, msk_nonzero_values] = 1
+        print(msk)
+        msk = Variable(torch.from_numpy(msk))
+        out = linout(x, mask=msk)
+        self.assertEqual(out.size(), (3, 7))
+        data = linout.data
+        computer = linout.computer
+        cout = torch.matmul(x, computer(data).t())
+        cout = cout * msk.float()
+        self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
+
+
     def test_all_masked(self):
         x = Variable(torch.randn(3, 15)).float()
         msk = np.zeros((3, 7)).astype("int32")

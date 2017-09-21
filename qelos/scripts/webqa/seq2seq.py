@@ -7,7 +7,7 @@ import numpy as np
 
 
 def test_model(encoder, decoder, m, questions, queries, vnt):
-    batsize = 100
+    batsize = 10
     questions = q.var(questions[:batsize]).v
     queries = q.var(queries[:batsize]).v
     vnt = q.var(vnt[:batsize]).v
@@ -61,7 +61,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
 
     # region whole model
     m.zero_grad()
-    dec = m(questions, queries[:, :-1], vnt)
+    dec = m(questions, queries[:, :-1], vnt[:, 1:])
     assert(dec.size(0) == questions.size(0))
     assert(dec.size(1) == queries.size(1) - 1)
     # assert(dec.size(2) == 11075)
@@ -71,7 +71,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
     assert(len(set(allparams) - set(decparams) - set(encparams)) == 0)
     print("dry run of whole model didn't throw errors")
     # endregion
-    q.embed()
+    # q.embed()
 
 
 def make_encoder(src_emb, embdim=100, dim=100, **kw):
@@ -183,6 +183,16 @@ def run(lr=0.1,
     (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin) \
         = load_all(dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
                    rel_which=rel_which)
+
+    # test tgt_lin
+    testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v
+    testlinvnt = np.zeros((3, vnt_mat.shape[-1]), dtype="int64")
+    testlinvntx = np.asarray([0, 0, 0,  1, 1,   1, 2, 2,  2,   2])
+    testlinvnty = np.asarray([0, 1, 21, 0, 1, 201, 0, 1, 21, 201])
+    testlinvnt[testlinvntx, testlinvnty] = 1
+    testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
+
+
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")
     # train/test split:
@@ -243,7 +253,7 @@ def run(lr=0.1,
 
     # train
     q.train(m).cuda(cuda).train_on(train_dataloader, losses)\
-        .set_batch_transformer(lambda a, b, c: (a, c[:, :-1], b, c[:, 1:]))\
+        .set_batch_transformer(lambda a, b, c: (a, c[:, :-1], b[:, 1:], c[:, 1:]))\
         .valid_on(valid_dataloader, validlosses)\
         .optimizer(optimizer).clip_grad_norm(gradnorm)\
         .clip_grad_norm(gradnorm)\
