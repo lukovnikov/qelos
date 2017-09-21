@@ -160,7 +160,8 @@ def get_vnt_mat(qids, tgtdict, vnts):
     vntmat[:, :, 0] = 1     # enable mask id as a vnt
     for i, qid in enumerate(qids):
         for j, timestep_vnt in enumerate(vnt[qid]):
-            vntmat[i, j, 0] = 0     # disable mask id as vnt
+            if len(timestep_vnt) > 0:
+                vntmat[i, j, 0] = 0     # disable mask id as vnt
             for timestep_vnt_element in timestep_vnt:
                 k = tgtdict[timestep_vnt_element]
                 # print(i, j, k)
