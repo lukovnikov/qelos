@@ -157,8 +157,10 @@ def get_vnt_mat(qids, tgtdict, vnts):
 
     # vntmat = sparse.lil_matrix((len(qids) * (maxlen+1), max(tgtdict.values())+1), dtype="int32")
     vntmat = np.zeros((len(qids), (maxlen + 1), max(tgtdict.values()) + 1), dtype="int32")
+    vntmat[:, :, 0] = 1     # enable mask id as a vnt
     for i, qid in enumerate(qids):
         for j, timestep_vnt in enumerate(vnt[qid]):
+            vntmat[i, j, 0] = 0     # disable mask id as vnt
             for timestep_vnt_element in timestep_vnt:
                 k = tgtdict[timestep_vnt_element]
                 # print(i, j, k)
