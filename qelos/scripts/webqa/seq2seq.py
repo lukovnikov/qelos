@@ -244,23 +244,34 @@ def run(lr=0.1,
     test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
     # training settings
-    losses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
-    validlosses = q.lossarray(q.SeqNLLLoss(), q.SeqAccuracy(), q.SeqElemAccuracy())
+    losses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
+    validlosses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
+    testlosses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
 
     optimizer = torch.optim.Adadelta(q.params_of(m), lr=lr, weight_decay=wreg)
 
     # sys.exit()
 
     # train
+    bt = lambda a, b, c: (a, c[:, :-1], b[:, 1:], c[:, 1:])
     q.train(m).cuda(cuda).train_on(train_dataloader, losses)\
-        .set_batch_transformer(lambda a, b, c: (a, c[:, :-1], b[:, 1:], c[:, 1:]))\
+        .set_batch_transformer(bt)\
         .valid_on(valid_dataloader, validlosses)\
         .optimizer(optimizer).clip_grad_norm(gradnorm)\
         .clip_grad_norm(gradnorm)\
         .train(epochs)
 
     # test
-    # TODO
+    nll, seqacc, elemacc \
+        = q.test(m).cuda(cuda)\
+        .on(test_dataloader, testlosses)\
+        .set_batch_transformer(bt).run()
+
+    tt.msg("Test results:")
+    tt.msg("NLL:\t{}\n Seq Accuracy:\t{}\n Elem Accuracy:\t{}"
+          .format(nll, seqacc, elemacc))
+
+    # TODO test number taking into account non-perfect starting entity linking !!!
 
 
 if __name__ == "__main__":
