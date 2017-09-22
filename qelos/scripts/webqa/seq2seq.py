@@ -284,13 +284,17 @@ class ErrorAnalyzer(q.LossWithAgg):
                         -res["toppredprob"], res["toppred_str"],
                         -res["goldprob"], res["gold_str"])
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
-            msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
+            msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
+            # attention scores
             decwords = res["toppred_str"].split()
+            maxlen = max([len(decword) for decword in decwords])
+            # maxlen = 20
+            msg += "{} - {}\n".format("\t"*maxlen, res["question_str"])
             for j, decword in enumerate(decwords):
-                msg += "\t{:^15.15s} - {}\n".format(decword,
-                       sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
+                msg += "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen) \
+                       + " - {}\n".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
             print(msg)
-            rawinp = raw_input(":> ")
+            rawinp = raw_input("'q'+ENTER to exit:> ")
             if rawinp == "q":
                 break
             i += 1
