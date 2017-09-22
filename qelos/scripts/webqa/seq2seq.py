@@ -288,9 +288,11 @@ class ErrorAnalyzer(q.LossWithAgg):
             # attention scores
             decwords = res["toppred_str"].split()
             maxlen = max([len(decword) for decword in decwords])
-            # maxlen = 20
+            maxlen = 20
             msg += "\t{} - {}\n".format(" "*maxlen, res["question_str"])
             for j, decword in enumerate(decwords):
+                if len(decword) > maxlen:
+                    decword = decword[-maxlen:]
                 msg += "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen) \
                        + " - {}\n".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
             print(msg)
