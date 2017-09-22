@@ -286,15 +286,20 @@ class ErrorAnalyzer(q.LossWithAgg):
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             # attention scores
+            goldwords = ["<E0>"] + res["gold_str"].split()
             decwords = res["toppred_str"].split()
-            maxlen = max([len(decword) for decword in decwords])
-            maxlen = 20
+            maxlen = 30
             msg += "\t{} - {}\n".format(" "*maxlen, res["question_str"])
-            for j, decword in enumerate(decwords):
+            for j, (goldword, decword) in enumerate(zip(goldwords[:-1], decwords)):
                 if len(decword) > maxlen:
                     decword = decword[-maxlen:]
-                msg += "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen) \
-                       + " - {}\n".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
+                if len(goldword) > maxlen:
+                    goldword = goldword[-maxlen:]
+                msg += "\t{:^{maxlenn}.{maxlenn}s}".format(goldword, maxlenn=maxlen) \
+                       + " -> {} -> ".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8")) \
+                       + "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen)\
+                       + "\n"
+            msg += "\t{:^{maxlenn}.{maxlenn}s}\n".format(goldwords[-1])
             print(msg)
             rawinp = raw_input("ENTER to continue, 'q'+ENTER to exit:> ")
             if rawinp == "q":
