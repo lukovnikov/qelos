@@ -287,25 +287,24 @@ def run(lr=0.1,
         trainlossscores = losses.get_agg_errors()
         validlossscores = validlosses.get_agg_errors()
 
-        q.log("experiments_seq2seq.log", mode="a", name="", body=
-              OrderedDict({"script": "webqa/seq2seq.py",
-               "timestamp": datetime.datetime.now(),
-               "settings": savesettings,
-               "final_train_scores":
-                   {"train_NLL": trainlossscores[0],
-                    "train_seq_acc": trainlossscores[1],
-                    "train_elem_acc": trainlossscores[2]},
-               "final_valid_scores":
-                   {"valid_NLL": validlossscores[0],
-                    "valid_seq_acc": validlossscores[1],
-                    "valid_elem_acc": validlossscores[2]},
-               "test_results":
+        body = OrderedDict()
+        body["timestamp"] = datetime.datetime.now()
+        body["settings"] = savesettings
+        body["test_results"] = \
                    {"NLL": nll,
                     "seq_acc": seqacc,
                     "elem_acc": elemacc
                    }
-               }),
-              )
+        body["final_train_scores"] = \
+                   {"train_NLL": trainlossscores[0],
+                    "train_seq_acc": trainlossscores[1],
+                    "train_elem_acc": trainlossscores[2]}
+        body["final_valid_scores"] = \
+                   {"valid_NLL": validlossscores[0],
+                    "valid_seq_acc": validlossscores[1],
+                    "valid_elem_acc": validlossscores[2]}
+
+        q.log("experiments_seq2seq.log", mode="a", name="", body=body)
 
     # TODO test number taking into account non-perfect starting entity linking !!!
 
