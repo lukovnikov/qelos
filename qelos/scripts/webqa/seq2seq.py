@@ -288,7 +288,7 @@ def run(lr=0.1,
         validlossscores = validlosses.get_agg_errors()
 
         body = OrderedDict()
-        body["timestamp"] = datetime.datetime.now()
+        body["timestamp"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         body["settings"] = savesettings
         body["test_results"] = \
                    OrderedDict([("NLL", nll),
