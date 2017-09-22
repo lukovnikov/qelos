@@ -28,6 +28,6 @@ from qelos.furnn import MemGRUCell
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo, emit, get_emitted, \
-    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split
+    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
     params_of

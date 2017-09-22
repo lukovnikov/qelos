@@ -554,4 +554,27 @@ def split(npmats, splits=(80, 20), random=True):
     return ret
 
 
+def log(p, mode="a", name="", body={}):
+    indentlevel = 0
+    acc = ""
+    acc += "{}\n".format(name)
+    acc += _rec_write(body, indentlevel=indentlevel+1)
+    if p is None:
+        print(acc)
+        return acc
+    else:
+        with open(p, mode) as f:
+            f.write(acc)
+
+def _rec_write(d, indentlevel=0):
+    ret = ""
+    for k, v in d.items():
+        indent = "".join(["\t"]*indentlevel)
+        if isinstance(v, dict):
+            ret += "{}{}:\n".format(indent, k)
+            ret += _rec_write(v, indentlevel=indentlevel+1)
+        else:
+            ret += "{}{}: {}\n".format(indent, k, str(v))
+    return ret
+
 

@@ -22,3 +22,17 @@ class TestSplit(TestCase):
             self.assertTrue(splits[0][0][i-1] < splits[0][0][i])
         for i in range(1, len(splits[1][0])):
             self.assertTrue(splits[1][0][i-1] < splits[1][0][i])
+
+
+class TestLog(TestCase):
+    def test_log_string(self):
+        ret = q.log(None, name="name", body=
+            {"level1key": {
+                "level2key": "level2val",
+                "level2key2": ["level2listval1", "level2listval2"],
+                "level2key3": {
+                    "level3key": set(["a", "b"])
+                }
+            },
+            "level1key2": "level1key2val"})
+        pass
