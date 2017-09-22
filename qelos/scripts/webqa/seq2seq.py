@@ -286,9 +286,9 @@ class ErrorAnalyzer(q.LossWithAgg):
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             decwords = res["toppred_str"].split()
-            for i, decword in enumerate(decwords):
+            for j, decword in enumerate(decwords):
                 msg += "\t{:^15.15s} - {}\n".format(decword,
-                       sparkline.sparkify(res["attention_scores"][i]).encode("utf-8"))
+                       sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
             print(msg)
             rawinp = raw_input(":> ")
             if rawinp == "q":
