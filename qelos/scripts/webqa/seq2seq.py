@@ -287,10 +287,12 @@ class ErrorAnalyzer(q.LossWithAgg):
             msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             decwords = res["toppred_str"].split()
             for i, decword in enumerate(decwords):
-                msg += "\t{:^15s} - {}".format(decword,
+                msg += "\t{:^15.15s} - {}\n".format(decword,
                        sparkline.sparkify(res["attention_scores"][i]).encode("utf-8"))
             print(msg)
             rawinp = raw_input(":> ")
+            if rawinp == "q":
+                break
             i += 1
 
     # region LossWithAgg interface
