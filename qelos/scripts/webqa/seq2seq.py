@@ -282,7 +282,7 @@ class ErrorAnalyzer(q.LossWithAgg):
                 .format(res["question_str"],
                         -res["toppredprob"], res["toppred_str"],
                         -res["goldprob"], res["gold_str"])
-            msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]))
+            msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             decwords = res["toppred_str"].split()
             for i, decword in enumerate(decwords):
