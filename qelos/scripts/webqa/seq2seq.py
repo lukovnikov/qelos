@@ -193,6 +193,7 @@ class ErrorAnalyzer(q.LossWithAgg):
 
         pred = pred.cpu().data.numpy()      # (seqlen, probs)
         gold = gold.cpu().data.numpy()
+        att = att.cpu().data.numpy()
         mask = (gold != 0)
         inp = inputs[0].cpu().data.numpy() if inputs is not None else None
 
