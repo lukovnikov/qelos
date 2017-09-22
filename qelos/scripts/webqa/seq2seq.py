@@ -278,12 +278,19 @@ class ErrorAnalyzer(q.LossWithAgg):
         i = 0
         while i < len(self.acc):
             res = self.acc[i]
-            msg = "Question:\t{}\nPrediction:\t{:.4f}-{}\nGold:   \t{:.4f}-{}"\
+            msg = "Question:\t{}\nPrediction:\t{:.4f} - {}\nGold:   \t{:.4f} - {}\n"\
                 .format(res["question_str"],
-                        res["toppredprob"], res["toppred_str"],
-                        res["goldprob"], res["gold_str"])
+                        -res["toppredprob"], res["toppred_str"],
+                        -res["goldprob"], res["gold_str"])
+            msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]))
+            msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]))
+            decwords = res["toppred_str"].split()
+            for i, decword in enumerate(decwords):
+                msg += "\t{:^15s} - {}".format(decword,
+                       sparkline.sparkify(res["attention_scores"][i]))
             print(msg)
             rawinp = raw_input(":> ")
+            i += 1
 
     # region LossWithAgg interface
     def get_agg_error(self):
