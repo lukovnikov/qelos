@@ -1,3 +1,4 @@
+from __future__ import print_function
 import qelos as q
 from qelos.scripts.webqa.load import load_all
 import torch
@@ -5,6 +6,7 @@ from torch import nn
 import sys
 import numpy as np
 from collections import OrderedDict
+import sparkline
 
 
 def test_model(encoder, decoder, m, questions, queries, vnt):
@@ -62,7 +64,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
 
     # region whole model
     m.zero_grad()
-    dec = m(questions, queries[:, :-1], vnt[:, 1:])
+    dec, atts = m(questions, queries[:, :-1], vnt[:, 1:])
     assert(dec.size(0) == questions.size(0))
     assert(dec.size(1) == queries.size(1) - 1)
     # assert(dec.size(2) == 11075)
@@ -154,7 +156,152 @@ class Model(nn.Module):
         ctx, ctxmask, finalstate = self.encoder(srcseq)
         self.decoder.set_init_states(finalstate)
         dec, att = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
-        return dec
+        return dec, att
+
+
+class ErrorAnalyzer(q.LossWithAgg):
+    callwithinputs = True
+
+    def __init__(self, questionD, queryD):
+        super(ErrorAnalyzer, self).__init__()
+        self.questionD, self.queryD = {v: k for k, v in questionD.items()}, \
+                                      {v: k for k, v in queryD.items()}
+        self.global_entmistakes = 0
+        self.global_relmistakes = 0
+        self.global_othermistakes = 0
+        self.global_count = 0
+        self.global_entities = 0
+        self.global_relations = 0
+        self.global_others = 0
+
+        self.acc = []
+
+    def __call__(self, pred, gold, inputs=None):    # (batsize, seqlen, outvocsize)
+        pred, att = pred
+        for i in range(len(pred)):
+            exampleresult = self.processexample(pred[i], att[i], gold[i],
+                inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))
+            self.acc.append(exampleresult)
+        return 0
+
+    def processexample(self, pred, att, gold, inputs=None):
+        """ compute how many entity mistakes, relation mistakes;
+            store predictions, gold, and inputs in string form
+            compute probability of correct sequence
+        """
+        res = {}
+
+        pred = pred.cpu().data.numpy()      # (seqlen, probs)
+        gold = gold.cpu().data.numpy()
+        mask = (gold != 0)
+        inp = inputs[0].cpu().data.numpy() if inputs is not None else None
+
+        toppred = np.argmax(pred, axis=1)
+
+        # transform to strings
+        def pp(seq, dic):
+            seq = [dic[x] for x in seq]
+            seq = filter(lambda x: x != "<MASK>", seq)
+            seq_str = " ".join(seq)
+            return seq_str, seq
+
+        question_str, question_seq = pp(inp, self.questionD) if inp is not None else None
+        toppred_str, toppred_seq = pp(toppred, self.queryD)
+        gold_str, gold_seq = pp(gold, self.queryD)
+
+        # save strings
+        res["question_str"] = question_str
+        res["toppred_str"] = toppred_str
+        res["gold_str"] = gold_str
+        res["mask"] = mask
+
+        # compute entity/relations/other mistakes
+        relmistakes = []
+        entmistakes = []
+        othermistakes = []
+        totalentities = 0
+        totalrelations = 0
+        totalothers = 0
+        for i in range(len(gold_seq)):
+            gold_seq_elem = gold_seq[i]
+            pred_seq_elem = toppred_seq[i]
+            if gold_seq_elem[0] == ":":  # relation
+                if pred_seq_elem != gold_seq_elem:
+                    relmistakes.append((gold_seq_elem, pred_seq_elem))
+                totalrelations += 1
+            elif gold_seq_elem[0:2] == "m.":    # entity
+                if pred_seq_elem != gold_seq_elem:
+                    entmistakes.append((gold_seq_elem, pred_seq_elem))
+                totalentities += 1
+            else:
+                if pred_seq_elem != gold_seq_elem:
+                    othermistakes.append((gold_seq_elem, pred_seq_elem))
+                totalothers += 1
+
+        self.global_entmistakes += len(entmistakes)
+        self.global_relmistakes += len(relmistakes)
+        self.global_othermistakes += len(othermistakes)
+        self.global_entities += totalentities
+        self.global_relations += totalrelations
+        self.global_others += totalothers
+
+        res["entmistakes"] = entmistakes
+        res["relmistakes"] = relmistakes
+        res["othermistakes"] = othermistakes
+
+        # probability of gold sequence, probability of top pred
+        goldprobs = pred[np.arange(0, len(pred)), gold] * mask
+        toppredprobs = pred[np.arange(0, len(pred)), toppred] * mask
+        goldprob = np.sum(goldprobs)
+        toppredprob = np.sum(toppredprobs)
+        res["goldprobs"] = goldprobs        # (seqlen,)
+        res["goldprob"] = goldprob
+        res["toppredprobs"] = toppredprobs  # (seqlen,)
+        res["toppredprob"] = toppredprob
+
+        res["attention_scores"] = att
+
+        self.global_count += 1
+
+        return res
+
+    def summary(self):
+        ret = ""
+        ret += "Total examples: {}\n".format(self.global_count)
+        ret += "Total entity mistakes: {}/{}\n".format(self.global_entmistakes, self.global_entities)
+        ret += "Total relation mistakes: {}/{}\n".format(self.global_relmistakes, self.global_relations)
+        ret += "Total other mistakes: {}/{}\n".format(self.global_othermistakes, self.global_others)
+        # print(ret)
+        return ret
+
+    def inspect(self):
+        i = 0
+        while i < len(self.acc):
+            res = self.acc[i]
+            msg = "Question:\t{}\nPrediction:\t{:.4f}-{}\nGold:   \t{:.4f}-{}"\
+                .format(res["question_str"],
+                        res["toppredprob"], res["toppred_str"],
+                        res["goldprob"], res["gold_str"])
+            print(msg)
+            rawinp = raw_input(":> ")
+
+    # region LossWithAgg interface
+    def get_agg_error(self):
+        return 0
+
+    def reset_agg(self):
+        self.acc = []
+        self.global_entmistakes = 0
+        self.global_relmistakes = 0
+        self.global_othermistakes = 0
+        self.global_count = 0
+        self.global_entities = 0
+        self.global_relations = 0
+        self.global_others = 0
+
+    def cuda(self, *a, **kw):
+        pass
+    # endregion
 
 
 def run(lr=0.1,
@@ -174,8 +321,8 @@ def run(lr=0.1,
         gpu=1,
         inspectdata=False,
         log=True,
+        erroranalysis=True,
         ):
-    print(locals()['glovedim'])
     localvars = locals()
     savesettings = "glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
@@ -263,8 +410,20 @@ def run(lr=0.1,
 
     # sys.exit()
 
-    # train
     bt = lambda a, b, c: (a, c[:, :-1], b[:, 1:], c[:, 1:])
+
+    if erroranalysis:       # TODO remove from here
+        tt.msg("error analysis")
+        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D)
+        anal_losses = q.lossarray((erranal, lambda x: x))
+        q.test(m)\
+            .on(valid_dataloader, anal_losses)\
+            .set_batch_transformer(bt)\
+            .run()
+        print(erranal.summary())
+        erranal.inspect()
+
+    # train
     q.train(m).cuda(cuda).train_on(train_dataloader, losses)\
         .set_batch_transformer(bt)\
         .valid_on(valid_dataloader, validlosses)\
@@ -282,6 +441,7 @@ def run(lr=0.1,
     tt.msg("NLL:\t{}\n Seq Accuracy:\t{}\n Elem Accuracy:\t{}"
           .format(nll, seqacc, elemacc))
 
+    # log
     if log:
         import datetime
         trainlossscores = losses.get_agg_errors()
@@ -304,6 +464,10 @@ def run(lr=0.1,
                                 ("valid_elem_acc", validlossscores[2])])
 
         q.log("experiments_seq2seq.log", mode="a", name="seq2seq_run", body=body)
+
+    # error analysis
+    if erroranalysis:
+        analyze_errors(m, test_dataloader)
 
     # TODO test number taking into account non-perfect starting entity linking !!!
 

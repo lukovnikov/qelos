@@ -79,7 +79,9 @@ class Aggregator(HistoryAggregator):
 
 
 class LossWithAgg(HistoryAggregator):
-    def __call__(self, pred, gold):
+    callwithinputs = False
+
+    def __call__(self, pred, gold, **kw):
         raise NotImplemented()
 
     def get_agg_error(self):
@@ -98,7 +100,7 @@ class LossAndAgg(LossWithAgg):
         self.loss = loss
         self.agg = agg
 
-    def __call__(self, pred, gold):
+    def __call__(self, pred, gold, **kw):
         l = self.loss(pred, gold)
         numex = pred.size(0)
         if len(l) == 2:     # loss returns numex too
@@ -121,16 +123,28 @@ class lossarray(object):
     def __init__(self, trainloss, *losses):
         super(lossarray, self).__init__()
         self.losses = []
+        self.loss_transformers = []
         for loss in (trainloss,) + losses:
+            loss_transf = default_loss_input_transform
+            if isinstance(loss, tuple):
+                assert(len(loss) == 2)
+                loss_transf = loss[1]
+                loss = loss[0]
+            self.loss_transformers.append(loss_transf)
             if isinstance(loss, LossWithAgg):
                 self.losses.append(loss)
             else:
                 self.losses.append(LossAndAgg(loss, Aggregator(mode="mean")))
 
-    def __call__(self, prediction, gold):
+    def __call__(self, prediction, gold, inputs=None):
         outl = []
-        for loss in self.losses:
-            l = loss(prediction, gold)
+        for loss, loss_transf in zip(self.losses, self.loss_transformers):
+            if loss_transf is not None:
+                prediction = loss_transf(prediction)
+            if loss.callwithinputs:
+                l = loss(prediction, gold, inputs=inputs)
+            else:
+                l = loss(prediction, gold)
             outl.append(l)
         return outl
 
@@ -156,6 +170,13 @@ class lossarray(object):
             loss._reset()
 
 
+def default_loss_input_transform(outs):
+    if not issequence(outs):
+        outs = [outs]
+    ret = outs[0]
+    return ret
+
+
 class test(object):
     def __init__(self, model):
         super(test, self).__init__()
@@ -163,7 +184,8 @@ class test(object):
         self.metrics = None
         self.usecuda = False
         self.cudaargs = ([], {})
-        self.transform_batch = None
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
         self.dataloader = None
         self.tt = ticktock("tester")
 
@@ -182,8 +204,11 @@ class test(object):
         self.metrics = lossarray
         return self
 
-    def set_batch_transformer(self, f):
-        self.transform_batch = f
+    def set_batch_transformer(self, input_transform=None, output_transform=None):
+        if input_transform is not None:
+            self.transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.transform_batch_out = output_transform
         return self
 
     def reset(self):
@@ -204,12 +229,13 @@ class test(object):
         self.model.eval()
         for i, batch in enumerate(self.dataloader):
             batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
-            if self.transform_batch is not None:
-                batch = self.transform_batch(*batch)
+            if self.transform_batch_inp is not None:
+                batch = self.transform_batch_inp(*batch)
             modelouts = self.model(*batch[:-1])
-            if not issequence(modelouts):
-                modelouts = [modelouts]
-            metrics = self.metrics(modelouts[0], batch[-1])
+            modelouts2loss = modelouts
+            if self.transform_batch_out is not None:
+                modelouts2loss = self.transform_batch_out(modelouts)
+            metrics = self.metrics(modelouts2loss, batch[-1], inputs=batch[:-1])
 
             tt.live("test - [{}/{}]: {}"
                 .format(
@@ -240,7 +266,8 @@ class train(object):
         self.usecuda = False
         self.cudaargs = ([], {})
         self.optim = None
-        self.transform_batch = None
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
@@ -314,8 +341,11 @@ class train(object):
         self.optim = optimizer
         return self
 
-    def set_batch_transformer(self, f):
-        self.transform_batch = f
+    def set_batch_transformer(self, input_transform=None, output_transform=None):
+        if input_transform is not None:
+            self.transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.transform_batch_out = output_transform
         return self
 
     def trainloop(self):
@@ -334,12 +364,13 @@ class train(object):
                 self.optim.zero_grad()
                 params = q.params_of(self.model)
                 batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
-                if self.transform_batch is not None:
-                    batch = self.transform_batch(*batch)
+                if self.transform_batch_inp is not None:
+                    batch = self.transform_batch_inp(*batch)
                 modelouts = self.model(*batch[:-1])
-                if not issequence(modelouts):
-                    modelouts = [modelouts]
-                trainlosses = self.trainlosses(modelouts[0], batch[-1])
+                modelout2loss = modelouts
+                if self.transform_batch_out is not None:
+                    modelout2loss = self.transform_batch_out(modelouts)
+                trainlosses = self.trainlosses(modelout2loss, batch[-1], inputs=batch[:-1])
                 trainlosses[0].backward()
                 # grad total norm
                 tgn0 = None
@@ -380,12 +411,13 @@ class train(object):
                 totalvalidbats = len(self.validdataloader)
                 for i, batch in enumerate(self.validdataloader):
                     batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
-                    if self.transform_batch is not None:
-                        batch = self.transform_batch(*batch)
+                    if self.transform_batch_inp is not None:
+                        batch = self.transform_batch_inp(*batch)
                     modelouts = self.model(*batch[:-1])
-                    if not issequence(modelouts):
-                        modelouts = [modelouts]
-                    validlosses = self.validlosses(modelouts[0], batch[-1])
+                    modelout2loss = modelouts
+                    if self.transform_batch_out is not None:
+                        modelout2loss = self.transform_batch_out(modelouts)
+                    validlosses = self.validlosses(modelout2loss, batch[-1], inputs=batch[:-1])
                     tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
                             .format(
                                 self.current_epoch+1,
