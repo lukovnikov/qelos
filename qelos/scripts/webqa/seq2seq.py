@@ -283,11 +283,11 @@ class ErrorAnalyzer(q.LossWithAgg):
                         -res["toppredprob"], res["toppred_str"],
                         -res["goldprob"], res["gold_str"])
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]))
-            msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]))
+            msg += "Gold probs: {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             decwords = res["toppred_str"].split()
             for i, decword in enumerate(decwords):
                 msg += "\t{:^15s} - {}".format(decword,
-                       sparkline.sparkify(res["attention_scores"][i]))
+                       sparkline.sparkify(res["attention_scores"][i]).encode("utf-8"))
             print(msg)
             rawinp = raw_input(":> ")
             i += 1
@@ -423,7 +423,7 @@ def run(lr=0.1,
         tt.msg("error analysis")
         erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D)
         anal_losses = q.lossarray((erranal, lambda x: x))
-        q.test(m)\
+        q.test(m).cuda(cuda)\
             .on(valid_dataloader, anal_losses)\
             .set_batch_transformer(bt)\
             .run()
