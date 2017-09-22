@@ -433,7 +433,8 @@ def run(lr=0.1,
 
     bt = lambda a, b, c: (a, c[:, :-1], b[:, 1:], c[:, 1:])
 
-    if erroranalysis:       # TODO remove from here
+    if erroranalysis and False:
+        # TODO remove from here
         tt.msg("error analysis")
         erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D)
         anal_losses = q.lossarray((erranal, lambda x: x))
@@ -488,7 +489,15 @@ def run(lr=0.1,
 
     # error analysis
     if erroranalysis:
-        analyze_errors(m, test_dataloader)
+        tt.msg("error analysis")
+        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D)
+        anal_losses = q.lossarray((erranal, lambda x: x))
+        q.test(m).cuda(cuda)\
+            .on(test_dataloader, anal_losses)\
+            .set_batch_transformer(bt)\
+            .run()
+        print(erranal.summary())
+        erranal.inspect()
 
     # TODO test number taking into account non-perfect starting entity linking !!!
 

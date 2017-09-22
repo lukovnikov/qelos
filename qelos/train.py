@@ -227,6 +227,7 @@ class test(object):
         tt = ticktock("-")
         totaltestbats = len(self.dataloader)
         self.model.eval()
+        self.metrics.reset()
         for i, batch in enumerate(self.dataloader):
             batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
             if self.transform_batch_inp is not None:
@@ -354,6 +355,7 @@ class train(object):
         tt = ticktock("-")
         current_epoch = 0
         totaltrainbats = len(self.traindataloader)
+        self.trainlosses.reset()
         while not stop:
             self.current_epoch = current_epoch
             stop = self.current_epoch+1 == self.epochs
