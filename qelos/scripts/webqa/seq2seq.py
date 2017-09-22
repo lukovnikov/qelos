@@ -289,12 +289,12 @@ class ErrorAnalyzer(q.LossWithAgg):
             decwords = res["toppred_str"].split()
             maxlen = max([len(decword) for decword in decwords])
             # maxlen = 20
-            msg += "{} - {}\n".format("\t"*maxlen, res["question_str"])
+            msg += "\t{} - {}\n".format(" "*maxlen, res["question_str"])
             for j, decword in enumerate(decwords):
                 msg += "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen) \
                        + " - {}\n".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8"))
             print(msg)
-            rawinp = raw_input("'q'+ENTER to exit:> ")
+            rawinp = raw_input("ENTER to continue, 'q'+ENTER to exit:> ")
             if rawinp == "q":
                 break
             i += 1
