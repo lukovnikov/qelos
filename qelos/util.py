@@ -559,12 +559,14 @@ def log(p, mode="a", name="", body={}):
     acc = ""
     acc += "{}\n".format(name)
     acc += _rec_write(body, indentlevel=indentlevel+1)
+    acc += "\n"
     if p is None:
         print(acc)
         return acc
     else:
         with open(p, mode) as f:
             f.write(acc)
+
 
 def _rec_write(d, indentlevel=0):
     ret = ""
