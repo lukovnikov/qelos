@@ -299,7 +299,7 @@ class ErrorAnalyzer(q.LossWithAgg):
                        + " -> {} -> ".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8")) \
                        + "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen)\
                        + "\n"
-            msg += "\t{:^{maxlenn}.{maxlenn}s}\n".format(goldwords[-1])
+            msg += "\t{:^{maxlenn}.{maxlenn}s}\n".format(goldwords[-1], maxlenn=maxlen)
             print(msg)
             rawinp = raw_input("ENTER to continue, 'q'+ENTER to exit:> ")
             if rawinp == "q":
