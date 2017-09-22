@@ -175,8 +175,10 @@ def run(lr=0.1,
         inspectdata=False,
         log=True,
         ):
+    print(locals()['glovedim'])
+    localvars = locals()
     savesettings = "glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
-    savesettings = OrderedDict({k: locals()[k] for k in savesettings})
+    savesettings = OrderedDict({k: localvars[k] for k in savesettings})
     if cuda:
         torch.cuda.set_device(gpu)
 
