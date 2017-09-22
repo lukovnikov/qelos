@@ -50,7 +50,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
         decoder.block.zero_grad()
         outmaskt=vnt[:, t]
         # outmaskt=q.var(np.ones_like(vnt[:, t].data.numpy()).astype("int64")).v
-        y_t = decoder.block(queries[:, t], ctx.detach(), ctxmask=ctxmask.detach(), t=t, outmask_t=outmaskt)
+        y_t, att_t = decoder.block(queries[:, t], ctx.detach(), ctxmask=ctxmask.detach(), t=t, outmask_t=outmaskt)
         loss = torch.max(y_t)
         print(loss)
         loss.backward()
@@ -74,7 +74,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
     # q.embed()
 
 
-def make_encoder(src_emb, embdim=100, dim=100, **kw):
+def make_encoder(src_emb, embdim=100, dim=100, dropout=0.0, **kw):
     """ make encoder
     # concatenating bypass encoder:
     #       embedding  --> top GRU
@@ -88,9 +88,11 @@ def make_encoder(src_emb, embdim=100, dim=100, **kw):
         q.argsave.spec(emb=0, mask=1),
         q.argmap.spec(0, mask=["mask"]),
         q.BidirGRULayer(embdim, dim),
+        q.TimesharedDropout(dropout),
         q.argsave.spec(bypass=0),
         q.argmap.spec(0, mask=["mask"]),
         q.BidirGRULayer(dim * 2, dim),
+        q.TimesharedDropout(dropout),
         q.argmap.spec(0, ["bypass"], ["emb"]),
         q.Lambda(lambda x, y, z: torch.cat([x, y, z], 1)),
         q.argmap.spec(0, mask=["mask"]),
@@ -135,7 +137,9 @@ def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
                                      ctx_to_smo=True,
                                      state_to_smo=True,
                                      decinp_to_att=True,
-                                     state_split=decsplit)
+                                     state_split=decsplit,
+                                     return_att=True,
+                                     return_out=True)
     return attcell.to_decoder()
 
 
@@ -148,7 +152,7 @@ class Model(nn.Module):
     def forward(self, srcseq, tgtseq, outmask=None):
         ctx, ctxmask, finalstate = self.encoder(srcseq)
         self.decoder.set_init_states(finalstate)
-        dec = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
+        dec, att = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
         return dec
 
 
@@ -156,6 +160,7 @@ def run(lr=0.1,
         gradnorm=2.,
         epochs=100,
         wreg=1e-6,
+        dropout=0.1,
         glovedim=50,
         encdim=100,
         decdim=100,
@@ -234,7 +239,7 @@ def run(lr=0.1,
     # make main model
     src_emb_dim = glovedim
     tgt_emb_dim = flvecdim
-    encoder = make_encoder(src_emb, embdim=src_emb_dim, dim=encdim)
+    encoder = make_encoder(src_emb, embdim=src_emb_dim, dim=encdim, dropout=dropout)
     ctxdim = encdim
     decoder = make_decoder(tgt_emb, tgt_lin, ctxdim=ctxdim,
                            embdim=tgt_emb_dim, dim=decdim,
