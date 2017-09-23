@@ -93,12 +93,47 @@ class GANTrainer(object):
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
               data_gen=None, valid_data_gen=None, cuda=False):
-        print("status: pagan added")
+        """
+        :param netD:    nn.Module for discriminator function,
+                        or, tuple of two nn.Modules,
+                        first one used as discriminator during discriminator training,
+                        second one used as discriminator during generator training
+        :param netG:    nn.Module for generator function,
+                        or, tuple of two nn.Modules,
+                        first one used as generator during discriminator training,
+                        second one used as generator during generator training
+        :param niter:   total number of iterations to train (equals number of generator updates)
+        :param niterD:  number of discriminator updates per generator update
+        :param batsizeG: generator batch size
+        :param data_gen: data generator of real examples (must have next()), must produce one tensor    # TODO: support multiple parts for data
+        :param valid_data_gen: data generator for validation (must have next()), must produce one tensor
+        :param cuda:
+        :return:
+        """
+        print("status: supporting different nets for discriminator and generator training")
         data_gen = data_gen if data_gen is not None else self.data_iter
         valid_data_gen = valid_data_gen if valid_data_gen is not None else self.valid_data_iter
+
+        if isinstance(netD, tuple):
+            assert(len(netD) == 2)
+            netD4D = netD[0]
+            netD4G = netD[1]
+        else:
+            netD4D, netD4G = netD, netD
+        if isinstance(netG, tuple):
+            assert(len(netG) == 2)
+            netG4D = netG[0]
+            netG4G = netG[1]
+        else:
+            netG4D, netG4G = netG
+
         if cuda:
-            netD.cuda()
-            netG.cuda()
+            netD4D.cuda()
+            if netD4D != netD4G:
+                netD4G.cuda()
+            netG4D.cuda()
+            if netG4G != netG4D:
+                netG4G.cuda()
 
         valid_EMD = 0.
         valid_fake2real = 0.    # mean of distances from each fake to closest real
@@ -109,6 +144,7 @@ class GANTrainer(object):
 
         for _iter in range(niter):
             ##########  Update D net ##########
+            netD, netG = netD4D, netG4D
             lip_loss = None
             for p in netD.parameters():
                 p.requires_grad = True
@@ -190,6 +226,8 @@ class GANTrainer(object):
                 self.optimizerD.step()
 
             ##########  Update G net ##########
+            netD, netG = netD4G, netG4G
+
             for p in netD.parameters():
                 p.requires_grad = False
             netG.zero_grad()

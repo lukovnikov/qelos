@@ -1,8 +1,10 @@
 import torch
 from torch import nn
+
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
 from qelos.util import issequence
+from qelos.exceptions import SumTingWongException
 
 
 # region attention
@@ -272,6 +274,12 @@ class AttentionDecoder(ContextDecoder):
         pass # TODO
 
 
+class Argmaxer(nn.Module):
+    def forward(self, x):       # (batsize, vocsize)
+        maxes, argmaxes = torch.max(x, 1)
+        return argmaxes
+
+
 class DecoderCell(RecStatefulContainer):
     """
     Decoder logic.
@@ -291,6 +299,7 @@ class DecoderCell(RecStatefulContainer):
         else:
             self.core = None
         self.teacher_force = 1
+        self._teacher_force_block = None
         self._init_state_computer = None
         self._inputs_t_getter = None
 
@@ -305,12 +314,19 @@ class DecoderCell(RecStatefulContainer):
         return self.core.get_init_states(batsize)
     # endregion
 
-    def teacher_force(self, frac=1):        # set teacher forcing
+    def teacher_force(self, frac=1, block=Argmaxer()):        # set teacher forcing
+        """
+        Can only be called on blocks that support teacher unforcing (_teacher_unforce_support)
+        :param frac: mixture between teacher forcing and own decoding
+        :param block: how to transform previous outputs to new inputs
+        :return:
+        """
         if not self._teacher_unforcing_support and frac < 1:
             raise NotImplementedError("only teacher forcing supported")
         if frac < 0 or frac > 1:
             raise Exception("bad argument, must be [0, 1]")
         self.teacher_force = frac
+        self._teacher_force_block = block
 
     def forward(self, *x, **kw):                        # OVERRIDE THIS
         """
@@ -373,6 +389,8 @@ class DecoderCell(RecStatefulContainer):
 
 
 class ContextDecoderCell(DecoderCell):
+    _teacher_unforcing_support = True
+
     def __init__(self, embedder=None, *layers):
         super(ContextDecoderCell, self).__init__(*layers)
         self.embedder = embedder
@@ -387,7 +405,13 @@ class ContextDecoderCell(DecoderCell):
         return ret
 
     def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
-        return (x[0][:, t], x[1]), {}
+        if self.teacher_force == 0:
+            y_t = self._teacher_force_block(y_t)
+            return (y_t, x[1]), {}
+        elif self.teacher_force == 1:
+            return (x[0][:, t], x[1]), {}
+        else:
+            raise NotImplemented("partial teacher forcing not supported")
 
 
 class AttentionDecoderCell(DecoderCell):
