@@ -25,7 +25,8 @@ class GANTrainer(object):
                         validation_metrics=[],  # fnr, emd
                         notgan=False,
                         validinter=1,
-                        paganP=1):
+                        paganP=1,
+                        noise_dim=2):
         if one_sided:
             self.clip_fn = lambda x: x.clamp(min=0)
         else:
@@ -37,7 +38,7 @@ class GANTrainer(object):
         self.perturb_symmetric = perturb_symmetric
         self.perturb_scale = perturb_scale
         self.clamp_weights_rng = clamp_weights_rng
-        self.noise_dim = 2
+        self.noise_dim = noise_dim
         self.mode = mode
         self.modeD = modeD
         self.logger = logger
@@ -68,7 +69,8 @@ class GANTrainer(object):
         else:
             perturbation.uniform_(-1, to=1)
         perturbation *= self.perturb_scale * x.data.std()
-        interp_alpha = perturbation.new(perturbation.size(0), 1)
+        interp_alpha = perturbation.new(perturbation.size(0),
+                                        *([1]*(perturbation.dim()-1)))
         interp_alpha.uniform_(0, to=1)
         perturbation = interp_alpha * perturbation
         perturbed = x.data + perturbation
@@ -92,7 +94,7 @@ class GANTrainer(object):
         return Variable(ret, requires_grad=True)
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
-              data_gen=None, valid_data_gen=None, cuda=False):
+              data_gen=None, valid_data_gen=None, cuda=False, netR=None):
         """
         :param netD:    nn.Module for discriminator function,
                         or, tuple of two nn.Modules,
@@ -108,6 +110,8 @@ class GANTrainer(object):
         :param data_gen: data generator of real examples (must have next()), must produce one tensor    # TODO: support multiple parts for data
         :param valid_data_gen: data generator for validation (must have next()), must produce one tensor
         :param cuda:
+        :param netR:    network for processing real examples; trained with discriminator
+                        allows specifying different network for processing real examples
         :return:
         """
         print("status: supporting different nets for discriminator and generator training")
@@ -120,6 +124,7 @@ class GANTrainer(object):
             netD4G = netD[1]
         else:
             netD4D, netD4G = netD, netD
+
         if isinstance(netG, tuple):
             assert(len(netG) == 2)
             netG4D = netG[0]
@@ -134,6 +139,8 @@ class GANTrainer(object):
             netG4D.cuda()
             if netG4G != netG4D:
                 netG4G.cuda()
+            if netR is not None:
+                netR.cuda()
 
         valid_EMD = 0.
         valid_fake2real = 0.    # mean of distances from each fake to closest real
@@ -142,11 +149,14 @@ class GANTrainer(object):
 
         vnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
 
+        netD4Dparams = q.params_of(netD4D)
+        netD4Gparams = q.params_of(netD4G)
+
         for _iter in range(niter):
             ##########  Update D net ##########
             netD, netG = netD4D, netG4D
             lip_loss = None
-            for p in netD.parameters():
+            for p in netD4Dparams:
                 p.requires_grad = True
 
             if _iter < 25 or _iter % 500 == 0:
@@ -160,9 +170,11 @@ class GANTrainer(object):
                         p.data.clamp_(*self.clamp_weights_rng)
                 data = next(data_gen)
                 real = q.var(data).cuda(cuda).v
-                num_examples = data.size(0)
+                if netR is not None:
+                    real = netR(real)
+                num_examples = real.size(0)
                 batsize = num_examples
-                vnoise = Variable(real.data.new(num_examples, self.noise_dim))
+                vnoise = q.var(torch.FloatTensor(num_examples, self.noise_dim)).cuda(real).v
                 vnoise.data.normal_(0, 1)
                 fake = netG(vnoise)
                 scoreD_real_vec = netD(real)        # (batsize,)
@@ -184,7 +196,7 @@ class GANTrainer(object):
                     grad_points = None
                 elif self.mode == "WGAN-GP":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
-                    interp_alpha = real.data.new(num_examples, 1)
+                    interp_alpha = real.data.new(num_examples, *([1]*(real.dim()-1)))
                     interp_alpha.uniform_(0, 1)
                     interp_points = interp_alpha * real.data + (1 - interp_alpha) * fake.data
                     grad_points = interp_points.clone()
@@ -228,7 +240,7 @@ class GANTrainer(object):
             ##########  Update G net ##########
             netD, netG = netD4G, netG4G
 
-            for p in netD.parameters():
+            for p in netD4Gparams:
                 p.requires_grad = False
             netG.zero_grad()
 

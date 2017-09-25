@@ -4,6 +4,7 @@ from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
 from qelos.util import issequence
+from qelos.qutils import var
 from qelos.exceptions import SumTingWongException
 
 
@@ -128,7 +129,10 @@ class Decoder(nn.Module):
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         self.reset_state()
         batsize = x[0].size(0)
-        maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
+        if hasattr(self.block, "_max_time") and self.block._max_time is None:
+            maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
+        else:
+            maxtime = self.block._max_time
         new_init_states = self._compute_init_states(*x, **kw)
         if new_init_states is not None:
             if not issequence(new_init_states):
@@ -276,7 +280,7 @@ class AttentionDecoder(ContextDecoder):
 
 class Argmaxer(nn.Module):
     def forward(self, x):       # (batsize, vocsize)
-        maxes, argmaxes = torch.max(x, 1)
+        maxes, argmaxes = torch.max(x[0], 1)
         return argmaxes
 
 
@@ -298,8 +302,11 @@ class DecoderCell(RecStatefulContainer):
             self.core = RecStack(*layers)
         else:
             self.core = None
-        self.teacher_force = 1
-        self._teacher_force_block = None
+        self._teacher_force = 1
+        self._teacher_unforced = False
+        self._y_tm1_to_x_t = None
+        self._max_time = None
+        self._start_symbols = None
         self._init_state_computer = None
         self._inputs_t_getter = None
 
@@ -325,8 +332,14 @@ class DecoderCell(RecStatefulContainer):
             raise NotImplementedError("only teacher forcing supported")
         if frac < 0 or frac > 1:
             raise Exception("bad argument, must be [0, 1]")
-        self.teacher_force = frac
-        self._teacher_force_block = block
+        self._teacher_force = frac
+        self._y_tm1_to_x_t = block
+
+    def teacher_unforce(self, maxtime=None, block=Argmaxer(), startsymbols=None):
+        self.teacher_force(0, block=block)
+        self._teacher_unforced = True
+        self._max_time = maxtime
+        self._start_symbols = startsymbols
 
     def forward(self, *x, **kw):                        # OVERRIDE THIS
         """
@@ -405,10 +418,25 @@ class ContextDecoderCell(DecoderCell):
         return ret
 
     def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
-        if self.teacher_force == 0:
-            y_t = self._teacher_force_block(y_t)
-            return (y_t, x[1]), {}
-        elif self.teacher_force == 1:
+        if self._teacher_force == 0:
+            if y_t is None:
+                assert(t == 0)
+                if self._start_symbols is not None:
+                    ctx = x[0]
+                    y_t = torch.LongTensor(ctx.size(0))
+                    y_t.fill_(self._start_symbols)
+                    y_t = var(y_t).cuda(ctx).v
+                else:
+                    y_t = x[0]
+                    ctx = x[1]
+            else:
+                y_t = self._y_tm1_to_x_t(y_t)
+                if self._start_symbols is not None:
+                    ctx = x[0]
+                else:
+                    ctx = x[1]
+            return (y_t, ctx), {}
+        elif self._teacher_force == 1:
             return (x[0][:, t], x[1]), {}
         else:
             raise NotImplemented("partial teacher forcing not supported")

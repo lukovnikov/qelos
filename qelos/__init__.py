@@ -9,7 +9,8 @@ from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     CosineDistance, DotDistance, Forward, ForwardDistance, \
     Distance, Lambda, Stack, TrilinearDistance, LNormDistance, \
-    SeqBatchNorm1d, CReLU, Identity, argmap, argsave, LayerNormalization
+    SeqBatchNorm1d, CReLU, Identity, argmap, argsave, LayerNormalization, \
+    IdxToOnehot
 from qelos.containers import ModuleList
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, \
     WordLinout, PretrainedWordLinout, ComputedWordLinout

@@ -577,3 +577,18 @@ class LayerNormalization(nn.Module):
         return ln_out
 
 
+class IdxToOnehot(nn.Module):
+    def __init__(self, vocsize):
+        super(IdxToOnehot, self).__init__()
+        self.eyem = q.val(torch.eye(vocsize).float()).v
+
+    def forward(self, x):
+        xshape = x.size()
+        if x.dim() > 1:
+            x = x.view(-1)
+        y = torch.index_select(self.eyem, 0, x)
+        if len(xshape) > 1:
+            y = y.view(xshape + (y.size(1),))
+        return y
+
+

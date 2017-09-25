@@ -570,3 +570,41 @@ class TestGrad(TestCase):
 
 
         print("qsdf")
+
+
+class TestIdxToOnehot(TestCase):
+    def test_it(self):
+        data = q.var(np.random.randint(0, 10, (15,))).v
+        m = q.IdxToOnehot(10)
+        y = m(data)
+        y = y.data.numpy()
+        yexp = np.zeros((15, 10))
+        data = data.data.numpy()
+        for x in range(len(data)):
+            yexp[x, data[x]] = 1
+        self.assertTrue(np.allclose(y, yexp))
+
+    def test_it_2D(self):
+        data = q.var(np.random.randint(0, 10, (15, 7))).v
+        m = q.IdxToOnehot(10)
+        y = m(data)
+        y = y.data.numpy()
+        yexp = np.zeros((15, 7, 10))
+        data = data.data.numpy()
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                yexp[i, j, data[i, j]] = 1
+        self.assertTrue(np.allclose(y, yexp))
+
+    def test_it_3D(self):
+        data = q.var(np.random.randint(0, 10, (15, 7, 11))).v
+        m = q.IdxToOnehot(10)
+        y = m(data)
+        y = y.data.numpy()
+        yexp = np.zeros((15, 7, 11, 10))
+        data = data.data.numpy()
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                for k in range(data.shape[2]):
+                    yexp[i, j, k, data[i, j, k]] = 1
+        self.assertTrue(np.allclose(y, yexp))

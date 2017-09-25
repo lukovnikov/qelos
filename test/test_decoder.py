@@ -59,14 +59,15 @@ class TestDecoder(TestCase):
             q.Forward(encdim, vocsize),
             q.Softmax()
         )
-        decoder_cell.teacher_force(0.)
+        decoder_cell.teacher_unforce()
         decoder = decoder_cell.to_decoder()
         # end model def
-        data = np.random.randint(0, vocsize, (batsize, seqlen))
+        data = np.random.randint(0, vocsize, (batsize,))
         data = Variable(torch.LongTensor(data))
         ctx = Variable(torch.FloatTensor(np.random.random((batsize, ctxdim))))
 
-        decoded = decoder(data, ctx).data.numpy()
+        decoded = decoder(data, ctx, maxtime=seqlen)
+        decoded = decoded.data.numpy()
         self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))  # shape check
         self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
 
