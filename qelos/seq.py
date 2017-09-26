@@ -644,7 +644,7 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
         if self._state_stack is None:
             self._state_stack = [[] for _ in range(mask.size(0))]
         for i in range(mask.size(0)):
-            if mask[i].data.numpy()[0] == 0:        # save
+            if mask[i].data[0] == 0:        # save
                 statestosave = [state[i] for state in states]
                 self._state_stack[i].append(statestosave)
 
@@ -652,7 +652,7 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
         """ pops from saved states based on mask
             and merges with provided states based on mask """
         gatheredstates = []
-        if torch.sum(mask).data[0] == 0:
+        if torch.sum(mask).data[0] == mask.size(0):
             return states
         for i in range(mask.size(0)):
             if mask[i].data[0] == 0:        # pop saved

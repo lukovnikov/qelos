@@ -123,7 +123,7 @@ def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
     else:
         raise q.SumTingWongException()
 
-    attcell = q.AttentionDecoderCell(attention=attention,
+    attcell = q.HierarchicalAttentionDecoderCell(attention=attention,
                                      embedder=emb,
                                      core=q.RecStack(
                                          q.GRUCell(coreindim, dim),
@@ -142,7 +142,8 @@ def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
                                      decinp_to_att=True,
                                      state_split=decsplit,
                                      return_att=True,
-                                     return_out=True)
+                                     return_out=True,
+                                     structure_tokens=(emb.D["<BRANCH>"], emb.D["<JOIN>"]))
     return attcell.to_decoder()
 
 
