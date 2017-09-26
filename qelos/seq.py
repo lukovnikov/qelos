@@ -451,7 +451,6 @@ class AttentionDecoderCell(DecoderCell):
         # states
         self._state = [None]
 
-
     # region implement DecoderCell signature
     def forward(self, x_t, ctx, ctxmask=None, t=None, outmask_t=None, **kw):
         """
@@ -546,4 +545,105 @@ class AttentionDecoderCell(DecoderCell):
         self._state[0] = ownstate
         self.core.set_init_states(*states)
     # endregion
+
+
+class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
+    """
+    Recurrence of decoder with attention    # TODO
+    """
+    def __init__(self, attention=None,
+                 embedder=None,
+                 core=None,
+                 smo=None,
+                 init_state_gen=None,
+                 attention_transform=None,
+                 att_after_update=False,
+                 ctx_to_decinp=True,
+                 ctx_to_smo=True,
+                 state_to_smo=True,
+                 decinp_to_att=False,
+                 decinp_to_smo=False,
+                 return_out=True,
+                 return_att=False,
+                 state_split=False,
+                 structure_tokens=(0, 1),
+                 **kw):
+        """
+        Initializes attention-based decoder cell
+        :param attention:           attention module
+        :param embedder:            embedder module
+        :param core:                core recurrent module   (recstateful)
+        :param smo:                 module that takes core's output vectors and produces probabilities over output vocabulary
+        :param init_state_gen:      module that generates initial states for the decoder and its core (see also .set_init_states())
+        :param attention_transform: module that transforms attention vector just before generation of attention weights
+        :param att_after_update:    perform recurrent step before attention
+        :param ctx_to_decinp:       feed attention context to core
+        :param ctx_to_smo:          feed attention context to smo
+        :param state_to_smo:        feed output of core to smo
+        :param decinp_to_att:       feed embedding to attention generation
+        :param decinp_to_smo:       feed embedding to smo
+        :param return_out:          return output probabilities
+        :param return_att:          return attention weights over input sequence
+        :param state_split:         split core's state, first half goes to attention (which might also be split), second half goes to smo
+        :param structure_tokens:    TODO
+        :param kw:
+        """
+        super(HierarchicalAttentionDecoderCell, self).__init__(attention=attention, embedder=embedder,
+            core=core, smo=smo, init_state_gen=init_state_gen, attention_transform=attention_transform,
+            att_after_update=att_after_update, ctx_to_decinp=ctx_to_decinp, ctx_to_smo=ctx_to_smo,
+            state_to_smo=state_to_smo, decinp_to_att=decinp_to_att, decinp_to_smo=decinp_to_smo,
+            return_att=return_att, return_out=return_out, state_split=state_split, **kw)
+        # hierarchical
+        self._branch_token = structure_tokens[0]        # actually ID
+        self._join_token = structure_tokens[1]
+        self._state_stack = None
+
+    def forward(self, x_t, ctx, ctxmask=None, t=None, outmask_t=None, **kw):
+        # check where in x_t are branch tokens and save the right states from the core
+        batsize = x_t.size(0)
+        branch_mask = x_t == self._branch_token
+        join_mask = x_t == self._join_token
+        corestates = self.core.get_states(batsize)
+        self._save_states(corestates, branch_mask)
+        restore_states = self._pop_states(corestates, join_mask)
+        self.core.set_states(*restore_states)
+        ret = super(HierarchicalAttentionDecoderCell, self).forward(x_t, ctx, ctxmask=ctxmask, t=t, outmask_t=outmask_t, **kw)
+        return ret
+
+    def reset_state(self):
+        super(HierarchicalAttentionDecoderCell, self).reset_state()
+        self._state_stack = None      # list per example in batch
+
+    def _save_states(self, states, mask):
+        """ saves states in state stack based on mask
+            states are saved in lists per example, each example list contains lists of states"""
+        if self._state_stack is None:
+            self._state_stack = [[] for _ in range(mask.size(0))]
+        for i in range(mask.size(0)):
+            if mask[i].data.numpy()[0] == 1:        # save
+                statestosave = [state[i] for state in states]
+                self._state_stack[i].append(statestosave)
+
+    def _pop_states(self, states, mask):
+        """ pops from saved states based on mask
+            and merges with provided states based on mask """
+        gatheredstates = []
+        if torch.sum(mask).data[0] == 0:
+            return states
+        for i in range(mask.size(0)):
+            if mask[i].data[0] == 1:        # pop saved
+                poppedstates = self._state_stack[i].pop()
+                gatheredstates.append(poppedstates)
+            else:
+                statestopreserve = [state[i] for state in states]
+                gatheredstates.append(statestopreserve)
+        # merge gathered states
+        outstates = []
+        for statepos in zip(*gatheredstates):
+            toout = torch.stack(statepos, 0)
+            outstates.append(toout)
+        return outstates
+
+
+
 

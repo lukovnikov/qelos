@@ -986,7 +986,7 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
         return initstates
 
     def set_states(self, *states):
-        assert(len(states) == len(self.numstates))
+        assert(len(states) == self.numstates)
         for layer in self.layers:
             if isinstance(layer, RecStateful):
                 statesforlayer = states[:layer.numstates]

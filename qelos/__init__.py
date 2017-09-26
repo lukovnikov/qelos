@@ -5,7 +5,8 @@ from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     TimesharedDropout
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
-    AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder
+    AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder, \
+    HierarchicalAttentionDecoderCell
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     CosineDistance, DotDistance, Forward, ForwardDistance, \
     Distance, Lambda, Stack, TrilinearDistance, LNormDistance, \
