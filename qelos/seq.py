@@ -601,12 +601,36 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
     def forward(self, x_t, ctx, ctxmask=None, t=None, outmask_t=None, **kw):
         # check where in x_t are branch tokens and save the right states from the core
         batsize = x_t.size(0)
-        branch_mask = x_t == self._branch_token
-        join_mask = x_t == self._join_token
+
+        bt = self._branch_token
+        if not issequence(bt):
+            bt = [bt]
+        branch_mask = None
+        for bte in bt:
+            branch_mask_i = x_t != bte
+            if branch_mask is None:
+                branch_mask = branch_mask_i
+            else:
+                branch_mask = branch_mask * branch_mask_i
+
+        jt = self._join_token
+        if not issequence(jt):
+            jt = [jt]
+        join_mask = None
+        for jte in jt:
+            join_mask_i = x_t != jte
+            if join_mask is None:
+                join_mask = join_mask_i
+            else:
+                join_mask = join_mask * join_mask_i
+
         corestates = self.core.get_states(batsize)
+
         self._save_states(corestates, branch_mask)
         restore_states = self._pop_states(corestates, join_mask)
+
         self.core.set_states(*restore_states)
+
         ret = super(HierarchicalAttentionDecoderCell, self).forward(x_t, ctx, ctxmask=ctxmask, t=t, outmask_t=outmask_t, **kw)
         return ret
 
@@ -620,7 +644,7 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
         if self._state_stack is None:
             self._state_stack = [[] for _ in range(mask.size(0))]
         for i in range(mask.size(0)):
-            if mask[i].data.numpy()[0] == 1:        # save
+            if mask[i].data.numpy()[0] == 0:        # save
                 statestosave = [state[i] for state in states]
                 self._state_stack[i].append(statestosave)
 
@@ -631,7 +655,7 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
         if torch.sum(mask).data[0] == 0:
             return states
         for i in range(mask.size(0)):
-            if mask[i].data[0] == 1:        # pop saved
+            if mask[i].data[0] == 0:        # pop saved
                 poppedstates = self._state_stack[i].pop()
                 gatheredstates.append(poppedstates)
             else:
