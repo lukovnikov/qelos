@@ -48,13 +48,23 @@ class SeqAccuracy(nn.Module):       # TODO test
     def __init__(self, size_average=True, ignore_index=0):
         super(SeqAccuracy, self).__init__()
         self.size_average = size_average
-        self.ignore_index = ignore_index
+        if ignore_index is not None:
+            if not q.issequence(ignore_index):
+                ignore_index = [ignore_index]
+            self.ignore_index = ignore_index
+        else:
+            self.ignore_index = None
         self.EPS = 1e-6
 
     def forward(self, probs, gold):     # (batsize, seqlen, vocsize), (batsize, seqlen)-idx
         mask = None
         if self.ignore_index is not None:
-            mask = (gold != self.ignore_index)
+            for ignore in self.ignore_index:
+                mask_i = (gold != ignore)   # zero for ignored ones
+                if mask is None:
+                    mask = mask_i
+                else:
+                    mask = mask * mask_i
         maxes, argmaxes = torch.max(probs, dim=2)
         diff = argmaxes != gold
         if mask is not None:
