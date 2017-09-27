@@ -326,6 +326,16 @@ class ErrorAnalyzer(q.LossWithAgg):
     # endregion
 
 
+def allgiven_adjust_vnt(queries, vnt):
+    vnt_filter = np.zeros((vnt.shape[0], vnt.shape[2]), dtype=vnt.dtype)
+    for i in range(queries.shape[0]):
+        for j in range(queries.shape[1]):
+            vnt_filter[i, queries[i, j]] = 1
+    newvnt = vnt * vnt_filter[:, np.newaxis, :]
+    # q.embed()
+    return newvnt
+
+
 def run(lr=0.1,
         gradnorm=2.,
         epochs=100,
@@ -344,6 +354,7 @@ def run(lr=0.1,
         inspectdata=False,
         log=True,
         erroranalysis=True,
+        allgiven=True,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         ):
     localvars = locals()
     savesettings = "glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
@@ -383,6 +394,10 @@ def run(lr=0.1,
     # train/valid split
     (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
         = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
+
+    if allgiven:
+        train_vnt = allgiven_adjust_vnt(train_queries, train_vnt)
+        test_vnt = allgiven_adjust_vnt(test_queries, test_vnt)
 
     for k, v in query_sm.D.items():
         assert(tgt_emb.D[k] == v)
