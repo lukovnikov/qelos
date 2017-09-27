@@ -2,6 +2,8 @@ import qelos as q
 import torch
 from torch import nn
 import numpy as np
+import h5py
+from IPython import embed
 
 
 class DCB(object):
@@ -122,21 +124,101 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym, seqlen, noisedi
     return (netD, netD), (netG, netG), netR
 
 
+# region data loading
+def makemat(data, window, subsample):
+    startpositions = np.arange(0, data.shape[0] - window)
+    np.random.shuffle(startpositions)
+    numex = startpositions.shape[0] // subsample
+    startpositions = startpositions[:numex]
+    mat = np.zeros((startpositions.shape[0], window), dtype="int64")
+    for i in range(startpositions.shape[0]):
+        startpos = startpositions[i]
+        mat[i, :] = data[startpos:startpos + window]
+    return mat
+
+
+def loaddata_hutter(p="../../datasets/hutter/enwik8.h5", window=200, subsample=1000):
+    return loaddata(p=p, window=window, subsample=subsample, utfdic=True)
+
+
+def loaddata_text8(p="../../datasets/text8/text8.h5", window=200, subsample=1000):
+    return loaddata(p=p, window=window, subsample=subsample, utfdic=False)
+
+
+def loaddata(p="../../datasets/hutter/enwik8.h5", window=200, subsample=1000, utfdic=True):
+    tt = q.ticktock("dataloader")
+    tt.tick("loading data")
+    with h5py.File(p, "r") as f:
+        if utfdic:
+            charlist = [x.decode("unicode-escape") for x in list(f["dict"][:, 0])]
+        else:
+            charlist = list(f["dict"][:, 0])
+        chardic = dict(zip(range(len(charlist)), charlist))
+        train, valid, test = f["train"][:], f["valid"][:], f["test"][:]
+    tt.tock("data loaded")
+    tt.tick("making mats")
+
+    def pp(charseq):
+        if charseq.ndim == 1:
+            return "".join([chardic[x] for x in charseq])
+        elif charseq.ndim == 2:
+            ret = []
+            for i in range(len(charseq)):
+                ret.append(pp(charseq[i]))
+            return ret
+
+    ret = (makemat(train, window, subsample),
+           makemat(valid, window, subsample),
+           makemat(test, window, subsample),
+           chardic, pp)
+    tt.tock("made mats")
+    return ret
+# endregion
+
+
+def makeiter(dl):
+    def inner():
+        for i in dl:
+            yield i
+    dli = inner()
+    while True:
+        try:
+            ret = next(dli)
+            yield ret[0]
+        except StopIteration as e:
+            dli = inner()
+
+
 def run(lr=0.00005,
-        vocsize=100,
         embdim=50,
         noisedim=50,
         gendim=50,
         discdim=50,
-        batsize=16,
+        batsize=64,
         niter=100,
-        seqlen=10,
+        seqlen=100,
         cuda=False,
-        mode="normal"       # "normal"
+        mode="normal",       # "normal"
+        window=100,
+        subsample=1000,
+        inspectdata=False,
         ):
 
     # get data and dict
-    datagen = get_data_gen(vocsize, batsize, seqlen)()
+    # datagen = get_data_gen(vocsize, batsize, seqlen)()
+    trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=window, subsample=subsample)
+    traingen = makeiter(q.dataload(trainmat, batch_size=batsize, shuffle=True))
+    validgen = makeiter(q.dataload(validmat, batch_size=batsize, shuffle=False))
+    testgen = makeiter(q.dataload(testmat, batch_size=batsize, shuffle=False))
+
+    vocsize = np.max(trainmat) + 1
+
+    print("Number of training sequences: {}, vocabulary of {}"
+          .format(trainmat.shape[0], vocsize))
+
+    if inspectdata:
+        embed()
+
 
     # build networks
     if mode == "normal":
@@ -156,7 +238,7 @@ def run(lr=0.00005,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
-                     data_gen=datagen, cuda=cuda, netR=netR)
+                     data_gen=traingen, cuda=cuda, netR=netR)
 
 
 if __name__ == "__main__":
