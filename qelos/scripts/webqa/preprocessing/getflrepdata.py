@@ -67,7 +67,6 @@ class Querier(object):
         return ret
 
 
-
 def run(basep="../../../../datasets/webqsp/webqsp.",
         files=("core.test.butd.vnt", "core.train.butd.vnt",
                "test.butd.vnt", "train.butd.vnt"),

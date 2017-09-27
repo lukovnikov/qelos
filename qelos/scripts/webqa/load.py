@@ -12,7 +12,7 @@ defaultqp = "../../../datasets/webqsp/webqsp"
 vntcachep = "wholevnt.mat.cache"
 
 
-def load_all(p=defaultp, qp=defaultqp, dim=50, glovedim=50,
+def load_full(p=defaultp, qp=defaultqp, dim=50, glovedim=50,
              merge_mode="cat", rel_which=("urlwords",)):
     tt = q.ticktock("load")
     tt.tick("loading everything")
@@ -45,5 +45,13 @@ def load_all(p=defaultp, qp=defaultqp, dim=50, glovedim=50,
     return (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin)
 
 
+def load_both():
+    pass
+    # TODO: merge core-only and full examples and their vnts
+    # TODO: are all vnt for core chains in flmats?
+        # --> default arguments of getflrepdata.py make it seem so --> TODO test !!!
+    #
+
+
 if __name__ == "__main__":
-    q.argprun(load_all)
+    q.argprun(load_full)

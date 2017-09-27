@@ -1,6 +1,6 @@
 from __future__ import print_function
 import qelos as q
-from qelos.scripts.webqa.load import load_all
+from qelos.scripts.webqa.load import *
 import torch
 from torch import nn
 import sys
@@ -361,7 +361,7 @@ def run(lr=0.1,
     else:           flvecdim += decdim
     flvecdim += encdim
     (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin) \
-        = load_all(dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
+        = load_full(dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
                    rel_which=rel_which)
 
     # test tgt_lin
