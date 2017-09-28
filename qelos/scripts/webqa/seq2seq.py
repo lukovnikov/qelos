@@ -393,14 +393,15 @@ def run(lr=0.1,
     print(len(test_qids))
     # q.embed()
 
-    # train/valid split
-    (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
-        = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
-
     if allgiven:
         tt.msg("using allgiven")
         train_vnt = allgiven_adjust_vnt(train_queries, train_vnt)
         test_vnt = allgiven_adjust_vnt(test_queries, test_vnt)
+
+    # train/valid split
+    (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
+        = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
+
 
     for k, v in query_sm.D.items():
         assert(tgt_emb.D[k] == v)
