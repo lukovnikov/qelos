@@ -383,13 +383,13 @@ def run(lr=0.1,
     testlinvnt[testlinvntx, testlinvnty] = 1
     testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
 
-
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")
     # train/test split:
     train_questions, test_questions = question_sm.matrix[:tx_sep], question_sm.matrix[tx_sep:]
     train_queries, test_queries = query_sm.matrix[:tx_sep], query_sm.matrix[tx_sep:]
     train_vnt, test_vnt = vnt_mat[:tx_sep], vnt_mat[tx_sep:]
+    train_qids, test_qids = qids[:tx_sep]
 
     # train/valid split
     (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
@@ -480,6 +480,26 @@ def run(lr=0.1,
     tt.msg("NLL:\t{}\n Seq Accuracy:\t{}\n Elem Accuracy:\t{}"
           .format(nll, seqacc, elemacc))
 
+    tt.tick("getting EL- and data-corrected seq accuracy")
+    welllinked = pickle.load(open("../../../datasets/webqsp/welllinked_qids.pkl"))
+    argmaxer = q.Lambda(lambda x: torch.max(x, 2)[1])
+    predictions = q.eval(m).cuda(cuda).on(test_dataloader)\
+        .set_batch_transformer(bt, argmaxer).run()
+    predictions = predictions.data.numpy()
+
+    totaltest = 1639.
+    diff = predictions != test_queries
+    mask = test_queries == 0
+    diff = diff * mask
+    diff = np.sum(diff, axis=1)
+    acc = 0
+    for diff_e, qid in zip(list(diff), test_qids):
+        if diff_e == 0 and qid in welllinked:
+            acc += 1
+    tt.tock("{} corrected seq accuracy computed".format(acc / totaltest))
+
+
+
     # log
     if log:
         import datetime
@@ -503,6 +523,8 @@ def run(lr=0.1,
                                 ("valid_elem_acc", validlossscores[2])])
 
         q.log("experiments_seq2seq.log", mode="a", name="seq2seq_run", body=body)
+
+
 
     # error analysis
     if erroranalysis:

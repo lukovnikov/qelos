@@ -256,6 +256,75 @@ class test(object):
         return metricnumbers
 
 
+class eval(object):
+    def __init__(self, model):
+        super(eval, self).__init__()
+        self.model = model
+        self.usecuda = False
+        self.cudaargs = ([], {})
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
+        self.dataloader = None
+        self.tt = ticktock("eval")
+
+    def cuda(self, usecuda, *args, **kwargs):
+        self.usecuda = usecuda
+        self.cudaargs = (args, kwargs)
+        return self
+
+    def initialize(self):
+        if self.usecuda:
+            self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
+
+    def on(self, dataloader):
+        self.dataloader = dataloader
+        return self
+
+    def set_batch_transformer(self, input_transform=None, output_transform=None):
+        if input_transform is not None:
+            self.transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.transform_batch_out = output_transform
+        return self
+
+    def reset(self):
+        return self
+
+    def run(self):
+        self.reset()
+        self.initialize()
+        ret = self.evalloop()
+        return ret
+
+    def evalloop(self):
+        self.tt.tick("testing")
+        tt = ticktock("-")
+        totaltestbats = len(self.dataloader)
+        self.model.eval()
+        outs = []
+        for i, batch in enumerate(self.dataloader):
+            batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
+            if self.transform_batch_inp is not None:
+                batch = self.transform_batch_inp(*batch)
+            modelouts = self.model(*batch)
+            if self.transform_batch_out is not None:
+                modelouts = self.transform_batch_out(modelouts)
+
+            tt.live("eval - [{}/{}]"
+                .format(
+                i + 1,
+                totaltestbats
+            )
+            )
+            outs.append(modelouts)
+        ttmsg = "eval done"
+        tt.stoplive()
+        tt.tock(ttmsg)
+        self.tt.tock("tested")
+        out = torch.cat(outs, 0)
+        return out
+
+
 class train(object):
     def __init__(self, model):
         super(train, self).__init__()

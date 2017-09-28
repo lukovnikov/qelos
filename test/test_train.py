@@ -48,3 +48,15 @@ class TestTensorDataset(TestCase):
                 batch = next(dl_iter)[0].numpy()
                 batches.append(batch)
         self.assertRaises(StopIteration, fn)
+
+
+class TestEval(TestCase):
+    def test_it(self):
+        data = q.var(np.random.random((10,5)).astype("float32")).v.data
+        m = torch.nn.Linear(5, 4)
+        dl = q.dataload(data, batch_size=3)
+        out = q.eval(m).on(dl).run()
+
+        self.assertEqual(out.size(), (10, 4))
+        refout = m(q.var(data).v)
+        self.assertTrue(np.allclose(out.data.numpy(), refout.data.numpy()))
