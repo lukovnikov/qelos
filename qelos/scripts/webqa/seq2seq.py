@@ -483,7 +483,7 @@ def run(lr=0.1,
     tt.msg("NLL:\t{}\n Seq Accuracy:\t{}\n Elem Accuracy:\t{}"
           .format(nll, seqacc, elemacc))
 
-    tt.tick("getting EL- and data-corrected seq accuracy")
+    tt.msg("getting EL- and data-corrected seq accuracy")
     welllinked = pickle.load(open("../../../datasets/webqsp/welllinked_qids.pkl"))
     ebt = lambda a, b, c: (a, c[:, :-1], b[:, 1:])
     argmaxer = q.Lambda(lambda x: torch.max(x[0], 2)[1])
@@ -492,15 +492,15 @@ def run(lr=0.1,
     predictions = predictions.cpu().data.numpy()
 
     totaltest = 1639.
-    diff = predictions != test_queries
-    mask = test_queries == 0
+    diff = predictions != test_queries[:, 1:]
+    mask = test_queries[:, 1:] == 0
     diff = diff * mask
     diff = np.sum(diff, axis=1)
     acc = 0
     for diff_e, qid in zip(list(diff), test_qids):
         if diff_e == 0 and qid in welllinked:
             acc += 1
-    tt.tock("{} corrected seq accuracy computed".format(acc / totaltest))
+    tt.msg("{} corrected seq accuracy computed".format(acc / totaltest))
 
 
 

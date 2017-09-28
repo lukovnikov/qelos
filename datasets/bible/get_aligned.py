@@ -50,20 +50,10 @@ while i < len(verses[0]) and j < len(verses[1]):
     lbook, lpart, (lverse, llen), ltext = lverses[i]
     rbook, rpart, (rverse, rlen), rtext = rverses[j]
     if lbook == rbook and lpart == rpart and lverse == rverse:
-        if previ < i:
-            l = ltext
-        else:
-            l += ltext
-        if prevj < j:
-            r = rtext
-        else:
-            r += rtext
-    if llen == 1 and rlen == 1:
-        aligned.append((l, r))
-        l, r = "", ""
+        l = ltext
+        r = rtext
         i += 1
         j += 1
-    elif llen > 1:
-        j += 1
-    previ = i
-    prevj = j
+        aligned.append((l, r))
+    elif lbook == rbook and lpart == rpart:
+        if lverse > rverse:
