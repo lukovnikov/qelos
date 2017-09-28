@@ -492,12 +492,12 @@ def run(lr=0.1,
     predictions = predictions.cpu().data.numpy()
 
     totaltest = 1639.
-    diff = predictions != test_queries[:, 1:]
-    mask = test_queries[:, 1:] == 0
-    diff = diff * mask
-    diff = np.sum(diff, axis=1)
+    same = predictions == test_queries[:, 1:]
+    mask = test_queries[:, 1:] != 0
+    same = same * mask
+    same = np.sum(same, axis=1)
     acc = 0
-    for diff_e, qid in zip(list(diff), test_qids):
+    for diff_e, qid in zip(list(same), test_qids):
         if diff_e == 0 and qid in welllinked:
             acc += 1
     tt.msg("{} corrected seq accuracy computed".format(acc / totaltest))

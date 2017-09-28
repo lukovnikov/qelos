@@ -1,6 +1,7 @@
 from __future__ import print_function
 import re, lxml
 from lxml import etree
+from IPython import embed
 
 
 # LOAD
@@ -46,6 +47,8 @@ previ = 0
 prevj = 0
 prevlverse = None
 prevrverse = None
+lacc = ""
+racc = ""
 while i < len(verses[0]) and j < len(verses[1]):
     lbook, lpart, (lverse, llen), ltext = lverses[i]
     rbook, rpart, (rverse, rlen), rtext = rverses[j]
@@ -54,6 +57,35 @@ while i < len(verses[0]) and j < len(verses[1]):
         r = rtext
         i += 1
         j += 1
-        aligned.append((l, r))
-    elif lbook == rbook and lpart == rpart:
-        if lverse > rverse:
+        aligned.append([l, r])
+        lacc = ""
+        racc = ""
+    elif lbook == rbook:
+        if lpart > rpart:
+            aligned[-1][0] += " " + rtext
+            j += 1
+        elif lpart < rpart:
+            aligned[-1][1] += " " + ltext
+            i += 1
+        else:
+            if lverse > rverse:
+                aligned[-1][0] += " " + rtext
+                j += 1
+            elif lverse < rverse:
+                aligned[-1][0] += " " + ltext
+                i += 1
+    else:
+        if lverse < rverse:
+            aligned[-1][0] += " " + rtext
+            j += 1
+        elif lverse > rverse:
+            aligned[-1][0] += " " + ltext
+            i += 1
+
+
+outp = "-".join(languages) + ".txt"
+with open(outp, "w") as outf:
+    for l, r in aligned:
+        string = "{}\t{}\n".format(l.encode("utf-8"), r.encode("utf-8"))
+        outf.write(string)
+
