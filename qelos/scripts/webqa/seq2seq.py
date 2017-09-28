@@ -391,7 +391,7 @@ def run(lr=0.1,
     train_vnt, test_vnt = vnt_mat[:tx_sep], vnt_mat[tx_sep:]
     train_qids, test_qids = qids[:tx_sep], qids[tx_sep:]
     print(len(test_qids))
-    q.embed()
+    # q.embed()
 
     # train/valid split
     (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
