@@ -486,7 +486,7 @@ def run(lr=0.1,
     tt.tick("getting EL- and data-corrected seq accuracy")
     welllinked = pickle.load(open("../../../datasets/webqsp/welllinked_qids.pkl"))
     ebt = lambda a, b, c: (a, c[:, :-1], b[:, 1:])
-    argmaxer = q.Lambda(lambda x: torch.max(x, 2)[1])
+    argmaxer = q.Lambda(lambda x: torch.max(x[0], 2)[1])
     predictions = q.eval(m).cuda(cuda).on(test_dataloader)\
         .set_batch_transformer(ebt, argmaxer).run()
     predictions = predictions.data.numpy()
