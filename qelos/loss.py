@@ -5,6 +5,11 @@ import numpy as np
 
 class SeqNLLLoss(nn.NLLLoss):
     def __init__(self, weight=None, size_average=True, time_average=True, ignore_index=0):
+        if ignore_index is not None:
+            if not q.issequence(ignore_index):
+                ignore_index = [ignore_index]
+        else:
+            ignore_index = None
         super(SeqNLLLoss, self).__init__(weight=weight, size_average=size_average, ignore_index=ignore_index)
         self.time_average = time_average
         self.EPS = 1e-6
@@ -20,8 +25,14 @@ class SeqNLLLoss(nn.NLLLoss):
         y = gold.contiguous().view(batsize * seqlen)
         mask = None
         if self.ignore_index is not None:
-            mask = (y != self.ignore_index).float()      # ByteTensor
-        # mask = mask.type(torch.FloatTensor)
+            for ignore in self.ignore_index:
+                mask_i = (y != ignore)   # zero for ignored ones
+                if mask is None:
+                    mask = mask_i
+                else:
+                    mask = mask * mask_i
+        mask = mask.float()
+
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
         if self.weight is not None:
             weights = self.weight[y]
@@ -81,15 +92,20 @@ class SeqElemAccuracy(SeqAccuracy):     # TODO: test
     def forward(self, probs, gold):
         mask = None
         if self.ignore_index is not None:
-            mask = (gold == self.ignore_index)
+            for ignore in self.ignore_index:
+                mask_i = (gold != ignore)  # zero for ignored ones
+                if mask is None:
+                    mask = mask_i
+                else:
+                    mask = mask * mask_i
         maxes, argmaxes = torch.max(probs, dim=2)
-        diff = argmaxes != gold
+        diff = argmaxes == gold
         if mask is not None:
-            diff = diff + mask
-            total = torch.sum((mask == 0).long()).data[0]
+            diff = diff * mask
+            total = torch.sum(mask.long()).data[0]
         else:
             total = gold.size(0) * gold.size(1)
-        acc = torch.sum((diff == 0).float())
+        acc = torch.sum(diff.float())
         if self.size_average:
             acc = acc / total
         return acc, total
