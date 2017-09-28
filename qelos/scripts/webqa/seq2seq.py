@@ -396,6 +396,7 @@ def run(lr=0.1,
         = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
 
     if allgiven:
+        tt.msg("using allgiven")
         train_vnt = allgiven_adjust_vnt(train_queries, train_vnt)
         test_vnt = allgiven_adjust_vnt(test_queries, test_vnt)
 
