@@ -55,6 +55,7 @@ test_loader = torch.utils.data.DataLoader(
 tt.tock("datasets")
 tt.tick("preparing")
 
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -104,6 +105,7 @@ def train(epoch):
     tt.stoplive()
     tt.msg(msg)
 
+
 def test():
     model.eval()
     test_loss = 0
@@ -121,6 +123,7 @@ def test():
     tt.msg('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
+
 
 tt.tock("prepared")
 tt.tick("training")
