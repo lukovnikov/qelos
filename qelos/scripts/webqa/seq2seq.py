@@ -489,7 +489,7 @@ def run(lr=0.1,
     argmaxer = q.Lambda(lambda x: torch.max(x[0], 2)[1])
     predictions = q.eval(m).cuda(cuda).on(test_dataloader)\
         .set_batch_transformer(ebt, argmaxer).run()
-    predictions = predictions.data.numpy()
+    predictions = predictions.cpu().data.numpy()
 
     totaltest = 1639.
     diff = predictions != test_queries
