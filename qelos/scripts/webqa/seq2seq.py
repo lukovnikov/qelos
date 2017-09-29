@@ -177,7 +177,7 @@ class ErrorAnalyzer(q.LossWithAgg):
         self.global_relations = 0
         self.global_others = 0
 
-        self.traintokens = {queryD[x] for x in set(np.unique(trainquerymat)) if x != 0}
+        self.traintokens = {self.queryD[x] for x in set(np.unique(trainquerymat))}
 
         self.acc = []
 

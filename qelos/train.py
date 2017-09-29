@@ -419,6 +419,9 @@ class train(object):
         return self
 
     def trainloop(self):
+        if self.epochs == 0:
+            self.tt.msg("skipping training")
+            return
         stop = False
         self.tt.tick("training")
         tt = ticktock("-")
