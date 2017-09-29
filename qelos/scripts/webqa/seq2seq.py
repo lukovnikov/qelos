@@ -90,17 +90,18 @@ def make_encoder(src_emb, embdim=100, dim=100, dropout=0.0, **kw):
         src_emb,        # embs, masks
         q.argsave.spec(emb=0, mask=1),
         q.argmap.spec(0, mask=["mask"]),
-        q.BidirGRULayer(embdim, dim),
+        q.BidirGRULayer(embdim, dim/2),
         q.TimesharedDropout(dropout),
         q.argsave.spec(bypass=0),
         q.argmap.spec(0, mask=["mask"]),
-        q.BidirGRULayer(dim * 2, dim),
-        q.TimesharedDropout(dropout),
-        q.argmap.spec(0, ["bypass"], ["emb"]),
-        q.Lambda(lambda x, y, z: torch.cat([x, y, z], 1)),
-        q.argmap.spec(0, mask=["mask"]),
-        q.GRULayer(dim * 4 + embdim, dim).return_final(True),
-        q.argmap.spec(1, ["mask"], 0),
+        q.BidirGRULayer(dim, dim/2).return_final(True),
+        # q.TimesharedDropout(dropout),
+        q.argsave.spec(final=0),
+        q.argmap.spec(1, ["bypass"]),
+        q.Lambda(lambda x, y: x + y),
+        # q.argmap.spec(0, mask=["mask"]),
+        # q.GRULayer(dim * 2, dim).return_final(True),
+        q.argmap.spec(0, ["mask"], ["final"]),
     )   # returns (all_states, mask, final_state)
     return encoder
 
