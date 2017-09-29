@@ -247,8 +247,8 @@ def run(lr=0.00005,
                               penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
 
-    def samplepp(noise=None):
-        y = sampler(noise)
+    def samplepp(noise=None, cuda=False):
+        y = sampler(noise=noise, cuda=cuda)
         y = y.cpu().data.numpy()
         return pp(y)
 
