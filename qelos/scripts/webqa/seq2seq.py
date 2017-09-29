@@ -382,9 +382,10 @@ def run(lr=0.1,
         erroranalysis=True,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         entityfilter=False,
+        onlycorechain=False,
         ):
     localvars = locals()
-    savesettings = "celltype allgiven entityfilter glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
+    savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
     if cuda:
         torch.cuda.set_device(gpu)
@@ -399,7 +400,7 @@ def run(lr=0.1,
     else:           flvecdim += decdim
     flvecdim += encdim
     (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin) \
-        = load_full(dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
+        = load_full(qp="../../../datasets/webqsp/webqsp.time", dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
                    rel_which=rel_which)
 
     # test tgt_lin
@@ -419,6 +420,12 @@ def run(lr=0.1,
     train_qids, test_qids = qids[:tx_sep], qids[tx_sep:]
     print(len(test_qids))
     # q.embed()
+
+    if entityfilter:
+        pass        # TODO
+
+    if onlycorechain:
+        pass        # TODO
 
     if allgiven:
         tt.msg("using allgiven")
