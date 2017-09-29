@@ -210,6 +210,7 @@ def run(lr=0.00005,
         window=100,
         subsample=1000,
         inspectdata=False,
+        pw=10,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -243,7 +244,7 @@ def run(lr=0.00005,
     optimD = torch.optim.RMSprop(q.params_of(netD4D), lr=lr)
     optimG = torch.optim.RMSprop(q.params_of(netG4G), lr=lr)
     gantrainer = q.GANTrainer(mode="WGAN-GP", one_sided=True, noise_dim=noisedim,
-                              penalty_weight=5,
+                              penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
 
     def samplepp(noise=None):
