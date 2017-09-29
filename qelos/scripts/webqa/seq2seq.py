@@ -163,17 +163,23 @@ class Model(nn.Module):
 class ErrorAnalyzer(q.LossWithAgg):
     callwithinputs = True
 
-    def __init__(self, questionD, queryD):
+    def __init__(self, questionD, queryD, trainquerymat):
         super(ErrorAnalyzer, self).__init__()
         self.questionD, self.queryD = {v: k for k, v in questionD.items()}, \
                                       {v: k for k, v in queryD.items()}
         self.global_entmistakes = 0
+        self.global_entmistakes_notintrain = 0
         self.global_relmistakes = 0
+        self.global_relmistakes_notintrain = 0
         self.global_othermistakes = 0
         self.global_count = 0
         self.global_entities = 0
         self.global_relations = 0
         self.global_others = 0
+
+        self.trainquerymat = trainquerymat
+        trainunique = np.unique(trainquerymat.cpu().data.numpy())
+        self.traintokens = set([queryD[x] for x in trainunique])
 
         self.acc = []
 
@@ -215,11 +221,14 @@ class ErrorAnalyzer(q.LossWithAgg):
         res["question_str"] = question_str
         res["toppred_str"] = toppred_str
         res["gold_str"] = gold_str
+        res["gold_seq"] = gold_seq
         res["mask"] = mask
 
         # compute entity/relations/other mistakes
         relmistakes = []
+        relmistakes_notintrain = []
         entmistakes = []
+        entmistakes_notintrain = []
         othermistakes = []
         totalentities = 0
         totalrelations = 0
@@ -230,10 +239,14 @@ class ErrorAnalyzer(q.LossWithAgg):
             if gold_seq_elem[0] == ":":  # relation
                 if pred_seq_elem != gold_seq_elem:
                     relmistakes.append((gold_seq_elem, pred_seq_elem))
+                    if gold_seq_elem not in self.traintokens:
+                        relmistakes_notintrain.append(gold_seq_elem)
                 totalrelations += 1
             elif gold_seq_elem[0:2] == "m.":    # entity
                 if pred_seq_elem != gold_seq_elem:
                     entmistakes.append((gold_seq_elem, pred_seq_elem))
+                    if gold_seq_elem not in self.traintokens:
+                        entmistakes_notintrain.append(gold_seq_elem)
                 totalentities += 1
             else:
                 if pred_seq_elem != gold_seq_elem:
@@ -241,7 +254,9 @@ class ErrorAnalyzer(q.LossWithAgg):
                 totalothers += 1
 
         self.global_entmistakes += len(entmistakes)
+        self.global_entmistakes_notintrain += len(entmistakes_notintrain)
         self.global_relmistakes += len(relmistakes)
+        self.global_relmistakes_notintrain += len(relmistakes_notintrain)
         self.global_othermistakes += len(othermistakes)
         self.global_entities += totalentities
         self.global_relations += totalrelations
@@ -270,8 +285,8 @@ class ErrorAnalyzer(q.LossWithAgg):
     def summary(self):
         ret = ""
         ret += "Total examples: {}\n".format(self.global_count)
-        ret += "Total entity mistakes: {}/{}\n".format(self.global_entmistakes, self.global_entities)
-        ret += "Total relation mistakes: {}/{}\n".format(self.global_relmistakes, self.global_relations)
+        ret += "Total entity mistakes: {}({})/{}\n".format(self.global_entmistakes, self.global_entmistakes_notintrain, self.global_entities)
+        ret += "Total relation mistakes: {}({})/{}\n".format(self.global_relmistakes, self.global_relmistakes_notintrain, self.global_relations)
         ret += "Total other mistakes: {}/{}\n".format(self.global_othermistakes, self.global_others)
         # print(ret)
         return ret
@@ -286,6 +301,7 @@ class ErrorAnalyzer(q.LossWithAgg):
                         -res["goldprob"], res["gold_str"])
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
+            msg += "Seen in train:   {}\n".format(str([1 if x in self.traintokens else 0 for x in res["gold_seq"] if x != 0]))
             # attention scores
             goldwords = ["<E0>"] + res["gold_str"].split()
             decwords = res["toppred_str"].split()
@@ -533,7 +549,7 @@ def run(lr=0.1,
     # error analysis
     if erroranalysis:
         tt.msg("error analysis")
-        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D)
+        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, traintokens)
         anal_losses = q.lossarray((erranal, lambda x: x))
         q.test(m).cuda(cuda)\
             .on(test_dataloader, anal_losses)\

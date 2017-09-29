@@ -6,7 +6,7 @@ from IPython import embed
 
 # LOAD
 
-languages = ["English", "Dutch"]
+languages = ["English", "Esperanto"]
 
 verses = [[] for language in languages]
 supre = re.compile("<sup[^<]+</sup>([^<]+)")
