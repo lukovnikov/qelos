@@ -412,7 +412,7 @@ def run(lr=0.1,
         erroranalysis=True,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         entityfilter=False,
-        onlycorechain=True,
+        onlycorechain=False,
         ):
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
