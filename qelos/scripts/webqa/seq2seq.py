@@ -177,9 +177,7 @@ class ErrorAnalyzer(q.LossWithAgg):
         self.global_relations = 0
         self.global_others = 0
 
-        self.trainquerymat = trainquerymat
-        trainunique = np.unique(trainquerymat.cpu().data.numpy())
-        self.traintokens = set([queryD[x] for x in trainunique])
+        self.traintokens = {queryD[x] for x in set(np.unique(trainquerymat))}
 
         self.acc = []
 
@@ -299,9 +297,9 @@ class ErrorAnalyzer(q.LossWithAgg):
                 .format(res["question_str"],
                         -res["toppredprob"], res["toppred_str"],
                         -res["goldprob"], res["gold_str"])
+            msg += "Seen in train:  {}\n".format(str([1 if x in self.traintokens else 0 for x in res["gold_seq"] if x != 0]))
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
-            msg += "Seen in train:   {}\n".format(str([1 if x in self.traintokens else 0 for x in res["gold_seq"] if x != 0]))
             # attention scores
             goldwords = ["<E0>"] + res["gold_str"].split()
             decwords = res["toppred_str"].split()
@@ -549,7 +547,7 @@ def run(lr=0.1,
     # error analysis
     if erroranalysis:
         tt.msg("error analysis")
-        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, traintokens)
+        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, train_queries)
         anal_losses = q.lossarray((erranal, lambda x: x))
         q.test(m).cuda(cuda)\
             .on(test_dataloader, anal_losses)\
