@@ -580,3 +580,16 @@ def _rec_write(d, indentlevel=0):
     return ret
 
 
+class kw2dict(object):
+    def __init__(self, **kw):
+        super(kw2dict, self).__init__()
+        self._kw = kw
+
+    def __call__(self, **kw):
+        self._kw.update(kw)
+
+    @property
+    def v(self):
+        return self._kw
+
+

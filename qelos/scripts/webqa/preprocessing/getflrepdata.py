@@ -11,7 +11,7 @@ from qelos.scripts.webqa.preprocessing.buildvnt import category, ARGOPT, VAR, RE
 
 class Querier(object):
     def __init__(self, address="http://drogon:9890/sparql", **kw):
-        #address = "http://localhost:9890/sparql"        # TODO remote testing
+        address = "http://localhost:9890/sparql"        # TODO remote testing
         super(Querier, self).__init__(**kw)
         self.sparql = SPARQLWrapper(address)
         self.sparql.setReturnFormat(JSON)
@@ -69,7 +69,8 @@ class Querier(object):
 
 def run(basep="../../../../datasets/webqsp/webqsp.",
         files=("core.test.butd.vnt", "core.train.butd.vnt",
-               "test.butd.vnt", "train.butd.vnt"),
+               "test.butd.vnt", "train.butd.vnt",
+               "train.time.butd.vnt", "test.time.butd.vnt"),
         outfile="all.butd.vnt.info"):
     """
      Collect all entities and relations in files and get their info.

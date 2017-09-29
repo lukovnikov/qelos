@@ -28,8 +28,8 @@ def run(trainp="../../../../datasets/webqsp/webqsp.train.json",
         trainquestions[traindi["QuestionId"]] = traindi
     for testdi in testd["Questions"]:
         testquestions[testdi["QuestionId"]] = testdi
-    print_forms(tq2p, trainquestions, traingraphs, tofile="../../../../datasets/webqsp/webqsp.train.graph", find_partial_entity_name_matches=False)
-    print_forms(xq2p, testquestions, testgraphs, tofile="../../../../datasets/webqsp/webqsp.test.graph", find_partial_entity_name_matches=False)
+    print_forms(tq2p, trainquestions, traingraphs, tofile="../../../../datasets/webqsp/webqsp.train.time.graph", find_partial_entity_name_matches=False)
+    print_forms(xq2p, testquestions, testgraphs, tofile="../../../../datasets/webqsp/webqsp.test.time.graph", find_partial_entity_name_matches=False)
 
 
 def print_forms(tq2p, trainquestions, traingraphs, tofile=None, find_partial_entity_name_matches=False):
@@ -130,6 +130,7 @@ def buildgraphs(d,
                 no_entity_constraints=False,
                 no_order=False,
                 no_complex_order=True,
+                only_time=False,
                 corechains_only=False):
     # iterate over questions and their parses, output dictionary from question id to parse ids and dictionary of parses
     q2p = {}
@@ -144,6 +145,7 @@ def buildgraphs(d,
     onlychaincount = 0
     withordercount = 0
     numquestions = 0
+    numsupported = 0
     for q in d["Questions"]:
         numquestions += 1
         qid = q["QuestionId"]
@@ -156,6 +158,7 @@ def buildgraphs(d,
             parseid = parse["ParseId"]
             parsegraph, hases, topicmid = buildgraph(parse, corechains_only=corechains_only)
             entcont, valcont, order, argopt, chain = hases
+
             withoutchaincount += 1 if chain is False else 0
             withentconstraintcount += 1 if entcont is True else 0
             onlyentconstraintcount += 1 if entcont is True and valcont is False and order is False else 0
@@ -171,8 +174,9 @@ def buildgraphs(d,
                           order and not argopt and no_complex_order)):
                 parsegraphs[parseid] = parsegraph
                 parseids.append(parseid)
+                numsupported += 1
         q2p[qid] = parseids
-    print ("number of questions: {}".format(numquestions))
+    print ("number of questions: {}/{}".format(numsupported, numquestions))
     print ("number of questions with multiple parses: {}".format(multipleparsescount))
     print ("number of questions with only chain: {}".format(onlychaincount))
     print ("number of questions without chain: {}".format(withoutchaincount))
@@ -216,6 +220,7 @@ def buildgraph_from_fish(parse, corechains_only=False):
     # TODO
     # constraints
     if not corechains_only:
+        timeconstraintrel = None
         for constraint in parse["Constraints"]:
             operator, argtype, arg, name, pos, pred, valtype = constraint["Operator"], constraint["ArgumentType"], constraint["Argument"], constraint["EntityName"], constraint["SourceNodeIndex"], constraint["NodePredicate"], constraint["ValueType"]
             if argtype == "Entity":
@@ -232,28 +237,58 @@ def buildgraph_from_fish(parse, corechains_only=False):
                 spinenodes[pos].append_edge(edge)
                 ent.append_edge(edge)
             elif argtype == "Value":
-                hasvalueconstraints = True
                 assert(name == "" or name == None)
-                intervar = VariableNode()
-                try:
-                    edge = RelationEdge(spinenodes[pos], intervar, pred)
-                except IndexError as e:
-                    print(parse["ParseId"])
-                    break
-                spinenodes[pos].append_edge(edge)
-                intervar.append_edge(edge)
-                if operator == "LessOrEqual":
-                    rel = "<="
-                elif operator == "GreaterOrEqual":
-                    rel = ">="
-                elif operator == "Equal":
-                    rel = "=="
+                if valtype == "DateTime":       # check time field
+                    if pred == timeconstraintrel:
+                        pass
+                    else:
+                        timeconstraintrel = pred
+                        timeinfo = parse["Time"]
+                        if timeinfo["IsRelativeToNow"] == True:
+                            try:
+                                assert(timeinfo["Start"] == "0000-00-00")
+                                assert(timeinfo["End"] == "0000-00-00")
+                            except AssertionError as e:
+                                hasvalueconstraints = True      # hack for unsupported question
+                            arg = "<NOW>"
+                        else:
+                            # m = re.match(r"(\d{4})-\d{2}-\d{2}", arg)        # extract year
+                            # assert(m)
+                            # arg = m.group(1)
+                            timemention = timeinfo["PotentialTimeMention"]
+                            assert(timemention is not None)
+                            timemention = timemention.split()
+                            arg = "<<{}>>".format(timemention[-1])
+                        val = ValueNode(arg, valuetype=valtype)
+                        try:
+                            edge = RelationEdge(spinenodes[pos], val, pred)
+                        except IndexError as e:
+                            print(parse["ParseId"])
+                            break
+                        spinenodes[pos].append_edge(edge)
+                        val.append_edge(edge)
                 else:
-                    raise Exception("unknown operator")
-                val = ValueNode(arg, valuetype=valtype)
-                edge = MathEdge(intervar, val, rel)
-                intervar.append_edge(edge)
-                val.append_edge(edge)
+                    hasvalueconstraints = True
+                    intervar = VariableNode()
+                    try:
+                        edge = RelationEdge(spinenodes[pos], intervar, pred)
+                    except IndexError as e:
+                        print(parse["ParseId"])
+                        break
+                    spinenodes[pos].append_edge(edge)
+                    intervar.append_edge(edge)
+                    if operator == "LessOrEqual":
+                        rel = "<="
+                    elif operator == "GreaterOrEqual":
+                        rel = ">="
+                    elif operator == "Equal":
+                        rel = "=="
+                    else:
+                        raise Exception("unknown operator")
+                    val = ValueNode(arg, valuetype=valtype)
+                    edge = MathEdge(intervar, val, rel)
+                    intervar.append_edge(edge)
+                    val.append_edge(edge)
         # order
         if parse["Order"] is not None:
             hasorder = True
@@ -305,7 +340,8 @@ def _tostr_edge_based(node, top=True):
                 edge.lbl,
                 edge.tgt.value,
             )
-            if isinstance(edge.src, ValueNode) or isinstance(edge.tgt, ValueNode):
+            if (isinstance(edge.src, ValueNode) and not edge.src.valtype == "DateTime")\
+                    or (isinstance(edge.tgt, ValueNode) and not edge.tgt.valtype == "DateTime"):
                 valueconstraints = 1
             # if edge.lbl == "people.marriage.type_of_union":
             #     pass
@@ -464,7 +500,14 @@ class ValueNode(Node):
 
     @property
     def value(self):
-        return self._value.lower().replace(" ", "_")
+        prefix = ""
+        if self._valuetype == "DateTime":
+            prefix = "Time:"
+        return prefix + self._value.lower().replace(" ", "_")
+
+    @property
+    def valtype(self):
+        return self._valuetype
 
 
 class Edge(object):

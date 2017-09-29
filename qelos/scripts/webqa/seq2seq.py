@@ -106,7 +106,7 @@ def make_encoder(src_emb, embdim=100, dim=100, dropout=0.0, **kw):
 
 
 def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
-                 attmode="bilin", decsplit=False, **kw):
+                 attmode="bilin", decsplit=False, celltype="normal", **kw):
     """ makes decoder
     # attention cell decoder that accepts VNT !!!
     """
@@ -123,27 +123,34 @@ def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
     else:
         raise q.SumTingWongException()
 
-    attcell = q.HierarchicalAttentionDecoderCell(attention=attention,
-                                     embedder=emb,
-                                     core=q.RecStack(
-                                         q.GRUCell(coreindim, dim),
-                                         q.GRUCell(dim, dim),
-                                     ),
-                                     smo=q.Stack(
-                                         q.argsave.spec(mask={"mask"}),
-                                         lin,
-                                         q.argmap.spec(0, mask=["mask"]),
-                                         q.LogSoftmax(),
-                                         q.argmap.spec(0),
-                                     ),
-                                     ctx_to_decinp=True,
-                                     ctx_to_smo=True,
-                                     state_to_smo=True,
-                                     decinp_to_att=True,
-                                     state_split=decsplit,
-                                     return_att=True,
-                                     return_out=True,
-                                     structure_tokens=(emb.D["<BRANCH>"], emb.D["<JOIN>"]))
+    attcellkw = q.kw2dict(
+                         attention=attention,
+                         embedder=emb,
+                         core=q.RecStack(
+                             q.GRUCell(coreindim, dim),
+                             q.GRUCell(dim, dim),
+                         ),
+                         smo=q.Stack(
+                             q.argsave.spec(mask={"mask"}),
+                             lin,
+                             q.argmap.spec(0, mask=["mask"]),
+                             q.LogSoftmax(),
+                             q.argmap.spec(0),
+                         ),
+                         ctx_to_decinp=True,
+                         ctx_to_smo=True,
+                         state_to_smo=True,
+                         decinp_to_att=True,
+                         state_split=decsplit,
+                         return_att=True,
+                         return_out=True,)
+    if celltype == "tree":
+        attcellkw(structure_tokens=(emb.D["<BRANCH>"], emb.D["<JOIN>"]))
+        attcell = q.HierarchicalAttentionDecoderCell(**attcellkw.v)
+    elif celltype == "normal":
+        attcell = q.AttentionDecoderCell(**attcellkw.v)
+    else:
+        raise q.SumTingWongException("unknown cell type: {}".format(celltype))
     return attcell.to_decoder()
 
 
@@ -340,11 +347,15 @@ class ErrorAnalyzer(q.LossWithAgg):
     # endregion
 
 
-def allgiven_adjust_vnt(queries, vnt):
+def allgiven_adjust_vnt(queries, vnt, queryD, force_special_enable=True):
     vnt_filter = np.zeros((vnt.shape[0], vnt.shape[2]), dtype=vnt.dtype)
     for i in range(queries.shape[0]):
         for j in range(queries.shape[1]):
             vnt_filter[i, queries[i, j]] = 1
+    # force enable
+    if force_special_enable:
+        for token in "<BRANCH> <ARGMAX> <ARGMIN> <RETURN> <JOIN> <BRANCH> <TIME-NOW>".split():
+            vnt_filter[:, queryD[token]] = 1
     newvnt = vnt * vnt_filter[:, np.newaxis, :]
     # q.embed()
     return newvnt
@@ -362,6 +373,7 @@ def run(lr=0.1,
         attmode="bilin",        # "bilin" or "fwd"
         merge_mode="sum",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
+        celltype="tree",          # "normal", "tree"
         batsize=128,
         cuda=False,
         gpu=1,
@@ -369,9 +381,10 @@ def run(lr=0.1,
         log=True,
         erroranalysis=True,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
+        entityfilter=False,
         ):
     localvars = locals()
-    savesettings = "glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
+    savesettings = "celltype allgiven entityfilter glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
     if cuda:
         torch.cuda.set_device(gpu)
@@ -409,8 +422,8 @@ def run(lr=0.1,
 
     if allgiven:
         tt.msg("using allgiven")
-        train_vnt = allgiven_adjust_vnt(train_queries, train_vnt)
-        test_vnt = allgiven_adjust_vnt(test_queries, test_vnt)
+        train_vnt = allgiven_adjust_vnt(train_queries, train_vnt, query_sm.D)
+        test_vnt = allgiven_adjust_vnt(test_queries, test_vnt, query_sm.D)
 
     # train/valid split
     (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
@@ -451,7 +464,8 @@ def run(lr=0.1,
     ctxdim = encdim
     decoder = make_decoder(tgt_emb, tgt_lin, ctxdim=ctxdim,
                            embdim=tgt_emb_dim, dim=decdim,
-                           attmode=attmode, decsplit=decsplit)
+                           attmode=attmode, decsplit=decsplit,
+                           celltype=celltype)
     m = Model(encoder, decoder)
 
     test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
@@ -514,7 +528,7 @@ def run(lr=0.1,
     for diff_e, qid in zip(list(same), test_qids):
         if diff_e == 0 and qid in welllinked:
             acc += 1
-    tt.msg("{} corrected seq accuracy computed".format(acc / totaltest))
+    tt.msg("{} = corrected seq accuracy".format(acc / totaltest))
 
 
 

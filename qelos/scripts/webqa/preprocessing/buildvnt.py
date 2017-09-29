@@ -29,6 +29,7 @@ ARGOPT = 5
 RETURN = 6
 VAR = 7
 PLACEHOLDER = 8
+TIMETOKEN = 9
 
 # mode
 BOTTOMUP = 1
@@ -50,6 +51,8 @@ def category(token):
         return VAR
     elif re.match("<E\d+>", token):
         return PLACEHOLDER
+    elif re.match("<TIME-.+>", token):
+        return TIMETOKEN
     else:
         return ENT
 
@@ -199,6 +202,12 @@ class Querier(object):
         else:
             return list(ret)[0]
 
+    def rel_is_datetime(self, rel):
+        rng = self.get_range_of_relation(rel)
+        if rng == "type.datetime":
+            return True
+        return False
+
     def get_relations_of_var(self, spec, var, only_reverse=False, incl_reverse=False):
         entityquery = self.get_entity_query(spec, var, noargopt=True)
         # triples, values, const = spec
@@ -290,7 +299,7 @@ class Traverser(object):
     """
 
     def __init__(self, address="http://drogon:9890/sparql", repl_dic=None, **kw):
-        #address = "http://localhost:9890/sparql"        # TODO remote testing
+        address = "http://localhost:9890/sparql"        # TODO remote testing
         super(Traverser, self).__init__(**kw)
         self.que = Querier(address=address)
 
@@ -357,9 +366,21 @@ class Traverser(object):
                 self.prevrelstack[-1] = set(relations)
                 vnt |= set(relations)
                 if self.mode == TOPDOWN:
-                    entities = self.que.get_entities_of_var(self.current_value_query, self.varstack[-1])
-                    vnt |= set(entities)
-                    vnt |= {"<E0>"}
+                    if self.prev_type == REL:
+                        raise q.SumTingWongException("can't have more than one rel in branch currently")
+                    if self.que.rel_is_datetime(token):
+                        for k, v in self.repl_dic.items():      # add time tokens, if any
+                            if re.match("<TIME-.+>", k):
+                                vnt |= {k}
+                        vnt |= {"<TIME-NOW>"}
+                    else:
+                        entities = self.que.get_entities_of_var(self.current_value_query, self.varstack[-1])
+                        vnt |= set(entities)
+                        vnt |= {"<E0>"}
+            elif category(token) == TIMETOKEN:
+                # remove last added branch from current value query
+                # TODO: BEWARE WHEN MULTIPLE HOPS INSIDE BRANCH WON'T WORK
+                del self.current_value_query[0][-1]
             elif category(token) == BRANCH:
                 self.branchdepth += 1
                 self.mode = TOPDOWN
@@ -392,14 +413,21 @@ class Traverser(object):
             elif category(token) == RETURN:
                 self.query_fn, self.query = self.que.get_entity_query_fn(self.current_value_query, self.varstack[-1])
         if self.current_type == REL:
-            vnt |= {"<RETURN>", "<BRANCH>"}
+            vnt |= {"<BRANCH>"}
             if self.mode == TOPDOWN:
                 vnt |= {"<ARGMAX>", "<ARGMIN>"}
+            else:
+                vnt |= {"<RETURN>"}
         elif self.current_type == ENT:
             if self.mode == BOTTOMUP:
                 pass
             elif self.mode == TOPDOWN:      # finalize constraint!
                 vnt |= {"<JOIN>"}
+        elif self.current_type == TIMETOKEN:
+            if self.mode == TOPDOWN:
+                vnt |= {"<JOIN>"}
+            else:
+                pass
         elif self.current_type == JOIN:
             if self.branchdepth == 0:
                 vnt |= {"<RETURN>"}
@@ -418,9 +446,10 @@ def get_vnt_for_butd(butd="WebQTest-523	what is the largest nation in <E0>	<E0> 
     fl_repl_dic = {}
     for replacement in replacements:
         replacement = re.match("\(([^\]]+)\)", replacement.strip()).group(1)
-        tkn, nlrep, flrep = replacement.split("|")
-        nl_repl_dic[tkn] = nlrep
-        fl_repl_dic[tkn] = flrep
+        for replel in replacement.split(";"):
+            tkn, nlrep, flrep = replel.split("|")
+            nl_repl_dic[tkn] = nlrep
+            fl_repl_dic[tkn] = flrep
     # print(query, fl_repl_dic)
     traverser = Traverser(repl_dic=fl_repl_dic)
     vnts = [{"<E0>"}]
@@ -428,10 +457,13 @@ def get_vnt_for_butd(butd="WebQTest-523	what is the largest nation in <E0>	<E0> 
         if not token in vnts[-1]:
             # EXCEPTIONS DUE TO MISMATCH DATA/GOLD
             solved = False
-            if qid in "WebQTest-238 WebQTest-863 WebQTest-974".split():
+            if qid in "WebQTest-238 WebQTest-863 WebQTest-974 WebQTest-305".split():
                 vnts[-1].add(token)
                 solved = True
             if re.match(r'WebQTrn-\d+', qid):
+                vnts[-1].add(token)
+                solved = True
+            if re.match(r'WebQTest-\d+', qid):
                 vnts[-1].add(token)
                 solved = True
             if solved:
@@ -452,7 +484,7 @@ def get_vnt_for_butd(butd="WebQTest-523	what is the largest nation in <E0>	<E0> 
 
 
 def get_vnt_for_datasets(p="../../../../datasets/webqsp/webqsp.",
-                         files=("train", "test", "core.test", "core.train")):
+                         files=("test.time", "train.time")):
     tt = q.ticktock("vnt builder")
     for file in files:
         tt.tick("doing {}".format(file))
@@ -471,6 +503,6 @@ def get_vnt_for_datasets(p="../../../../datasets/webqsp/webqsp.",
 
 
 if __name__ == "__main__":
-    _, _, query = get_vnt_for_butd("WebQTrn-1102	what is the name of <E0> 's son	<E0> :people.person.children <BRANCH> :people.person.gender m.05zppz <JOIN> <RETURN>	(<E0>|walt disney|m.081nh)")
+    _, _, query = get_vnt_for_butd("WebQTest-305	where does <E0> live	<E0> :people.person.places_lived <BRANCH> :people.place_lived.start_date <TIME-NOW> <JOIN> <BRANCH> :people.place_lived.end_date <TIME-NOW> <JOIN> :people.place_lived.location <RETURN>	(<E0>|bradley walsh|m.05h48b)")
     print(query())
     q.argprun(get_vnt_for_datasets)

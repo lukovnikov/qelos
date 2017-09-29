@@ -3,13 +3,22 @@ import qelos as q
 import re
 
 
-def run(prefix="../../../../datasets/webqsp/webqsp.", files=("test", "train", "core.train", "core.test")):
+def run(prefix="../../../../datasets/webqsp/webqsp.", files=("test.time", "train.time")):
     for file in files:
         p = prefix+file+".graph"
         relins = load_graph_dataset(p)
         with open(prefix+file+".butd", "w") as f:
             for qid, question, answer, dics, info in relins:
-                f.write("{}\t{}\t{}\t({}|{}|{})\n".format(qid, question, answer, "<E0>", dics[0]["<E0>"], dics[1]["<E0>"]))
+                dicstr = []
+                for k in dics[0]:
+                    nl_v = dics[0][k]
+                    if k not in dics[1]:
+                        print("{} not in fl_dic for {}".format(k, qid))
+                        continue
+                    fl_v = dics[1][k]
+                    dicstr.append("{}|{}|{}".format(k, nl_v, fl_v))
+                dicstr = "{}".format(";".join(dicstr))
+                f.write("{}\t{}\t{}\t({})\n".format(qid, question, answer, dicstr))
 
 
 def load_graph_dataset(inp="../../../../datasets/webqsp/webqsp.train.graph"):
@@ -26,6 +35,10 @@ def load_graph_dataset(inp="../../../../datasets/webqsp/webqsp.train.graph"):
             if loaded is not None:
                 qid, question, answer, (ent_nl_dic, ent_fl_dic), info = loaded
                 answer = relinearize(answer)
+
+                (question, answer), (time_nl_dic, time_fl_dic) = postprocess_time(question, answer)
+                ent_nl_dic.update(time_nl_dic)
+                ent_fl_dic.update(time_fl_dic)
 
                 print(qid, question)
                 print(qid, answer)
@@ -49,7 +62,7 @@ def relinearize(graph):
     constraintpoints = filter(lambda x: re.match("var\d", x) or x == "OUT", corechain)
     constraints = {}
     ret = " ".join(corechain)
-    if "ARGMAX" in graph:
+    if "Time:" in graph:
         pass
     for constraintpoint in constraintpoints:
         othertriples = sorted(othertriples, key=lambda x: int("ARGMAX" in x or "ARGMIN" in x))
@@ -141,6 +154,33 @@ def load_graph_question(line):
                 "valconstraints": valconstraints}
     else:
         return None
+
+
+def postprocess_time(question, answer):
+    nltimere = re.compile("\s(\d{2,5}s?)(?=\s|$)")
+    fltimere = re.compile("Time:<<([^>]+)>>")
+    timetokencount = 0
+    time_nl_dic = {}
+    time_fl_dic = {}
+    for timemention in re.findall(nltimere, question):
+        timetoken = "<TIME-{}>".format(timetokencount)
+        timetokencount += 1
+        time_nl_dic[timetoken] = timemention
+        question = re.subn(timemention, timetoken, question, 1)[0]
+    assert(timetokencount < 2)      # in webqa, we have no more than one time mention, remove for other
+    for timemention in re.findall(fltimere, answer):
+        timetoken = None
+        for k, v in time_nl_dic.items():
+            if timemention == v:
+                timetoken = k
+        if timetoken is None:
+            print("timetoken not in text: {}".format(question))
+            timetoken = "<TIME-0>"
+        assert(timetoken is not None)
+        time_fl_dic[timetoken] = timemention
+        answer = re.subn("Time:<<{}>>".format(timemention), timetoken, answer, 1)[0]
+    answer = answer.replace("Time:<now>", "<TIME-NOW>")
+    return (question, answer), (time_nl_dic, time_fl_dic)
 
 
 if __name__ == "__main__":
