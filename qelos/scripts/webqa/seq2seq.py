@@ -362,6 +362,7 @@ def allgiven_adjust_vnt(queries, vnt, queryD, force_special_enable=False):
 
 
 def get_corechain(querymat, vntmat, queryd):
+    print("getting only corechains")
     branchid = queryd["<BRANCH>"]
     joinid = queryd["<JOIN>"]
     maskid = queryd["<MASK>"]
@@ -386,9 +387,6 @@ def get_corechain(querymat, vntmat, queryd):
     querymat = querymat[:, :maxlen]
     vntmat = vntmat[:, :maxlen, :]
     return querymat, vntmat
-
-
-
 
 
 def run(lr=0.1,
