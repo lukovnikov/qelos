@@ -347,7 +347,7 @@ class ErrorAnalyzer(q.LossWithAgg):
     # endregion
 
 
-def allgiven_adjust_vnt(queries, vnt, queryD, force_special_enable=True):
+def allgiven_adjust_vnt(queries, vnt, queryD, force_special_enable=False):
     vnt_filter = np.zeros((vnt.shape[0], vnt.shape[2]), dtype=vnt.dtype)
     for i in range(queries.shape[0]):
         for j in range(queries.shape[1]):
