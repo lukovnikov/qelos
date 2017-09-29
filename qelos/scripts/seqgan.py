@@ -121,7 +121,14 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym, seqlen, noisedi
 
     netR = q.IdxToOnehot(vocsize)
 
-    return (netD, netD), (netG, netG), netR
+    def sample(noise=None):
+        if noise is None:
+            noise = q.var(torch.randn(1, noisedim)).cuda(next(netG.parameters()).cuda).v
+        o = netG(noise)
+        _, y = torch.max(o, 2)
+        return y
+
+    return (netD, netD), (netG, netG), netR, sample
 
 
 # region data loading
@@ -195,7 +202,7 @@ def run(lr=0.00005,
         gendim=50,
         discdim=50,
         batsize=64,
-        niter=100,
+        niter=1000,
         seqlen=100,
         cuda=False,
         mode="normal",       # "normal"
@@ -219,10 +226,9 @@ def run(lr=0.00005,
     if inspectdata:
         embed()
 
-
     # build networks
     if mode == "normal":
-        (netD4D, netD4G), (netG4D, netG4G), netR \
+        (netD4D, netD4G), (netG4D, netG4G), netR, sampler \
             = make_nets_normal(vocsize, embdim, gendim, discdim, 1, seqlen, noisedim)
     elif mode == "mine":
         raise NotImplemented()
@@ -236,6 +242,13 @@ def run(lr=0.00005,
     gantrainer = q.GANTrainer(mode="WGAN-GP", one_sided=True, noise_dim=noisedim,
                               penalty_weight=5,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
+
+    def samplepp(noise=None):
+        y = sampler(noise)
+        y = y.cpu().data.numpy()
+        return pp(y)
+
+    print(samplepp())
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
                      data_gen=traingen, cuda=cuda, netR=netR)
