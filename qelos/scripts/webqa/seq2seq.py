@@ -361,6 +361,36 @@ def allgiven_adjust_vnt(queries, vnt, queryD, force_special_enable=False):
     return newvnt
 
 
+def get_corechain(querymat, vntmat, queryd):
+    branchid = queryd["<BRANCH>"]
+    joinid = queryd["<JOIN>"]
+    maskid = queryd["<MASK>"]
+    maxlen = 0
+    for i in range(querymat.shape[0]):
+        k = 0
+        inbranch = False
+        for j in range(querymat.shape[1]):
+            sym = querymat[i, j]
+            if sym == branchid:
+                inbranch = True
+            elif sym == joinid:
+                inbranch = False
+            else:
+                if not inbranch:
+                    querymat[i, k] = querymat[i, j]
+                    vntmat[i, k, :] = vntmat[i, j, :]
+                    assert(vntmat[i, k, querymat[i, k]] == 1)
+                    k += 1
+            if sym != maskid:
+                maxlen = max(maxlen, k + 1)
+    querymat = querymat[:, :maxlen]
+    vntmat = vntmat[:, :maxlen, :]
+    return querymat, vntmat
+
+
+
+
+
 def run(lr=0.1,
         gradnorm=2.,
         epochs=100,
@@ -382,7 +412,7 @@ def run(lr=0.1,
         erroranalysis=True,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         entityfilter=False,
-        onlycorechain=False,
+        onlycorechain=True,
         ):
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
@@ -425,6 +455,8 @@ def run(lr=0.1,
         pass        # TODO
 
     if onlycorechain:
+        train_queries, train_vnt = get_corechain(train_queries, train_vnt, query_sm.D)
+        test_queries, test_vnt = get_corechain(test_queries, test_vnt, query_sm.D)
         pass        # TODO
 
     if allgiven:
