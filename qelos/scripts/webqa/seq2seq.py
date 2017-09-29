@@ -536,6 +536,7 @@ def run(lr=0.1,
         if diff_e == 0 and qid in welllinked:
             acc += 1
     tt.msg("{} = corrected seq accuracy".format(acc / totaltest))
+    correctedacc = acc / totaltest
 
 
 
@@ -551,7 +552,8 @@ def run(lr=0.1,
         body["test_results"] = \
                    OrderedDict([("NLL", nll),
                                 ("seq_acc", seqacc),
-                                ("elem_acc", elemacc)])
+                                ("elem_acc", elemacc),
+                                ("corr_seq_acc", correctedacc)])
         body["final_train_scores"] = \
                    OrderedDict([("train_NLL", trainlossscores[0]),
                                 ("train_seq_acc", trainlossscores[1]),
