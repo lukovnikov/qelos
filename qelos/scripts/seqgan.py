@@ -205,11 +205,14 @@ def run(lr=0.00005,
         niter=1000,
         seqlen=100,
         cuda=False,
+        gpu=1,
         mode="normal",       # "normal"
         window=100,
         subsample=1000,
         inspectdata=False,
         ):
+    if cuda:
+        torch.cuda.set_device(gpu)
 
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
