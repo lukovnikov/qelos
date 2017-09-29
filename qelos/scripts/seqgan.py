@@ -108,7 +108,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym, seqlen, noisedi
 
     netD = q.RecurrentStack(
         nn.Linear(vocsize, discdim),
-        q.GRULayer(discdim, discdim),
+        q.GRUCell(discdim, discdim).to_layer(),
     ).return_final()
 
     netD = q.Stack(
