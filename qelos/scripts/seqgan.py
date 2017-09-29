@@ -252,7 +252,7 @@ def run(lr=0.00005,
         y = y.cpu().data.numpy()
         return pp(y)
 
-    print(samplepp(cuda=cuda))
+    print(samplepp(cuda=False))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
                      data_gen=traingen, cuda=cuda, netR=netR)
