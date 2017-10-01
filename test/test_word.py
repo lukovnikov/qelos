@@ -211,6 +211,33 @@ class TestWordLinout(TestCase):
         # self.assertTrue(False)
 
 
+class TestCosineWordLinout(TestCase):
+    def setUp(self):
+        worddic = "<MASK> <RARE> first second third fourth fifth sixth"
+        worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
+        self.linout = q.WordLinout(10, worddic=worddic, cosnorm=True)
+
+    def test_it(self):
+        x = Variable(torch.randn(7, 10))
+        y = self.linout(x)
+        print(y)
+        self.assertEqual(y.size(), (7, 8))
+        self.assertTrue(np.all(y.data.numpy() < 1))
+        self.assertTrue(np.all(y.data.numpy() > -1))
+        x = x.data.numpy()
+        w = self. linout.lin.weight.data.numpy()
+        y = y.data.numpy()
+        for i in range(7):
+            for j in range(8):
+                self.assertTrue(np.allclose(y[i, j], np.dot(x[i], w[j]) / (np.linalg.norm(x[i], 2) * np.linalg.norm(w[j], 2))))
+
+        x = q.var(x).v
+        ny, cosnorm = self.linout(x, _retcosnorm=True)
+        ny = ny / x.norm(2, 1).unsqueeze(1)
+        ny = ny / cosnorm.pow(1./2)
+        self.assertTrue(np.allclose(ny.data.numpy(), y))
+
+
 class TestPretrainedWordLinout(TestCase):
     def setUp(self):
         q.PretrainedWordLinout.defaultpath = "../data/glove/miniglove.%dd"
@@ -246,8 +273,8 @@ class TestAdaptedWordLinout(TestCase):
     def setUp(self):
         wdic = {"<MASK>": 0, "<RARE>": 1, "the": 10, "a": 5, "his": 50, "abracadabrqmsd--qsdfmqgf-": 6}
         wdic2 = {"<MASK>": 0, "<RARE>": 1, "the": 2, "a": 3, "his": 4, "abracadabrqmsd--qsdfmqgf-": 5, "qsdfqsdf": 7}
-        self.adapted = q.WordLinout(10, worddic=wdic)
-        self.vanilla = q.WordLinout(10, worddic=wdic, weight=self.adapted.lin.weight.data.numpy())
+        self.adapted = q.WordLinout(10, worddic=wdic, bias=False)
+        self.vanilla = q.WordLinout(10, worddic=wdic, weight=self.adapted.lin.weight.data.numpy(), bias=False)
         self.adapted = self.adapted.adapt(wdic2)
 
     def test_map(self):
@@ -277,13 +304,32 @@ class TestAdaptedWordLinout(TestCase):
         pred = self.adapted(x)
         self.assertEqual(pred.size(), (2, 8))
 
+    def test_cosined(self):
+        EPS = 1e-6
+        self.adapted.inner.cosnorm = True
+        xval = np.stack([self.adapted % "the", self.adapted % "a"], axis=0)
+        x = q.var(xval).v
+        pred = self.adapted(x)
+        self.assertEqual(pred.size(), (2, 8))
+        prednp = pred.data.numpy()
+        print(prednp)
+        print(pred)
+        self.assertTrue(np.all(pred.data.numpy() <= 1.+EPS))
+        self.assertTrue(np.all(pred.data.numpy() >= -1-EPS))
+
+        ny, cosnorm = self.adapted(x, _retcosnorm=True)
+        ny = ny / x.norm(2, 1).unsqueeze(1)
+        ny = ny / cosnorm.pow(1./2)
+
+        self.assertTrue(np.allclose(ny.data.numpy(), prednp))
+
 
 class TestOverriddenWordLinout(TestCase):
     def setUp(self):
         wdic = {"<MASK>": 0, "<RARE>": 1, "the": 10, "a": 5, "his": 50, "monkey": 6}
         wdic2 = {"<MASK>": 0, "<RARE>": 1, "the": 2, "a": 3, "his": 4, "abracadabrqmsd--qsdfmqgf-": 5, "qsdfqsdf": 7}
-        self.base = q.WordLinout(10, worddic=wdic)
-        self.over = q.WordLinout(10, worddic=wdic2)
+        self.base = q.WordLinout(10, worddic=wdic, bias=False)
+        self.over = q.WordLinout(10, worddic=wdic2, bias=False)
         self.overridden = self.base.override(self.over)
 
     def test_shapes(self):
@@ -305,6 +351,25 @@ class TestOverriddenWordLinout(TestCase):
         self.assertTrue(np.allclose(pred[:, 5], overpred[:, 3]))
         self.assertTrue(np.allclose(pred[:, 6], basepred[:, 6]))
 
+    def test_cosined(self):
+        EPS = 1e-12
+        self.base.cosnorm = True
+        self.over.cosnorm = True
+        x = q.var(np.stack([self.base % x for x in "the a his".split()], axis=0)).v
+        pred = self.overridden(x)
+        self.assertEqual(pred.size(), (3, 51))
+        prednp = pred.data.numpy()
+        print(prednp)
+        print(pred)
+        self.assertTrue(np.all(pred.data.numpy() <= 1. + EPS))
+        self.assertTrue(np.all(pred.data.numpy() >= -1 - EPS))
+
+        ny, cosnorm = self.overridden(x, _retcosnorm=True)
+        ny = ny / x.norm(2, 1).unsqueeze(1)
+        ny = ny / cosnorm.pow(1. / 2)
+
+        self.assertTrue(np.allclose(ny.data.numpy(), prednp))
+
 
 class TestComputedWordLinout(TestCase):
     def setUp(self):
@@ -312,7 +377,7 @@ class TestComputedWordLinout(TestCase):
         computer = nn.Linear(10, 15)
         worddic = "<MASK> <RARE> first second third fourth fifth"
         worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
-        self.linout = q.ComputedWordLinout(data=data, computer=computer, worddic=worddic)
+        self.linout = q.ComputedWordLinout(data=data, computer=computer, worddic=worddic, bias=False)
 
     def test_basic(self):
         x = Variable(torch.randn(3, 15)).float()
@@ -322,6 +387,27 @@ class TestComputedWordLinout(TestCase):
         computer = self.linout.computer
         cout = torch.matmul(x, computer(data).t())
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
+
+    def test_cosiner(self):
+        EPS = 1e-12
+        self.linout.cosnorm = True
+        x = Variable(torch.randn(3, 15)).float()
+        out = self.linout(x)
+        self.assertEqual(out.size(), (3, 7))
+        self.assertTrue(np.all(out.data.numpy() <= 1. + EPS))
+        self.assertTrue(np.all(out.data.numpy() >= -1 - EPS))
+        data = self.linout.data
+        computer = self.linout.computer
+        cout = torch.matmul(x, computer(data).t())
+        cout = cout / torch.norm(computer(data), 2, 1).unsqueeze(0)
+        cout = cout / torch.norm(x, 2, 1).unsqueeze(1)
+        self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
+        self.linout.cosnorm = False
+        ny, cosnorm = self.linout(x, _retcosnorm=True)
+        ny = ny / x.norm(2, 1).unsqueeze(1)
+        ny = ny / cosnorm.pow(1. / 2)
+
+        self.assertTrue(np.allclose(ny.data.numpy(), out.data.numpy()))
 
     def test_masked(self):
         x = Variable(torch.randn(3, 15)).float()
@@ -362,7 +448,6 @@ class TestComputedWordLinout(TestCase):
         cout = torch.matmul(x, computer(data).t())
         cout = cout * msk.float()
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
-
 
     def test_all_masked(self):
         x = Variable(torch.randn(3, 15)).float()
@@ -418,6 +503,30 @@ class TestComputedWordLinout(TestCase):
                 bgrads.append(p.grad.data.numpy() + 0)
 
         pass
+
+
+class TestMergedWordLinout(TestCase):
+    def setUp(self):
+        wd = dict(zip(map(lambda x: chr(x), range(100)), range(100)))
+        self.base = q.WordLinout(50, worddic=wd, bias=False)
+        self.merg = q.WordLinout(50, worddic=wd, bias=False)
+        self.linout = self.base.merge(self.merg)
+
+    def test_cosiner(self):
+        self.linout.cosnorm = True
+        x = q.var(np.random.random((5, 50)).astype("float32")).v
+        pred = self.linout(x)
+        self.assertTrue(np.all(pred.data.numpy() <= 1.))
+        self.assertTrue(np.all(pred.data.numpy() >= -1.))
+
+        ny, cosnorm = self.linout(x, _retcosnorm=True)
+        ny = ny / x.norm(2, 1).unsqueeze(1)
+        ny = ny / cosnorm.pow(1. / 2)
+
+        self.assertTrue(np.allclose(ny.data.numpy(), pred.data.numpy()))
+
+
+
 
 
 
