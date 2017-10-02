@@ -101,7 +101,7 @@ class LossAndAgg(LossWithAgg):
         self.agg = agg
 
     def __call__(self, pred, gold, **kw):
-        l = self.loss(pred, gold)
+        l = self.loss(pred, gold, **kw)
         numex = pred.size(0)
         if len(l) == 2:     # loss returns numex too
             numex = l[1]
@@ -140,11 +140,12 @@ class lossarray(object):
         outl = []
         for loss, loss_transf in zip(self.losses, self.loss_transformers):
             kw = {}
+            pred = prediction
             if loss_transf is not None:
-                prediction, kw = loss_transf(prediction)
+                pred, kw = loss_transf(prediction)
             if loss.callwithinputs:
                 kw["inputs"] = inputs
-            l = loss(prediction, gold, **kw)
+            l = loss(pred, gold, **kw)
             outl.append(l)
         return outl
 

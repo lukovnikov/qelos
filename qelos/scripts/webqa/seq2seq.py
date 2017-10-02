@@ -432,6 +432,7 @@ def run(lr=0.1,
         = load_full(qp="../../../datasets/webqsp/webqsp.time", dim=flvecdim,
                     glovedim=glovedim, merge_mode=merge_mode,
                    rel_which=rel_which)
+    vnt_mat = vnt_mat[:, :query_sm.matrix.shape[1], :]
 
     # test tgt_lin
     testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v

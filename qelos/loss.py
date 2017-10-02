@@ -61,7 +61,7 @@ class SeqLoss(nn.Module):
         x = probs.view(batsize * seqlen, vocsize)
         y = gold.contiguous().view(batsize * seqlen)
         if mask is not None:
-            mask = mask.view(batsize * seqlen, vocsize)
+            mask = mask.contiguous().view(batsize * seqlen, vocsize)
 
         l, ignoremask = super(SeqLoss, self)._forward(x, y, mask=mask)
 
@@ -120,6 +120,8 @@ class CrossEntropyLoss(NLLLoss):
 
     def _forward(self, scores, gold, mask=None):
         probs = self.softmax(scores, mask=mask)
+        if isinstance(probs, tuple):
+            probs = probs[0]
         logprobs, ignoremask = super(CrossEntropyLoss, self)._forward(probs, gold, mask=mask)
         return logprobs, ignoremask
 
