@@ -71,16 +71,16 @@ class TestSeqNLLLoss(TestCase):
 class TestSeqAccuracy(TestCase):
     def test_same_as_numpy(self):
         self.EPS = 1e-6
-        self.batsize = 100
+        self.batsize = 20
         self.seqlen = 3
         self.size_avg = True
         self.ignore_idx = 0
-        self.vocsize = 2
+        self.vocsize = 3
         self.dorun()
         self.dorun()
         self.size_avg = False
         self.dorun()
-        self.ignore_idx = -100
+        self.ignore_idx = None
         self.dorun()
         self.dorun()
 
@@ -100,8 +100,6 @@ class TestSeqAccuracy(TestCase):
         loss = q.SeqAccuracy(size_average=size_avg, ignore_index=ignore_idx)\
             (x, y)
 
-        print(loss)
-
         x = x.data.numpy()
         x = np.argmax(x, axis=2)
         y = y.data.numpy()
@@ -114,7 +112,7 @@ class TestSeqAccuracy(TestCase):
         for i in range(x.shape[0]):
             time_acc = 0
             if np.all(x[i] == y[i]):
-                time_acc = 1
+                time_acc = 1 * (np.sum(mask[i]) > 0) if mask is not True else 1
             batch_acc += time_acc
             batch_total += 1
         nploss = batch_acc * 1.
@@ -218,7 +216,8 @@ class TestSeqLoss(TestCase):
         l = loss(scores, gold)
         l.backward()
         print(score.grad)
-        self.assertTrue(np.allclose(score.grad.sum(2).data.numpy(), np.zeros((5, 3))))
+        print(score.grad.sum(2))
+        self.assertTrue(np.allclose(score.grad.sum(2).data.numpy(), np.zeros((5, 3)), atol=1e-7))
 
 
 
