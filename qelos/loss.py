@@ -75,14 +75,18 @@ class SeqLoss(nn.Module):
         else:
             totals = l.size(1)
 
-        ltotal = l.sum(1)
         if self.time_agg == "sum":
-            pass
+            ltotal = l.sum(1)
         elif self.time_agg == "avg":
+            ltotal = l.sum(1)
             totals = totals.float().clamp(min=EPS)
             ltotal = ltotal / totals
-        elif self.time_agg == "eq":
+        elif self.time_agg == "eqtotal":
+            ltotal = l.sum(1)
             ltotal = (ltotal == totals).float()
+        elif self.time_agg == "allone":
+            ltotal = l.sum(1)
+            ltotal = (ltotal == l.size(1)).float()
 
         return ltotal, outmask
 
@@ -224,7 +228,7 @@ class Accuracy(DiscreteLoss):
         maxes, best = torch.max(x, 1)
         same = best == gold
         if ignoremask is not None:
-            same = same * ignoremask
+            same.data = same.data | ~ ignoremask.data
         return same.long(), ignoremask
 
 
@@ -232,7 +236,7 @@ class SeqAccuracy(SeqLoss, Accuracy):
     def __init__(self, size_average=True, ignore_index=None):
         super(SeqAccuracy, self).__init__(size_average=size_average,
                                           ignore_index=ignore_index,
-                                          time_agg="eq")
+                                          time_agg="allone")
 
 
 class SeqElemAccuracy(DiscreteLoss):

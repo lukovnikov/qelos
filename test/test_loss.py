@@ -67,7 +67,6 @@ class TestSeqNLLLoss(TestCase):
         self.assertTrue(np.isclose(loss.data.numpy()[0], nploss))
 
 
-
 class TestSeqAccuracy(TestCase):
     def test_same_as_numpy(self):
         self.EPS = 1e-6

@@ -192,12 +192,12 @@ class ErrorAnalyzer(q.LossWithAgg):
     def __call__(self, pred, gold, inputs=None):    # (batsize, seqlen, outvocsize)
         pred, att, mask = pred
         for i in range(len(pred)):
-            exampleresult = self.processexample(pred[i], att[i], gold[i],
-                inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))
+            exampleresult = self.processexample(pred[i], att[i], gold[i], mask[i],
+                    inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))
             self.acc.append(exampleresult)
         return 0
 
-    def processexample(self, pred, att, gold, inputs=None):
+    def processexample(self, pred, att, gold, outmask, inputs=None):
         """ compute how many entity mistakes, relation mistakes;
             store predictions, gold, and inputs in string form
             compute probability of correct sequence
@@ -207,9 +207,11 @@ class ErrorAnalyzer(q.LossWithAgg):
         pred = pred.cpu().data.numpy()      # (seqlen, probs)
         gold = gold.cpu().data.numpy()
         att = att.cpu().data.numpy()
+        outmask = outmask.cpu().data.numpy()
         mask = (gold != 0)
         inp = inputs[0].cpu().data.numpy() if inputs is not None else None
 
+        pred[outmask == 0] = -np.infty
         toppred = np.argmax(pred, axis=1)
 
         # transform to strings
@@ -303,8 +305,8 @@ class ErrorAnalyzer(q.LossWithAgg):
             res = self.acc[i]
             msg = "Question:\t{}\nPrediction:\t{:.4f} - {}\nGold:   \t{:.4f} - {}\n"\
                 .format(res["question_str"],
-                        -res["toppredprob"], res["toppred_str"],
-                        -res["goldprob"], res["gold_str"])
+                        res["toppredprob"], res["toppred_str"],
+                        res["goldprob"], res["gold_str"])
             msg += "Seen in train:  {}\n".format(str([1 if x in self.traintokens else 0 for x in res["gold_seq"] if x != 0]))
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
@@ -508,19 +510,19 @@ def run(lr=0.1,
                            celltype=celltype)
     m = Model(encoder, decoder)
 
-    test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
+    # test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
     # training settings
     lt = lambda a: (a[0], {"mask": a[2]})
-    losses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
-                         (q.SeqAccuracy(), lt),
-                         (q.SeqElemAccuracy(), lt))
-    validlosses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
-                              (q.SeqAccuracy(), lt),
-                              (q.SeqElemAccuracy(), lt))
-    testlosses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
-                             (q.SeqAccuracy(), lt),
-                             (q.SeqElemAccuracy(), lt))
+    losses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+                         (q.SeqAccuracy(ignore_index=0), lt),
+                         (q.SeqElemAccuracy(ignore_index=0), lt))
+    validlosses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+                              (q.SeqAccuracy(ignore_index=0), lt),
+                              (q.SeqElemAccuracy(ignore_index=0), lt))
+    testlosses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+                             (q.SeqAccuracy(ignore_index=0), lt),
+                             (q.SeqElemAccuracy(ignore_index=0), lt))
 
     optimizer = torch.optim.Adadelta(q.params_of(m), lr=lr, weight_decay=wreg)
 
@@ -577,8 +579,6 @@ def run(lr=0.1,
             acc += 1
     tt.msg("{} = corrected seq accuracy".format(acc / totaltest))
     correctedacc = acc / totaltest
-
-
 
     # log
     if log:
