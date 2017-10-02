@@ -2,6 +2,8 @@ import torch, qelos as q
 from torch import nn
 import numpy as np
 
+EPS = 1e-6
+
 
 class SeqNLLLoss(nn.NLLLoss):
     def __init__(self, weight=None, size_average=True, time_average=True, ignore_index=0):
@@ -31,17 +33,19 @@ class SeqNLLLoss(nn.NLLLoss):
                     mask = mask_i
                 else:
                     mask = mask * mask_i
-        mask = mask.float()
+            mask = mask.float()
 
         logprobs = -torch.gather(x, 1, y.unsqueeze(1)).squeeze()
         if self.weight is not None:
             weights = self.weight[y]
             logprobs = logprobs * weights
+
         if mask is not None:
             logprobs = logprobs * mask
-            mask = mask.view(batsize, seqlen)
+
         logprobs = logprobs.view(batsize, seqlen)
         if mask is not None:
+            mask = mask.view(batsize, seqlen)
             totals = mask.sum(1).clamp(min=self.EPS)
         else:
             totals = logprobs.size(1)
@@ -110,5 +114,101 @@ class SeqElemAccuracy(SeqAccuracy):     # TODO: test
             acc = acc / total
         return acc, total
 
+
+class RankingLoss(nn.Module):
+    def __init__(self, size_average=True, ignore_index=0,
+                 negbest=False,
+                 ignore_minimum=False,
+                 margin=None, ignore_below_margin=True, **kw):
+        super(RankingLoss, self).__init__(**kw)
+        self.size_average = size_average
+        self.ignore_index = ignore_index
+        self.ignore_minimum = ignore_minimum
+        self.margin = margin
+        self.ignore_below_margin = ignore_below_margin
+        self.negmode = "best" if negbest else "random"      # "random" or "best"
+
+    def forward(self, scores, gold, _noagg=False):    # (batsize, numvoc), idx^(batsize,)
+        scores = scores - scores.min()
+        goldscores = torch.gather(scores, 1, gold.unsqueeze(1)).squeeze()
+
+        if self.negmode == "random":
+            sampledist = scores.data.new(scores.size())
+            sampledist.fill_(1.)
+            sampledist.scatter_(1, gold.data.unsqueeze(1), 0)
+            sampledist_orig = sampledist
+            if self.margin is not None and self.ignore_below_margin:
+                cutoffs = goldscores.data - self.margin
+                cutoffmask = scores.data > cutoffs.unsqueeze(1)
+                sampledist = sampledist * cutoffmask.float()
+            if self.ignore_minimum:
+                minmask = scores.data == scores.min().data
+                sampledist = sampledist * minmask.float()
+            if (sampledist.sum(1) > 0).long().sum() < gold.size(0):
+                examplemask = (sampledist.sum(1) == 0)
+                addtosampledist = sampledist_orig * examplemask.float().unsqueeze(1)
+                sampledist = sampledist + addtosampledist
+            sample = torch.multinomial(sampledist, 1)
+            sample = q.var(sample).cuda(scores).v
+            negscores = torch.gather(scores, 1, sample).squeeze()
+        elif self.negmode == "best":
+            bestscores, best = torch.max(scores, 1)
+            secondscores = scores + 0
+            secondscores.scatter_(1, best.unsqueeze(1), 0)
+            secondbestscores, secondbest = torch.max(secondscores, 1)
+            switchmask = best == gold
+            negscores = secondbestscores * switchmask.float() + bestscores * (1 - switchmask.float())
+        else:
+            raise q.SumTingWongException("unknown mode: {}".format(self.negmode))
+
+        loss = negscores - goldscores
+        if self.margin is not None:
+            loss = torch.clamp(self.margin + loss, min=0)
+
+        mask = None
+        if self.ignore_index is not None:
+            mask = gold != self.ignore_index
+            loss = loss * mask.float()
+
+        if _noagg:
+            return loss, mask
+
+        totalloss = loss.sum()
+        if self.size_average:
+            totalnumber = loss.size(0)
+            totalloss = totalloss / totalnumber
+        return totalloss
+
+
+class SeqLoss(nn.Module):
+    def __init__(self, time_average=False, **kw):
+        super(SeqLoss, self).__init__(**kw)
+        self.time_average = time_average
+
+    def forward(self, probs, gold):     # (batsize, seqlen, dim), idx^(batsize, seqlen)
+        batsize, seqlen, vocsize = probs.size()
+        x = probs.view(batsize * seqlen, vocsize)
+        y = gold.contiguous().view(batsize * seqlen)
+
+        l, mask = super(SeqLoss, self).forward(x, y, _noagg=True)
+
+        l = l.view(batsize, seqlen)
+        if mask is not None:
+            mask = mask.view(batsize, seqlen)
+            totals = mask.float().sum(1).clamp(min=EPS)
+        else:
+            totals = l.size(1)
+        ltotal = l.sum(1)
+        if self.time_average:
+            ltotal = ltotal / totals
+        t = ltotal.size(0)
+        loss = ltotal.sum()
+        if self.size_average:
+            loss /= t
+        return loss
+
+
+class SeqRankingLoss(SeqLoss, RankingLoss):
+    pass
 
 
