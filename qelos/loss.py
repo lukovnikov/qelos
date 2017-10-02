@@ -150,36 +150,47 @@ class RankingLoss(DiscreteLoss):
             sampledist = scores.data.new(scores.size())
             sampledist.fill_(1.)
             sampledist.scatter_(1, gold.data.unsqueeze(1), 0)
-            sampledist_orig = sampledist
             if mask is not None:
                 sampledist = sampledist * mask.float()
+            sampledist_orig = sampledist
             if self.margin is not None and self.ignore_below_margin:
                 cutoffs = goldscores.data - self.margin
                 cutoffmask = scores.data > cutoffs.unsqueeze(1)
                 sampledist = sampledist * cutoffmask.float()
             if self.ignore_minimum:
-                minmask = scores.data == scores.min().data
+                minmask = scores.data > scores.min().data
                 sampledist = sampledist * minmask.float()
             if (sampledist.sum(1) > 0).long().sum() < gold.size(0):
+                # force to sample gold
+                gold_onehot = sampledist.new(sampledist.size())
+                gold_onehot.fill_(0.)
+                gold_onehot.scatter_(1, gold.data.unsqueeze(1), 1.)
                 examplemask = (sampledist.sum(1) == 0)
-                addtosampledist = sampledist_orig * examplemask.float().unsqueeze(1)
+                # addtosampledist = sampledist_orig * examplemask.float().unsqueeze(1)
+                addtosampledist = gold_onehot * examplemask.float().unsqueeze(1)
                 sampledist = sampledist + addtosampledist
             sample = torch.multinomial(sampledist, 1)
             sample = q.var(sample).cuda(scores).v
             negscores = torch.gather(scores, 1, sample).squeeze()
         elif self.negmode == "best":
+            scores = scores * mask.float() if mask else scores
             bestscores, best = torch.max(scores, 1)
             secondscores = scores + 0
             secondscores.scatter_(1, best.unsqueeze(1), 0)
             secondbestscores, secondbest = torch.max(secondscores, 1)
             switchmask = best == gold
+            sample = secondbest * switchmask.long() + best * (1 + (-1) * switchmask.long())
             negscores = secondbestscores * switchmask.float() + bestscores * (1 - switchmask.float())
+            # raise NotImplemented("some issues regarding implementation not resolved")
         else:
             raise q.SumTingWongException("unknown mode: {}".format(self.negmode))
 
         loss = negscores - goldscores
         if self.margin is not None:
             loss = torch.clamp(self.margin + loss, min=0)
+
+        examplemask = sample.squeeze() != gold
+        loss = examplemask.float() * loss
 
         ignoremask = self._get_ignore_mask(gold)
         if ignoremask is not None:

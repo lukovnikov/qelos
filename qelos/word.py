@@ -389,6 +389,10 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
 
 class WordLinoutBase(WordVecBase, nn.Module):
+    def __init__(self, worddic, **kw):
+        super(WordLinoutBase, self).__init__(worddic, **kw)
+        self.cosnorm = False
+
     def getvector(self, word):
         try:
             if isstring(word):

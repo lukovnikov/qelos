@@ -139,12 +139,12 @@ class lossarray(object):
     def __call__(self, prediction, gold, inputs=None):
         outl = []
         for loss, loss_transf in zip(self.losses, self.loss_transformers):
+            kw = {}
             if loss_transf is not None:
-                prediction = loss_transf(prediction)
+                prediction, kw = loss_transf(prediction)
             if loss.callwithinputs:
-                l = loss(prediction, gold, inputs=inputs)
-            else:
-                l = loss(prediction, gold)
+                kw["inputs"] = inputs
+            l = loss(prediction, gold, **kw)
             outl.append(l)
         return outl
 
@@ -174,7 +174,7 @@ def default_loss_input_transform(outs):
     if not issequence(outs):
         outs = [outs]
     ret = outs[0]
-    return ret
+    return ret, {}
 
 
 class test(object):

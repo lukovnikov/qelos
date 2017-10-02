@@ -64,7 +64,7 @@ def test_model(encoder, decoder, m, questions, queries, vnt):
 
     # region whole model
     m.zero_grad()
-    dec, atts = m(questions, queries[:, :-1], vnt[:, 1:])
+    dec, atts, outmask = m(questions, queries[:, :-1], vnt[:, 1:])
     assert(dec.size(0) == questions.size(0))
     assert(dec.size(1) == queries.size(1) - 1)
     # assert(dec.size(2) == 11075)
@@ -129,14 +129,14 @@ def make_decoder(emb, lin, ctxdim=100, embdim=100, dim=100,
                          embedder=emb,
                          core=q.RecStack(
                              q.GRUCell(coreindim, dim),
-                             q.GRUCell(dim, dim),
+                             # q.GRUCell(dim, dim),
                          ),
                          smo=q.Stack(
-                             q.argsave.spec(mask={"mask"}),
+                             # q.argsave.spec(mask={"mask"}),
                              lin,
-                             q.argmap.spec(0, mask=["mask"]),
-                             q.LogSoftmax(),
-                             q.argmap.spec(0),
+                             # q.argmap.spec(0, mask=["mask"]),
+                             # q.LogSoftmax(),
+                             # q.argmap.spec(0),
                          ),
                          ctx_to_decinp=True,
                          ctx_to_smo=True,
@@ -165,7 +165,7 @@ class Model(nn.Module):
         ctx, ctxmask, finalstate = self.encoder(srcseq)
         self.decoder.set_init_states(finalstate)
         dec, att = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
-        return dec, att
+        return dec, att, outmask
 
 
 class ErrorAnalyzer(q.LossWithAgg):
@@ -429,7 +429,8 @@ def run(lr=0.1,
     else:           flvecdim += decdim
     flvecdim += encdim
     (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin) \
-        = load_full(qp="../../../datasets/webqsp/webqsp.time", dim=flvecdim, glovedim=glovedim, merge_mode=merge_mode,
+        = load_full(qp="../../../datasets/webqsp/webqsp.time", dim=flvecdim,
+                    glovedim=glovedim, merge_mode=merge_mode,
                    rel_which=rel_which)
 
     # test tgt_lin
@@ -509,9 +510,16 @@ def run(lr=0.1,
     test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
     # training settings
-    losses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
-    validlosses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
-    testlosses = q.lossarray(q.SeqNLLLoss(time_average=False), q.SeqAccuracy(), q.SeqElemAccuracy())
+    lt = lambda a: (a[0], {"mask": a[2]})
+    losses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
+                         (q.SeqAccuracy(), lt),
+                         (q.SeqElemAccuracy(), lt))
+    validlosses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
+                              (q.SeqAccuracy(), lt),
+                              (q.SeqElemAccuracy(), lt))
+    testlosses = q.lossarray((q.SeqCrossEntropyLoss(), lt),
+                             (q.SeqAccuracy(), lt),
+                             (q.SeqElemAccuracy(), lt))
 
     optimizer = torch.optim.Adadelta(q.params_of(m), lr=lr, weight_decay=wreg)
 

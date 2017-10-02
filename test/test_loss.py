@@ -180,11 +180,12 @@ class TestSeqElemAccuracy(TestCase):
 
 class TestRankingLoss(TestCase):
     def test_margin_random(self):
-        loss = q.RankingLoss(margin=.3, ignore_below_margin=True, ignore_minimum=True)
+        loss = q.RankingLoss(margin=.1, ignore_below_margin=True, ignore_minimum=True)
         score = q.val(torch.randn(5, 10)).v
         score.requires_grad = True
         scores = score + 1
         gold = q.var(np.random.randint(0, 10, (5,))).v
+        gold.data[0] = torch.max(score, 1)[1].data[0]
         l, _ = loss(scores, gold, _noagg=True)
         self.assertEqual(l.size(), (5,))
         tl = l.sum()
