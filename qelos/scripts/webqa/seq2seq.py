@@ -190,7 +190,7 @@ class ErrorAnalyzer(q.LossWithAgg):
         self.acc = []
 
     def __call__(self, pred, gold, inputs=None):    # (batsize, seqlen, outvocsize)
-        pred, att = pred
+        pred, att, mask = pred
         for i in range(len(pred)):
             exampleresult = self.processexample(pred[i], att[i], gold[i],
                 inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))
@@ -611,7 +611,7 @@ def run(lr=0.1,
     if erroranalysis:
         tt.msg("error analysis")
         erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, train_queries)
-        anal_losses = q.lossarray((erranal, lambda x: x))
+        anal_losses = q.lossarray((erranal, lambda x: x, {}))
         q.test(m).cuda(cuda)\
             .on(test_dataloader, anal_losses)\
             .set_batch_transformer(bt)\
