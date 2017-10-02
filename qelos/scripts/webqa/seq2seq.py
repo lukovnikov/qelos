@@ -605,13 +605,11 @@ def run(lr=0.1,
 
         q.log("experiments_seq2seq.log", mode="a", name="seq2seq_run", body=body)
 
-
-
     # error analysis
     if erroranalysis:
         tt.msg("error analysis")
         erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, train_queries)
-        anal_losses = q.lossarray((erranal, lambda x: x, {}))
+        anal_losses = q.lossarray((erranal, lambda x: (x, {})))
         q.test(m).cuda(cuda)\
             .on(test_dataloader, anal_losses)\
             .set_batch_transformer(bt)\
