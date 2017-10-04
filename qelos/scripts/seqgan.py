@@ -144,7 +144,7 @@ class ContextDecoderACHAWrappper(nn.Module):
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                      seqlen, noisedim, soft_next=False):
     amortize_headstart = 500
-    amortize_interval = 100
+    amortize_interval = 200
 
     def amortizer_update_rule(current_value=0, iter=0, state=None):
         if iter < amortize_headstart:
