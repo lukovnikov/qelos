@@ -180,6 +180,14 @@ class GANTrainer(object):
                     for p in netD.parameters():
                         p.data.clamp_(*self.clamp_weights_rng)
                 data = next(data_gen)
+
+                if sample_real_for_gen:     # ensure data sizes consistency
+                    data4gen = next(data_gen)
+                    if data.size(0) != data4gen.size(0):
+                        minimumsize = min(data.size(0), data4gen.size(0))
+                        data = data[:minimumsize]
+                        data4gen = data4gen[:minimumsize]
+
                 real = q.var(data).cuda(cuda).v
                 if netR is not None:
                     real = netR(real)
@@ -191,8 +199,7 @@ class GANTrainer(object):
                 if not sample_real_for_gen:
                     fake = netG(vnoise)
                 else:
-                    real4gen = next(data_gen)
-                    real4gen = q.var(real4gen).cuda(cuda).v
+                    real4gen = q.var(data4gen).cuda(cuda).v
                     fake = netG(vnoise, real4gen)
 
                 scoreD_real_vec = netD(real)        # (batsize,)
