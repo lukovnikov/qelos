@@ -269,13 +269,16 @@ class GANTrainer(object):
                 p.requires_grad = False
             netG.zero_grad()
 
-            vnoise.data.normal_(0, 1)
             if not sample_real_for_gen:
-                fake = netG(vnoise)
+                vgnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
+                vgnoise.data.normal_(0, 1)
+                fake = netG(vgnoise)
             else:
                 real4gen = next(data_gen)
                 real4gen = q.var(real4gen).cuda(cuda).v
-                fake = netG(vnoise, real4gen)
+                vgnoise = q.var(torch.zeros(real4gen.size(0), self.noise_dim)).cuda(cuda).v
+                vgnoise.data.normal_(0, 1)
+                fake = netG(vgnoise, real4gen)
 
             errG = netD(fake)
             if self.modeD == "critic":
