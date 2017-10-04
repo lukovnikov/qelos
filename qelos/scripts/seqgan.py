@@ -327,6 +327,8 @@ def run(lr=0.00005,
                      data_gen=traingen, cuda=cuda, netR=netR,
                      sample_real_for_gen=True)
 
+    q.embed()
+
 
 if __name__ == "__main__":
     q.argprun(run)
