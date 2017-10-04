@@ -269,7 +269,7 @@ def run(lr=0.00005,
         gendim=256,
         discdim=256,
         batsize=256,
-        niter=5000,
+        niter=-1,
         seqlen=32,
         cuda=False,
         gpu=1,
@@ -281,6 +281,9 @@ def run(lr=0.00005,
     if cuda:
         torch.cuda.set_device(gpu)
 
+    if niter == -1:
+        niter = seqlen * 200 + 500 + 500        # seqlen * amortize_step + amortize_headstart + afterburn
+        print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
     trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=seqlen, subsample=subsample)
