@@ -71,3 +71,33 @@ def params_of(module):
     params = module.parameters()
     params = filter(lambda x: x.requires_grad == True, params)
     return params
+
+
+class Hyperparam(object):
+    def __init__(self, val=0, **kw):
+        super(Hyperparam, self).__init__(**kw)
+        self._value = val
+
+    @property
+    def v(self):
+        return self._value
+
+    @v.setter
+    def v(self, val):
+        self._value = val
+
+
+class DynamicHyperparam(Hyperparam):
+    def __init__(self, initval=0, update_rule=None, **kw):
+        super(DynamicHyperparam, self).__init__(val=initval, **kw)
+        self.update_rule = update_rule
+        self.state = {}
+
+    def update(self, iter=None):
+        if self.update_rule is not None:
+            self._value = self.update_rule(current_value=self._value, iter=iter, state=self.state)
+        return self.v
+
+    @property
+    def v(self):
+        return self._value

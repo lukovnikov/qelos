@@ -71,6 +71,32 @@ class TestDecoder(TestCase):
         self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))  # shape check
         self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
 
+    def test_context_decoder_teacher_unforced_after(self):
+        batsize, seqlen, vocsize = 5, 4, 7
+        embdim, encdim, outdim, ctxdim = 10, 16, 10, 8
+
+        decoder_cell = q.ContextDecoderCell(
+            nn.Embedding(vocsize, embdim, padding_idx=0),
+            q.GRUCell(embdim + ctxdim, encdim),
+            q.Forward(encdim, vocsize),
+            q.Softmax()
+        )
+
+        after = q.Hyperparam(4)
+
+        decoder_cell.teacher_unforce_after(seqlen, after, q.Argmaxer())
+        decoder = decoder_cell.to_decoder()
+
+        # end model def
+        data = np.random.randint(0, vocsize, (batsize, seqlen))
+        data = Variable(torch.LongTensor(data))
+        ctx = Variable(torch.FloatTensor(np.random.random((batsize, ctxdim))))
+
+        decoded = decoder(data, ctx)
+        decoded = decoded.data.numpy()
+        self.assertEqual(decoded.shape, (batsize, seqlen, vocsize))  # shape check
+        self.assertTrue(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
+
     def test_fast_context_decoder_shape(self):
         batsize, seqlen, vocsize = 5, 4, 7
         embdim, encdim, outdim, ctxdim = 10, 16, 10, 8

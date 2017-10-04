@@ -94,45 +94,106 @@ def make_nets_mine():
     )
 
 
-def make_nets_normal(vocsize, embdim, gendim, discdim, startsym, seqlen, noisedim):
+def test_acha_net_g():
+    batsize, seqlen, vocsize = 5, 4, 7
+    embdim, encdim, outdim, ctxdim = 10, 16, 10, 8
+    noisedim = ctxdim
+    gendim, discdim = encdim, encdim
+
+    (netD, _), (netG, _), _, _, amortizer = make_nets_normal(vocsize, embdim, gendim, discdim, None, seqlen, noisedim)
+
+
+    # end model def
+    data = np.random.randint(0, vocsize, (batsize, seqlen))
+    data = q.var(torch.LongTensor(data)).v
+    ctx = q.var(torch.FloatTensor(np.random.random((batsize, ctxdim)))).v
+
+    for iter in (499, 500, 600, 800, 1000):
+        amortizer.update(iter=iter)
+        decoded = netG(ctx, data)
+        decoded = decoded.data.numpy()
+        assert(decoded.shape == (batsize, seqlen-1, vocsize))  # shape check
+        assert(np.allclose(np.sum(decoded, axis=-1), np.ones_like(np.sum(decoded, axis=-1))))  # prob check
+
+
+class ContextDecoderACHAWrappper(nn.Module):
+    def __init__(self, decoder, amortizer=None, soft_next=False, vocsize=None, **kw):
+        super(ContextDecoderACHAWrappper, self).__init__(**kw)
+        self.decoder = decoder
+        self.amortizer = amortizer
+        self.soft_next = soft_next
+        self.vocsize = vocsize
+
+    def forward(self, noise, sequences):
+        overrideseq = sequences[:, 1:].contiguous()
+        sequences = sequences[:, :-1]
+        if self.soft_next:
+            sequences = q.IdxToOnehot(self.vocsize)(sequences)
+        dec = self.decoder(sequences, noise)        # (batsize, seqlen, vocsize)
+        seqlen, vocsize = dec.size(1), dec.size(2)
+        override = q.IdxToOnehot(vocsize)(overrideseq)
+        amortizer = min(self.amortizer.v+1, seqlen)
+        if amortizer == seqlen:
+            out = dec
+        else:
+            out = torch.cat([override[:, :-amortizer], dec[:, -amortizer:]], 1)
+        return out
+
+
+def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
+                     seqlen, noisedim, soft_next=False):
+    amortize_headstart = 500
+    amortize_interval = 100
+
+    def amortizer_update_rule(current_value=0, iter=0, state=None):
+        if iter < amortize_headstart:
+            return 0
+        else:
+            ret = 1 + (iter - amortize_headstart) // amortize_interval
+            return ret
+    amortizer = q.DynamicHyperparam(update_rule=amortizer_update_rule)
+
     netG = q.ContextDecoderCell(
-        nn.Embedding(vocsize, embdim),
+        nn.Embedding(vocsize, embdim) if not soft_next else nn.Linear(vocsize, embdim),
         q.GRUCell(embdim+noisedim, gendim),
-        nn.Linear(embdim, vocsize),
+        nn.Linear(gendim, vocsize),
         nn.Softmax(),
     )
-    netG.teacher_unforce(seqlen,
-                         q.Lambda(lambda x: torch.max(x[0], 1)[1]),
-                         startsymbols=startsym)
+    netG.teacher_unforce_after(seqlen-1, amortizer,
+                         q.Lambda(lambda x: torch.max(x[0], 1)[1]) if not soft_next else q.Lambda(lambda x: x[0])
+    )
     netG = netG.to_decoder()
+    netG = ContextDecoderACHAWrappper(netG, amortizer=amortizer, soft_next=soft_next, vocsize=vocsize)
 
+    # DISCRIMINATOR
     netD = q.RecurrentStack(
-        nn.Linear(vocsize, discdim),
+        nn.Linear(vocsize, discdim, bias=False),
         q.GRUCell(discdim, discdim, use_cudnn_cell=False).to_layer(),
     ).return_final()
 
     netD = q.Stack(
         netD,
         q.Forward(discdim, discdim, activation="relu"),
-        q.Forward(discdim, discdim, activation="relu"),
         nn.Linear(discdim, 1),
         q.Lambda(lambda x: x.squeeze(1))
     )
 
-    netR = q.IdxToOnehot(vocsize)
+    netR = q.Stack(q.Lambda(lambda x: x[:, 1:].contiguous()),
+                   q.IdxToOnehot(vocsize))
 
     def sample(noise=None, cuda=False):
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
-        o = netG(noise)
+        data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).v
+        o = netG(noise, data)
         _, y = torch.max(o, 2)
         return y
 
-    return (netD, netD), (netG, netG), netR, sample
+    return (netD, netD), (netG, netG), netR, sample, amortizer
 
 
 # region data loading
-def makemat(data, window, subsample):
+def makemat(data, window, subsample, startid=None):
     startpositions = np.arange(0, data.shape[0] - window)
     np.random.shuffle(startpositions)
     numex = startpositions.shape[0] // subsample
@@ -141,6 +202,8 @@ def makemat(data, window, subsample):
     for i in range(startpositions.shape[0]):
         startpos = startpositions[i]
         mat[i, :] = data[startpos:startpos + window]
+    if startid is not None:
+        mat[:, 0] = startid
     return mat
 
 
@@ -165,6 +228,9 @@ def loaddata(p="../../datasets/hutter/enwik8.h5", window=200, subsample=1000, ut
     tt.tock("data loaded")
     tt.tick("making mats")
 
+    startid = max(chardic.keys()) + 1
+    chardic[startid] = "<START>"
+
     def pp(charseq):
         if charseq.ndim == 1:
             return "".join([chardic[x] for x in charseq])
@@ -174,9 +240,9 @@ def loaddata(p="../../datasets/hutter/enwik8.h5", window=200, subsample=1000, ut
                 ret.append(pp(charseq[i]))
             return ret
 
-    ret = (makemat(train, window, subsample),
-           makemat(valid, window, subsample),
-           makemat(test, window, subsample),
+    ret = (makemat(train, window, subsample, startid=startid),
+           makemat(valid, window, subsample, startid=startid),
+           makemat(test, window, subsample, startid=startid),
            chardic, pp)
     tt.tock("made mats")
     return ret
@@ -197,17 +263,16 @@ def makeiter(dl):
 
 
 def run(lr=0.00005,
-        embdim=50,
-        noisedim=50,
-        gendim=50,
-        discdim=50,
-        batsize=64,
-        niter=1000,
-        seqlen=100,
+        embdim=128,
+        noisedim=128,
+        gendim=256,
+        discdim=256,
+        batsize=256,
+        niter=5000,
+        seqlen=32,
         cuda=False,
         gpu=1,
         mode="normal",       # "normal"
-        window=100,
         subsample=1000,
         inspectdata=False,
         pw=10,
@@ -217,7 +282,8 @@ def run(lr=0.00005,
 
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
-    trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=window, subsample=subsample)
+    trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=seqlen, subsample=subsample)
+    cd = {v: k for k, v in rcd.items()}
     traingen = makeiter(q.dataload(trainmat, batch_size=batsize, shuffle=True))
     validgen = makeiter(q.dataload(validmat, batch_size=batsize, shuffle=False))
     testgen = makeiter(q.dataload(testmat, batch_size=batsize, shuffle=False))
@@ -232,8 +298,8 @@ def run(lr=0.00005,
 
     # build networks
     if mode == "normal":
-        (netD4D, netD4G), (netG4D, netG4G), netR, sampler \
-            = make_nets_normal(vocsize, embdim, gendim, discdim, 1, seqlen, noisedim)
+        (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizer \
+            = make_nets_normal(vocsize, embdim, gendim, discdim, cd["<START>"], seqlen, noisedim)
     elif mode == "mine":
         raise NotImplemented()
         (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
@@ -247,6 +313,8 @@ def run(lr=0.00005,
                               penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
 
+    gantrainer.add_dyn_hyperparams(amortizer)
+
     def samplepp(noise=None, cuda=False):
         y = sampler(noise=noise, cuda=cuda)
         y = y.cpu().data.numpy()
@@ -255,7 +323,8 @@ def run(lr=0.00005,
     print(samplepp(cuda=False))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
-                     data_gen=traingen, cuda=cuda, netR=netR)
+                     data_gen=traingen, cuda=cuda, netR=netR,
+                     sample_real_for_gen=True)
 
 
 if __name__ == "__main__":

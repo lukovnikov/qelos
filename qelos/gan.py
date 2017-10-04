@@ -53,6 +53,12 @@ class GANTrainer(object):
         # PAGAN
         self.paganP = paganP      # NOT THE P OF NORM!!
         self.pagandist = q.LNormDistance(2)
+        # dynamic hyperparams
+        self.dynamichyperparams = []
+
+    def add_dyn_hyperparams(self, dynhparam):
+        self.dynamichyperparams.append(dynhparam)
+        return self
 
     def perturb(self, x):
         if self.mode == "DRAGAN":
@@ -94,7 +100,8 @@ class GANTrainer(object):
         return Variable(ret, requires_grad=True)
 
     def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
-              data_gen=None, valid_data_gen=None, cuda=False, netR=None):
+              data_gen=None, valid_data_gen=None, cuda=False,
+              netR=None, sample_real_for_gen=False):
         """
         :param netD:    nn.Module for discriminator function,
                         or, tuple of two nn.Modules,
@@ -153,6 +160,10 @@ class GANTrainer(object):
         netD4Gparams = q.params_of(netD4G)
 
         for _iter in range(niter):
+            #### DYNAMIC HYPERPARAMS ####
+            for dynhparam in self.dynamichyperparams:
+                dynhparam.update(iter=_iter)
+
             ##########  Update D net ##########
             netD, netG = netD4D, netG4D
             lip_loss = None
@@ -176,7 +187,14 @@ class GANTrainer(object):
                 batsize = num_examples
                 vnoise = q.var(torch.FloatTensor(num_examples, self.noise_dim)).cuda(real).v
                 vnoise.data.normal_(0, 1)
-                fake = netG(vnoise)
+
+                if not sample_real_for_gen:
+                    fake = netG(vnoise)
+                else:
+                    real4gen = next(data_gen)
+                    real4gen = q.var(real4gen).cuda(cuda).v
+                    fake = netG(vnoise, real4gen)
+
                 scoreD_real_vec = netD(real)        # (batsize,)
                 #scoreD_real = scoreD_real_vec.mean()
                 # scoreD_real.backward(one, retain_graph=(lc> 0))
@@ -245,7 +263,12 @@ class GANTrainer(object):
             netG.zero_grad()
 
             vnoise.data.normal_(0, 1)
-            fake = netG(vnoise)
+            if not sample_real_for_gen:
+                fake = netG(vnoise)
+            else:
+                real4gen = next(data_gen)
+                real4gen = q.var(real4gen).cuda(cuda).v
+                fake = netG(vnoise, real4gen)
 
             errG = netD(fake)
             if self.modeD == "critic":

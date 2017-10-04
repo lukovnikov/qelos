@@ -4,7 +4,7 @@ from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
 from qelos.util import issequence
-from qelos.qutils import var
+from qelos.qutils import var, Hyperparam
 from qelos.exceptions import SumTingWongException
 
 
@@ -407,6 +407,8 @@ class ContextDecoderCell(DecoderCell):
     def __init__(self, embedder=None, *layers):
         super(ContextDecoderCell, self).__init__(*layers)
         self.embedder = embedder
+        # teacher unforce after
+        self._tua_after = None
 
     def forward(self, x, ctx, **kw):
         if self.embedder is not None:
@@ -417,8 +419,25 @@ class ContextDecoderCell(DecoderCell):
         ret = self.core(inp)
         return ret
 
+    def teacher_unforce_after(self, maxlen, after, block):
+        self._y_tm1_to_x_t = block
+        self._max_time = maxlen
+        self._tua_after = after     # hyperparam or int !
+
     def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
-        if self._teacher_force == 0:
+        if self._tua_after is not None:
+            if isinstance(self._tua_after, Hyperparam):
+                tua_after = self._tua_after.v
+            else:
+                tua_after = self._tua_after
+            tua_after = max(1, self._max_time - tua_after)
+            if t < tua_after:
+                teacher_force = 1
+            else:
+                teacher_force = 0
+        else:
+            teacher_force = self._teacher_force
+        if teacher_force == 0:
             if y_t is None:
                 assert(t == 0)
                 if self._start_symbols is not None:
@@ -436,7 +455,7 @@ class ContextDecoderCell(DecoderCell):
                 else:
                     ctx = x[1]
             return (y_t, ctx), {}
-        elif self._teacher_force == 1:
+        elif teacher_force == 1:
             return (x[0][:, t], x[1]), {}
         else:
             raise NotImplemented("partial teacher forcing not supported")

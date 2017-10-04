@@ -592,3 +592,7 @@ class IdxToOnehot(nn.Module):
         return y
 
 
+class Argmaxer(nn.Module):
+    def forward(self, x):       # (batsize, vocsize)
+        maxes, argmaxes = torch.max(x[0], 1)
+        return argmaxes
