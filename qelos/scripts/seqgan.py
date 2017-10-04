@@ -151,6 +151,8 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
             return 0
         else:
             ret = 1 + (iter - amortize_headstart) // amortize_interval
+            if current_value != ret:
+                print("AMORTIZED FROM {} TO {}".format(current_value, ret))
             return ret
     amortizer = q.DynamicHyperparam(update_rule=amortizer_update_rule)
 
