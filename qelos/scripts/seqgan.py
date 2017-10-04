@@ -123,15 +123,16 @@ class ContextDecoderACHAWrappper(nn.Module):
         self.amortizer = amortizer
         self.soft_next = soft_next
         self.vocsize = vocsize
+        self.idx2onehot = q.IdxToOnehot(vocsize)
 
     def forward(self, noise, sequences):
         overrideseq = sequences[:, 1:].contiguous()
         sequences = sequences[:, :-1]
         if self.soft_next:
-            sequences = q.IdxToOnehot(self.vocsize)(sequences)
+            sequences = self.idx2onehot(sequences)
         dec = self.decoder(sequences, noise)        # (batsize, seqlen, vocsize)
         seqlen, vocsize = dec.size(1), dec.size(2)
-        override = q.IdxToOnehot(vocsize)(overrideseq)
+        override = self.idx2onehot(overrideseq)
         amortizer = min(self.amortizer.v+1, seqlen)
         if amortizer == seqlen:
             out = dec
