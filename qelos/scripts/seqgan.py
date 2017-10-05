@@ -142,31 +142,33 @@ class ContextDecoderACHAWrappper(nn.Module):
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
-                     seqlen, noisedim, soft_next=False):
-    amortize_headstart = 500
-    amortize_interval = 200
+                     seqlen, noisedim, soft_next=False, temperature=1.):
 
-    def amortizer_update_rule(current_value=0, iter=0, state=None):
-        if iter < amortize_headstart:
-            return 0
-        else:
-            ret = 1 + (iter - amortize_headstart) // amortize_interval
-            if current_value != ret:
-                print("AMORTIZED FROM {} TO {}".format(current_value, ret))
-            return ret
-    amortizer = q.DynamicHyperparam(update_rule=amortizer_update_rule)
+    def get_amortizer_update_rule(offset=0, headstart=500, interval=200):
+        def amortizer_update_rule(current_value=0, iter=0, state=None):
+            if iter < (offset + headstart):
+                return 0
+            else:
+                ret = 1 + (iter - (offset + headstart)) // interval
+                if current_value != ret:
+                    print("AMORTIZED FROM {} TO {}".format(current_value, ret))
+                return ret
+        return amortizer_update_rule
+    amortizer_override = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
+    tf_amor_offset = seqlen * 200 + 500
+    amortizer_teacherforce = q.DynamicHyperparam(update_rule=get_amortizer_update_rule(offset=tf_amor_offset))
 
     netG = q.ContextDecoderCell(
         nn.Embedding(vocsize, embdim) if not soft_next else nn.Linear(vocsize, embdim),
         q.GRUCell(embdim+noisedim, gendim),
         nn.Linear(gendim, vocsize),
-        nn.Softmax(),
+        q.Softmax(temperature=temperature),
     )
-    netG.teacher_unforce_after(seqlen-1, amortizer,
+    netG.teacher_unforce_after(seqlen-1, amortizer_teacherforce,
                          q.Lambda(lambda x: torch.max(x[0], 1)[1]) if not soft_next else q.Lambda(lambda x: x[0])
     )
     netG = netG.to_decoder()
-    netG = ContextDecoderACHAWrappper(netG, amortizer=amortizer, soft_next=soft_next, vocsize=vocsize)
+    netG = ContextDecoderACHAWrappper(netG, amortizer=amortizer_override, soft_next=soft_next, vocsize=vocsize)
 
     # DISCRIMINATOR
     netD = q.RecurrentStack(
@@ -197,7 +199,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
         _, y = torch.max(o, 2)
         return y
 
-    return (netD, netD), (netG, netG), netR, sample, amortizer
+    return (netD, netD), (netG, netG), netR, sample, [amortizer_teacherforce, amortizer_override]
 
 
 # region data loading
@@ -284,12 +286,13 @@ def run(lr=0.00005,
         subsample=1000,
         inspectdata=False,
         pw=10,
+        temperature=1.,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
 
     if niter == -1:
-        niter = seqlen * 200 + 500 + 500        # seqlen * amortize_step + amortize_headstart + afterburn
+        niter = (seqlen * 200 + 500)*2 + 500        # seqlen * amortize_step + amortize_headstart + afterburn
         print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
@@ -309,8 +312,9 @@ def run(lr=0.00005,
 
     # build networks
     if mode == "normal":
-        (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizer \
-            = make_nets_normal(vocsize, embdim, gendim, discdim, cd["<START>"], seqlen, noisedim)
+        (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
+            = make_nets_normal(vocsize, embdim, gendim, discdim,
+                               cd["<START>"], seqlen, noisedim, temperature=temperature)
     elif mode == "mine":
         raise NotImplemented()
         (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
@@ -324,7 +328,8 @@ def run(lr=0.00005,
                               penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
 
-    gantrainer.add_dyn_hyperparams(amortizer)
+    for amortizer in amortizers:
+        gantrainer.add_dyn_hyperparams(amortizer)
 
     def samplepp(noise=None, cuda=True, gen=testgen):
         y = sampler(noise=noise, cuda=cuda, gen=gen)

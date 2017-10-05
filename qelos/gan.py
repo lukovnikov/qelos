@@ -99,7 +99,7 @@ class GANTrainer(object):
         ret = x.data + perturbation
         return Variable(ret, requires_grad=True)
 
-    def train(self, netD, netG, niter=0, niterD=10, batsizeG=100,
+    def train(self, netD, netG, niter=0, niterD=10, niterG=1, batsizeG=100,
               data_gen=None, valid_data_gen=None, cuda=False,
               netR=None, sample_real_for_gen=False):
         """
@@ -263,31 +263,32 @@ class GANTrainer(object):
                 self.optimizerD.step()
 
             ##########  Update G net ##########
-            netD, netG = netD4G, netG4G
+            for j in range(niterG):
+                netD, netG = netD4G, netG4G
 
-            for p in netD4Gparams:
-                p.requires_grad = False
-            netG.zero_grad()
+                for p in netD4Gparams:
+                    p.requires_grad = False
+                netG.zero_grad()
 
-            if not sample_real_for_gen:
-                vgnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
-                vgnoise.data.normal_(0, 1)
-                fake = netG(vgnoise)
-            else:
-                real4gen = next(data_gen)
-                real4gen = q.var(real4gen).cuda(cuda).v
-                vgnoise = q.var(torch.zeros(real4gen.size(0), self.noise_dim)).cuda(cuda).v
-                vgnoise.data.normal_(0, 1)
-                fake = netG(vgnoise, real4gen)
+                if not sample_real_for_gen:
+                    vgnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
+                    vgnoise.data.normal_(0, 1)
+                    fake = netG(vgnoise)
+                else:
+                    real4gen = next(data_gen)
+                    real4gen = q.var(real4gen).cuda(cuda).v
+                    vgnoise = q.var(torch.zeros(real4gen.size(0), self.noise_dim)).cuda(cuda).v
+                    vgnoise.data.normal_(0, 1)
+                    fake = netG(vgnoise, real4gen)
 
-            errG = netD(fake)
-            if self.modeD == "critic":
-                errG = -errG.mean()
-            elif self.modeD == "disc":
-                errG = torch.log(1.0 - errG).mean()
+                errG = netD(fake)
+                if self.modeD == "critic":
+                    errG = -errG.mean()
+                elif self.modeD == "disc":
+                    errG = torch.log(1.0 - errG).mean()
 
-            errG.backward()
-            self.optimizerG.step()
+                errG.backward()
+                self.optimizerG.step()
 
             ######### Validate G net ##########
             if valid_data_gen is not None:
