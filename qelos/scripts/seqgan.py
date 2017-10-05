@@ -190,7 +190,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
         if gen is None:
             data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
         else:
-            data = next(gen)
+            data = next(gen)[0:1]
             data = q.var(data).cuda(cuda).v
         o = netG(noise, data)
         _, y = torch.max(o, 2)
