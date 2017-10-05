@@ -184,10 +184,14 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
     netR = q.Stack(q.Lambda(lambda x: x[:, 1:].contiguous()),
                    q.IdxToOnehot(vocsize))
 
-    def sample(noise=None, cuda=False):
+    def sample(noise=None, cuda=False, gen=None):
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
-        data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
+        if gen is None:
+            data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
+        else:
+            data = next(gen)
+            data = q.var(data).cuda(cuda).v
         o = netG(noise, data)
         _, y = torch.max(o, 2)
         return y
@@ -321,12 +325,12 @@ def run(lr=0.00005,
 
     gantrainer.add_dyn_hyperparams(amortizer)
 
-    def samplepp(noise=None, cuda=False):
-        y = sampler(noise=noise, cuda=cuda)
+    def samplepp(noise=None, cuda=False, gen=None):
+        y = sampler(noise=noise, cuda=cuda, gen=gen)
         y = y.cpu().data.numpy()
         return pp(y)
 
-    print(samplepp(cuda=False))
+    print(samplepp(cuda=False, gen=testgen))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
                      data_gen=traingen, cuda=cuda, netR=netR,
