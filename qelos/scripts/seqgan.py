@@ -279,6 +279,8 @@ def run(lr=0.00005,
         discdim=256,
         batsize=256,
         niter=-1,
+        niterD=10,
+        niterG=1,
         seqlen=32,
         cuda=False,
         gpu=1,
@@ -338,7 +340,7 @@ def run(lr=0.00005,
 
     print(samplepp(cuda=False, gen=testgen))
 
-    gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter,
+    gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
                      data_gen=traingen, cuda=cuda, netR=netR,
                      sample_real_for_gen=True)
 
