@@ -115,6 +115,30 @@ class Querier(object):
                     raise e
                 time.sleep(1)
 
+    def get_types_of_id(self, id):
+        query = u"SELECT DISTINCT (?t) WHERE {{ {} <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?t }}"\
+            .format(id)
+        ret = set()
+        res = self._exec_query(query)
+        results = res["results"]["bindings"]
+        for result in results:
+            rete = result["t"]["value"]
+            toadd = True
+            for ent_filterer in self.ent_filter:
+                toadd = False
+                if re.match(ent_filterer, rete):
+                    toadd = True
+                    break
+            for ent_blacklister in self.ent_blacklist:
+                if re.match(ent_blacklister, rete):
+                    toadd = False
+                    break
+            if toadd:
+                rete = u"<{}>".format(rete)
+                if rete is not None:
+                    ret.add(rete)
+        return ret
+
     def get_relations_of_id(self, id, only_reverse=False, incl_reverse=True):
         revrels = set()
         if not q.iscollection(id):
@@ -459,6 +483,8 @@ def get_vnt_for_dataset(p="../../../../datasets/lcquad/", files=("lcquad.multili
 
 
 def run(query="<http://dbpedia.org/resource/Buckhurst_Hill_County_High_School> :<http://dbpedia.org/ontology/localAuthority> <<BRANCH>> :-<http://dbpedia.org/property/placeOfBurial> <http://dbpedia.org/resource/Elizabeth_of_Rhuddlan> <<JOIN>> <<RETURN>>"):
+    q = Querier()
+    print(q.get_types_of_id("<http://dbpedia.org/resource/Lenka>"))
     # get_vnt_for_butd(u"<http://dbpedia.org/resource/Pavel_Moroz> :<http://dbpedia.org/property/hometown> <<BRANCH>> :-<http://dbpedia.org/ontology/deathPlace> <http://dbpedia.org/resource/Yakov_Estrin> <<JOIN>> <<RETURN>>")
     get_vnt_for_butd(u"<http://dbpedia.org/resource/Selwyn_Lloyd> :<http://dbpedia.org/ontology/primeMinister> <<EQUALS>> <http://dbpedia.org/resource/Winston_Churchill> <<RETURN>>")
     get_vnt_for_dataset()
