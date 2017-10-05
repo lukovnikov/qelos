@@ -187,6 +187,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
     def sample(noise=None, cuda=False, gen=None):
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
+            noise.data.normal_(0, 1)
         if gen is None:
             data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
         else:
@@ -325,7 +326,7 @@ def run(lr=0.00005,
 
     gantrainer.add_dyn_hyperparams(amortizer)
 
-    def samplepp(noise=None, cuda=False, gen=None):
+    def samplepp(noise=None, cuda=True, gen=testgen):
         y = sampler(noise=noise, cuda=cuda, gen=gen)
         y = y.cpu().data.numpy()
         return pp(y)
