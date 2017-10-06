@@ -221,15 +221,6 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
     return (netD, netD), (netG, netG), netR, sample, [amortizer_teacherforce, amortizer_override]
 
 
-def pp_scores(x):   # 2D
-    if isinstance(x, torch.autograd.Variable):
-        x = x.data
-    if not isinstance(x, np.ndarray):
-        x = x.cpu().numpy()
-    for xe in x:
-        print(sparkline.sparkify(xe))
-
-
 # region data loading
 def makemat(data, window, subsample, startid=None):
     startpositions = np.arange(0, data.shape[0] - window)
@@ -360,6 +351,14 @@ def run(lr=0.00005,
 
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
+
+    def pp_scores(x):  # 2D
+        if isinstance(x, torch.autograd.Variable):
+            x = x.data
+        if not isinstance(x, np.ndarray):
+            x = x.cpu().numpy()
+        for xe in x:
+            print(sparkline.sparkify(xe))
 
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False):
         y, o, score, ograds = sampler(noise=noise, cuda=cuda, gen=gen)
