@@ -4,6 +4,7 @@ from torch import nn
 import numpy as np
 import h5py
 from IPython import embed
+import sparkline
 
 
 class DCB(object):
@@ -196,8 +197,26 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
             data = next(gen)[0:1]
             data = q.var(data).cuda(cuda).v
         o = netG(noise, data)
+        do = q.var(o.data.new(o.size())).cuda(o).v
+        do.data = o.data + 0
+        do.requires_grad = True
+
+        netDparamswithgrad = []
+        for param in netD.parameters():
+            if param.requires_grad:
+                netDparamswithgrad.append(param)
+                param.requires_grad = False
+
+        score = netD(o)
+        loss = -score.sum()
+        loss.backward()
+        dograds = do.grad
+
         _, y = torch.max(o, 2)
-        return y
+
+        for param in netDparamswithgrad:
+            param.requires_grad = True
+        return y, o, score, dograds
 
     return (netD, netD), (netG, netG), netR, sample, [amortizer_teacherforce, amortizer_override]
 
@@ -333,9 +352,11 @@ def run(lr=0.00005,
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
 
-    def samplepp(noise=None, cuda=True, gen=testgen):
-        y = sampler(noise=noise, cuda=cuda, gen=gen)
+    def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False):
+        y, o, score, ograds = sampler(noise=noise, cuda=cuda, gen=gen)
         y = y.cpu().data.numpy()
+        if ret_all:
+            return pp(y), o, score, ograds
         return pp(y)
 
     print(samplepp(cuda=False, gen=testgen))
