@@ -7,6 +7,33 @@ from torch import nn
 import numpy as np
 
 
+class TestEmptyWordEmb(TestCase):
+    def test_it(self):
+        dic = dict(zip(map(chr, range(97, 122)), range(1,122-97+1)))
+        dic[q.WordEmb.masktoken] = 0
+        m = q.ZeroWordEmb(10, worddic=dic)
+        embedding, mask = m(Variable(torch.LongTensor([0,1,2])))
+        self.assertEqual(embedding.size(), (3, 10))
+        self.assertTrue(np.allclose(mask.data.numpy(), [0,1,1]))
+        self.assertTrue(np.allclose(np.zeros((3, 10)), embedding.data.numpy()))
+
+    def test_overridden(self):
+        dic = dict(zip(map(chr, range(97, 122)), range(1,122-97+1)))
+        dic[q.WordEmb.masktoken] = 0
+        m = q.ZeroWordEmb(10, worddic=dic)
+        dic = dict(zip(map(chr, range(97, 122)), range(0, 122 - 97)))
+        mo = q.WordEmb(10, worddic=dic)
+        moe = m.override(mo)
+        emb, mask = moe(Variable(torch.LongTensor([0,1,2])))
+        self.assertEqual(emb.size(), (3, 10))
+        self.assertTrue(np.allclose(mask.data.numpy(), [0,1,1]))
+        self.assertTrue(np.allclose(emb[0].data.numpy(), np.zeros((10,))))
+        oemb, mask = mo(Variable(torch.LongTensor([0,0,1])))
+        self.assertEqual(oemb.size(), (3, 10))
+        self.assertTrue(mask is None)
+        self.assertTrue(np.allclose(oemb.data.numpy()[1:], emb.data.numpy()[1:]))
+
+
 class TestWordEmb(TestCase):
     def test_creation_simple(self):
         dic = dict(zip(map(chr, range(97, 122)), range(122-97)))
@@ -194,7 +221,33 @@ class TestMergedWordEmb(TestCase):
         embres, msk = emb(x)
         self.assertTrue(np.allclose(embres.data.numpy(), np.concatenate([emb1res.data.numpy(), emb2res.data.numpy()], axis=1)))
 
-        # TODO: test WordLinouts
+
+class TestZeroWordLinout(TestCase):
+    def setUp(self):
+        worddic = "<MASK> <RARE> first second third fourth fifth"
+        worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
+        self.linout = q.ZeroWordLinout(10, worddic=worddic)
+
+    def test_it(self):
+        x = Variable(torch.randn(7, 10))
+        msk = Variable(torch.FloatTensor([[1,0,1,1,0,1,0]]*5 + [[0,1,0,0,1,0,1]]*2))
+        y = self.linout(x, mask=msk)
+        print(y)
+        self.assertEqual(y.size(), (7, 7))
+        self.assertTrue(np.allclose(y.data.numpy(), np.zeros_like(y.data.numpy())))
+
+    def test_overridden(self):
+        worddic = "second third fourth fifth"
+        worddic = dict(zip(worddic.split(), range(len(worddic.split()))))
+        linout = q.WordLinout(10, worddic=worddic)
+        l = self.linout.override(linout)
+        x = Variable(torch.randn(7, 10))
+        msk = Variable(torch.FloatTensor([[1,0,1,1,0,1,0]]*5 + [[0,1,0,0,1,0,1]]*2))
+        y = l(x, mask=msk)
+        print(y)
+
+
+
 
 class TestWordLinout(TestCase):
     def setUp(self):

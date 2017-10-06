@@ -593,3 +593,21 @@ class kw2dict(object):
         return self._kw
 
 
+def save_sparse_tensor(x, f):
+    shape = np.asarray(x.shape, dtype="int64")
+    coords = np.argwhere(x)
+    indexers = [coords[:, i] for i in range(coords.shape[1])]
+    values = x[indexers]
+    np.savez(f, coords, values, shape)
+
+
+def load_sparse_tensor(f):
+    npzl = np.load(f)
+    coords, values, shape = npzl["arr_0"], npzl["arr_1"], npzl["arr_2"]
+    x = np.zeros(tuple(shape), dtype=values.dtype)
+    indexers = [coords[:, i] for i in range(coords.shape[1])]
+    x[indexers] = values
+    return x
+
+
+

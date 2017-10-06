@@ -13,7 +13,8 @@ from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     SeqBatchNorm1d, CReLU, Identity, argmap, argsave, LayerNormalization
 from qelos.containers import ModuleList
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, \
-    WordLinout, PretrainedWordLinout, ComputedWordLinout
+    WordLinout, PretrainedWordLinout, ComputedWordLinout, ZeroWordEmb, \
+    ZeroWordLinout
 from qelos.gan import GANTrainer
 from qelos.exceptions import SumTingWongException, HoLeePhukException, \
     BaDumTssException
@@ -29,6 +30,7 @@ from qelos.furnn import MemGRUCell
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo, emit, get_emitted, \
-    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log, kw2dict
+    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log, kw2dict, \
+    save_sparse_tensor, load_sparse_tensor
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
     params_of

@@ -111,6 +111,24 @@ class WordEmbBase(WordVecBase, nn.Module):
         return MergedWordEmb(self, wordemb, mode=mode)
 
 
+class ZeroWordEmb(WordEmbBase):
+    def __init__(self, dim=50, worddic=None, **kw):
+        super(ZeroWordEmb, self).__init__(worddic, **kw)
+        self.dim = dim
+        # extract maskid and rareid from worddic
+        maskid = worddic[self.masktoken] if self.masktoken in worddic else None
+        rareid = worddic[self.raretoken] if self.raretoken in worddic else None
+        self.maskid = maskid
+
+    def forward(self, x):
+        outsize = x.size() + (self.dim,)
+        zeros = q.var(torch.zeros(*outsize)).cuda(x).v
+        mask = None
+        if self.maskid is not None:
+            mask = (x != self.maskid).int()
+        return zeros, mask
+
+
 class WordEmb(WordEmbBase):
     """ is a VectorEmbed with a dictionary to map words to ids """
     def __init__(self, dim=50, value=None, worddic=None,
@@ -420,6 +438,22 @@ class WordLinoutBase(WordVecBase, nn.Module):
         if not self.D == x.D:
             raise q.SumTingWongException()
         return MergedWordLinout(self, x, mode=mode)
+
+
+class ZeroWordLinout(WordLinoutBase):
+    def __init__(self, indim, worddic=None, cosnorm=False):
+        super(ZeroWordLinout, self).__init__(worddic)
+        self.indim = indim
+        self.vecdim = indim
+        self.outdim = max(worddic.values()) + 1
+        self.cosnorm = cosnorm
+
+    def forward(self, x, _ret_cosnorm=False, **kw):
+        outsize = x.size()[:-1] + (self.outdim,)
+        zeros = q.var(torch.zeros(*outsize)).cuda(x).v
+        if _ret_cosnorm:
+            return zeros, torch.sum(zeros, 0).unsqueeze(0)
+        return zeros
 
 
 class WordLinout(WordLinoutBase):

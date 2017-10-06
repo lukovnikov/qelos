@@ -57,7 +57,7 @@ Q17: Is Nikolai Morozov the former coach of Stanislav Morozov?
 Q17.P1: <http://dbpedia.org/resource/Stanislav_Morozov> :<http://dbpedia.org/ontology/formerCoach> <<EQUALS>> <http://dbpedia.org/resource/Nikolai_Morozov_(figure_skater)> <<RETURN>>
 Q17.P2: <http://dbpedia.org/resource/Nikolai_Morozov_(figure_skater)> :-<http://dbpedia.org/ontology/formerCoach> <<EQUALS>> <http://dbpedia.org/resource/Stanislav_Morozov> <<RETURN>>
 
-Q18: What is the common genere of Abhijit Kunte and Kasparov ?
+Q18: What is the common genre of Abhijit Kunte and Kasparov ?
 Q18.P1: <http://dbpedia.org/resource/Abhijit_Kunte> :<http://dbpedia.org/property/knownFor> <<BRANCH>> :-<http://dbpedia.org/ontology/genre> <http://dbpedia.org/resource/Virtual_Kasparov> <<JOIN>> <<RETURN>>
 Q18.P2: <http://dbpedia.org/resource/Virtual_Kasparov> :<http://dbpedia.org/ontology/genre> <<BRANCH>> :-<http://dbpedia.org/property/knownFor> <http://dbpedia.org/resource/Abhijit_Kunte> <<JOIN>> <<RETURN>>
 
@@ -68,7 +68,7 @@ Q19.P2: <http://dbpedia.org/resource/Outlook_on_the_web> :<http://dbpedia.org/pr
 Q20: On how many different grounds were seasons chaired by Ronaldo held?
 Q20.P1: <http://dbpedia.org/resource/Ronaldo> :-<http://dbpedia.org/ontology/chairman>  :<http://dbpedia.org/ontology/ground>  <<COUNT>> <<RETURN>>
 
-Q21: Which source country of SamurAbsheron channel is the birth place of Anar Salmanov ?
+Q21: Which source country of Samur-Absheron channel is the birth place of Anar Salmanov ?
 Q21.P1: <http://dbpedia.org/resource/Anar_Salmanov> :<http://dbpedia.org/property/placeOfBirth> <<BRANCH>> :-<http://dbpedia.org/ontology/sourceCountry> <http://dbpedia.org/resource/Samur–Absheron_channel> <<JOIN>> <<RETURN>>
 Q21.P2: <http://dbpedia.org/resource/Samur–Absheron_channel> :<http://dbpedia.org/ontology/sourceCountry> <<BRANCH>> :-<http://dbpedia.org/property/placeOfBirth> <http://dbpedia.org/resource/Anar_Salmanov> <<JOIN>> <<RETURN>>
 
@@ -12842,7 +12842,7 @@ Q3867: Name the television show which was developed by Brian Graden and distribu
 Q3867.P1: <http://dbpedia.org/resource/Brian_Graden> :-<http://dbpedia.org/property/developer> <<BRANCH>> :<http://dbpedia.org/property/distributor> <http://dbpedia.org/resource/Comedy_Central> <<JOIN>> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/TelevisionShow> <<JOIN>> <<RETURN>>
 Q3867.P2: <http://dbpedia.org/resource/Comedy_Central> :-<http://dbpedia.org/property/distributor> <<BRANCH>> :<http://dbpedia.org/property/developer> <http://dbpedia.org/resource/Brian_Graden> <<JOIN>> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/TelevisionShow> <<JOIN>> <<RETURN>>
 
-Q3868: Was Blade Runner cinematographed by JordanCronenweth?
+Q3868: Was Blade Runner cinematographed by Jordan Cronenweth?
 Q3868.P1: <http://dbpedia.org/resource/Blade_Runner> :<http://dbpedia.org/ontology/cinematography> <<EQUALS>> <http://dbpedia.org/resource/Jordan_Cronenweth> <<RETURN>>
 Q3868.P2: <http://dbpedia.org/resource/Jordan_Cronenweth> :-<http://dbpedia.org/ontology/cinematography> <<EQUALS>> <http://dbpedia.org/resource/Blade_Runner> <<RETURN>>
 
@@ -16477,7 +16477,7 @@ Q4958.P1: <http://dbpedia.org/resource/Yosemite_National_Park> :-<http://dbpedia
 Q4959: Name the battle fought by the people which also fought in Levant ?
 Q4959.P1: <http://dbpedia.org/resource/Levant> :-<http://dbpedia.org/property/battles> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/Person> <<JOIN>> :<http://dbpedia.org/property/battles>  <<RETURN>>
 
-Q4960: Who starred in Awakening and fifety five days at peknig ?
+Q4960: Who starred in Awakening and fifty five days at peking ?
 Q4960.P1: <http://dbpedia.org/resource/The_Awakening_(1980_film)> :<http://dbpedia.org/property/starring> <<BRANCH>> :-<http://dbpedia.org/ontology/starring> <http://dbpedia.org/resource/55_Days_at_Peking> <<JOIN>> <<RETURN>>
 Q4960.P2: <http://dbpedia.org/resource/55_Days_at_Peking> :<http://dbpedia.org/ontology/starring> <<BRANCH>> :-<http://dbpedia.org/property/starring> <http://dbpedia.org/resource/The_Awakening_(1980_film)> <<JOIN>> <<RETURN>>
 
@@ -16531,7 +16531,7 @@ Q4974: Which company was the designer of South African class 11e and RENFE class
 Q4974.P1: <http://dbpedia.org/resource/South_African_Class_11E> :<http://dbpedia.org/ontology/designer> <<BRANCH>> :-<http://dbpedia.org/ontology/designer> <http://dbpedia.org/resource/RENFE_Class_333> <<JOIN>> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/Company> <<JOIN>> <<RETURN>>
 Q4974.P2: <http://dbpedia.org/resource/RENFE_Class_333> :<http://dbpedia.org/ontology/designer> <<BRANCH>> :-<http://dbpedia.org/ontology/designer> <http://dbpedia.org/resource/South_African_Class_11E> <<JOIN>> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/Company> <<JOIN>> <<RETURN>>
 
-Q4975: What is the scientist whose doctoral students are Erich Bagge and erban ieica?
+Q4975: What is the scientist whose doctoral students are Erich Bagge and serban titeica?
 Q4975.P1: <http://dbpedia.org/resource/Erich_Bagge> :-<http://dbpedia.org/ontology/doctoralStudent> <<BRANCH>> :<http://dbpedia.org/ontology/doctoralStudent> <http://dbpedia.org/resource/Șerban_Țițeica> <<JOIN>> <<RETURN>>
 Q4975.P2: <http://dbpedia.org/resource/Șerban_Țițeica> :-<http://dbpedia.org/ontology/doctoralStudent> <<BRANCH>> :<http://dbpedia.org/ontology/doctoralStudent> <http://dbpedia.org/resource/Erich_Bagge> <<JOIN>> <<RETURN>>
 

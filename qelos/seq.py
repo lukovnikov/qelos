@@ -3,6 +3,7 @@ from torch import nn
 from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
 from qelos.util import issequence
+from qelos.qutils import var
 
 
 # region attention
@@ -294,6 +295,8 @@ class DecoderCell(RecStatefulContainer):
         self._init_state_computer = None
         self._inputs_t_getter = None
 
+        self._sparse_outmask = None
+
     # region RecStatefulContainer signature
     def reset_state(self):
         self.core.reset_state()
@@ -527,7 +530,17 @@ class AttentionDecoderCell(DecoderCell):
         if "ctxmask" in xkw:        # copy over ctxmask (shared over decoder steps)
             outkwargs["ctxmask"] = xkw["ctxmask"]
         if "outmask" in xkw:        # slice out the time from outmask
-            outkwargs["outmask_t"] = xkw["outmask"][:, t]
+            outmask = xkw["outmask"]
+            if outmask.dim() == 1:       # get mask from data stored on this object
+                assert(self._sparse_outmask is not None)
+                outmaskaddrs = list(outmask.cpu().data.numpy())
+                sparse_outmask_t = [self._sparse_outmask[a][t] for a in outmaskaddrs]
+                sparse_outmask_t = [torch.from_numpy(a.todense()).t() for a in sparse_outmask_t]
+                sparse_outmask_t = torch.cat(sparse_outmask_t, 0)
+                outmask_t = var(sparse_outmask_t).cuda(outmask).v
+            else:
+                outmask_t = outmask[:, t]
+            outkwargs["outmask_t"] = outmask_t
         return outargs, outkwargs
     # endregion
 

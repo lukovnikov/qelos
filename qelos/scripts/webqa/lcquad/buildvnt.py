@@ -85,6 +85,7 @@ class Querier(object):
 
     ent_blacklist = [
         "http://dbpedia\.org/class/yago/.+",
+        "http://dbpedia\.org/ontology/Wikidata.+",
     ]
 
     def __init__(self, endpoint="http://localhost:7890/sparql",
@@ -116,27 +117,68 @@ class Querier(object):
                 time.sleep(1)
 
     def get_types_of_id(self, id):
-        query = u"SELECT DISTINCT (?t) WHERE {{ {} <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?t }}"\
-            .format(id)
-        ret = set()
+        if not q.issequence(id):
+            id = [id]
+        query = u"SELECT DISTINCT ?s ?t WHERE {{ ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?t VALUES ?s {{ {} }} }}"\
+            .format(" ".join(id))
+        ret = {}
         res = self._exec_query(query)
         results = res["results"]["bindings"]
         for result in results:
-            rete = result["t"]["value"]
+            s = result["s"]["value"]
+            t = result["t"]["value"]
             toadd = True
             for ent_filterer in self.ent_filter:
                 toadd = False
-                if re.match(ent_filterer, rete):
+                if re.match(ent_filterer, t):
                     toadd = True
                     break
             for ent_blacklister in self.ent_blacklist:
-                if re.match(ent_blacklister, rete):
+                if re.match(ent_blacklister, t):
                     toadd = False
                     break
             if toadd:
-                rete = u"<{}>".format(rete)
-                if rete is not None:
-                    ret.add(rete)
+                s = u"<{}>".format(s)
+                t = u"<{}>".format(t)
+                if s not in ret:
+                    ret[s] = set()
+                ret[s].add(t)
+        return ret
+
+    def get_entity_property(self, entities, property, language=None):
+        if not q.issequence(entities):
+            entities = [entities]
+        # entities = [fbfy(entity) for entity in entities]
+        # propertychain = [fbfy(p) for p in property.strip().split()]
+        propchain = ""
+        prevvar = "?s"
+        varcount = 0
+        for prop in propertychain:
+            newvar = "?var{}".format(varcount)
+            varcount += 1
+            propchain += "{} {} {} .\n".format(prevvar, prop, newvar)
+            prevvar = newvar
+        propchain = propchain.replace(prevvar, "?o")
+
+        query = """SELECT ?s ?o WHERE {{
+                        {}
+                        VALUES ?s {{ {} }}
+                        {}
+                    }}""".format(
+            propchain,
+            " ".join(entities),
+            "FILTER (lang(?o) = '{}')".format(language) if language is not None else "")
+        ret = {}
+        res = self._exec_query(query)
+        results = res["results"]["bindings"]
+        for result in results:
+            s = unfbfy(result["s"]["value"])
+            if s not in ret:
+                ret[s] = set()
+            val = result["o"]["value"]
+            if language is None:
+                val = unfbfy(val)
+            ret[s].add(val)
         return ret
 
     def get_relations_of_id(self, id, only_reverse=False, incl_reverse=True):
@@ -269,7 +311,7 @@ class Querier(object):
         ret.update(revrels)
         return ret
 
-    def get_entities_of_value(self, triples, replacements, outvar, limit=100):
+    def get_entities_of_value(self, triples, replacements, outvar, limit=10):
         query = self.get_entity_query(triples, replacements, outvar, limit=limit)
         # print q
         ret = set()
@@ -452,7 +494,9 @@ def get_vnt_for_butd(x):
     return vnts, complete
 
 
-def get_vnt_for_dataset(p="../../../../datasets/lcquad/", files=("lcquad.multilin",)):
+def get_vnt_for_dataset(p="../../../../datasets/lcquad/",
+                        files=("lcquad.multilin",),
+                        outp="lcquad.multilin.vnt.smaller"):
     tt = q.ticktock("vnt builder")
     for file in files:
         tt.tick("doing {}".format(file))
@@ -475,7 +519,9 @@ def get_vnt_for_dataset(p="../../../../datasets/lcquad/", files=("lcquad.multili
                     if i % 1 == 0:
                         tt.msg("{} {}, max: {}, {}".format(i, qpid, maxvntlen, str(vntlen)))
                     # break
-        pickle.dump(vnts, open(p+file+".vnt", "w"))
+        if outp is None:
+            outp = p + file + ".vnt"
+        pickle.dump(vnts, open(outp, "w"))
         print("{} incomplete: {}".format(len(incompletevnts), " ".join(incompletevnts)))
         tt.tock("done {}".format(file))
         # reloaded = pickle.load(open(p+file+".vnt"))
