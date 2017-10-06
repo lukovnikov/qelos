@@ -207,7 +207,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                 netDparamswithgrad.append(param)
                 param.requires_grad = False
 
-        score = netD(o)
+        score = netD(do)
         loss = -score.sum()
         loss.backward()
         dograds = do.grad
