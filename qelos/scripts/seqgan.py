@@ -188,6 +188,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                    q.IdxToOnehot(vocsize))
 
     def sample(noise=None, cuda=False, gen=None):
+        gold = None
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
@@ -195,6 +196,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
             data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
         else:
             data = next(gen)[0:1]
+            gold = data
             data = q.var(data).cuda(cuda).v
         o = netG(noise, data)
         do = q.var(o.data.new(o.size())).cuda(o).v
@@ -216,7 +218,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
 
         for param in netDparamswithgrad:
             param.requires_grad = True
-        return y, o, score, dograds
+        return y, o[0], score, dograds[0], gold[0]
 
     return (netD, netD), (netG, netG), netR, sample, [amortizer_teacherforce, amortizer_override]
 
@@ -361,10 +363,10 @@ def run(lr=0.00005,
             print(sparkline.sparkify(xe))
 
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False):
-        y, o, score, ograds = sampler(noise=noise, cuda=cuda, gen=gen)
+        y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen)
         y = y.cpu().data.numpy()
         if ret_all:
-            return pp(y), o, score, ograds
+            return pp(y), o, score, ograds, gold
         return pp(y)
 
     print(samplepp(cuda=False, gen=testgen))
