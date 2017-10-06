@@ -49,12 +49,20 @@ def get_vnts(loaded_questions=None,
 
     tt.tick("making vnts mat")
     # vntmat = [[dok_matrix((vocsize, 1), dtype="uint8") for i in range(seqlen)] for j in range(numex)]
-    vntmat = np.zeros((numex, seqlen, vocsize), dtype="uint8")
+    maxlen = 0
+    for qpid in qpids:
+        for timestep_vnt in vnt[qpid]:
+            maxlen = max(maxlen, len(timestep_vnt))
+    vntmat = np.zeros((numex, seqlen+1, maxlen+2), dtype="int64")
+    vntmat[:, :, 2] = 1
     vntmat[:, :, 0] = 1
+    vntmat[:, :, 1] = vocsize
     for i, qpid in enumerate(qpids):
         for j, timestep_vnt in enumerate(vnt[qpid]):
+            l = 1
             if len(timestep_vnt) > 0:
-                vntmat[i, j, 0] = 0
+                vntmat[i, j, 2] = 0
+                l = 0
             for timestep_vnt_element in timestep_vnt:
                 if replace_dbp:
                     timestep_vnt_element = re.sub("(:-?<http://dbpedia\.org/)property/([^>]+>)",
@@ -63,9 +71,11 @@ def get_vnts(loaded_questions=None,
                     timestep_vnt_element = re.sub(":<http://www\.w3\.org/1999/02/22-rdf-syntax-ns#type>",
                                                   "<<TYPE>>", timestep_vnt_element)
                 k = fl_emb_d[timestep_vnt_element]
-                vntmat[i, j, k] = 1
+                vntmat[i, j, l+2] = k+1
+                l += 1
+            vntmat[i, j, 0] = l     # number of elements
     tt.tock("made")
-    q.embed()
+    # q.embed()
     return vntmat
 
 

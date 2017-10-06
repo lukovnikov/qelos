@@ -538,6 +538,12 @@ class AttentionDecoderCell(DecoderCell):
                 sparse_outmask_t = [torch.from_numpy(a.todense()).t() for a in sparse_outmask_t]
                 sparse_outmask_t = torch.cat(sparse_outmask_t, 0)
                 outmask_t = var(sparse_outmask_t).cuda(outmask).v
+            elif outmask.dim() == 2:        # batchable sparse
+                vocsize = outmask[0, 0, 1]
+                outmask_t = torch.zeros(outmask.size(0), vocsize+1)
+                outmask_t.scatter_(1, outmask[:, t, 2:], 1)
+                outmask_t = outmask_t[:, 1:]
+                outmask_t = var(outmask_t).cuda(outmask).v
             else:
                 outmask_t = outmask[:, t]
             outkwargs["outmask_t"] = outmask_t
