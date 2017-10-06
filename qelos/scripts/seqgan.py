@@ -361,6 +361,8 @@ def run(lr=0.00005,
             x = x.cpu().numpy()
         for xe in x:
             print(sparkline.sparkify(xe))
+        idxseq = np.arange(0, x.shape[1]) % 10
+        print("".join(list(idxseq)))
 
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen)
