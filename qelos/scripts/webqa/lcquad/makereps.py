@@ -1,6 +1,304 @@
+# -*- coding: utf8 -*-
+
+from __future__ import print_function
 import qelos as q
+import torch
 import re, dill as pickle, codecs, editdistance, numpy as np, os
 from scipy.sparse import dok_matrix
+
+
+def test_reps():
+    (qpids, questionsm, querysm, vntmat), (nl_emb, fl_emb, fl_linout) \
+        = load_all()
+
+    # region test nl emb
+    print(nl_emb)
+    rev_nl_emb_dic = {v: k for k, v in nl_emb.D.items()}
+    x = q.var(questionsm.matrix).v
+    xi = torch.cat([x[:5, 1], x[5:10, 9]], 0)
+    y = nl_emb(xi)
+    words = questionsm.pp(xi.data.numpy())
+    print(xi)
+    print(words)
+    xi = xi.data.numpy()
+    for i in range(10):
+        wordid = xi[i]
+        word = rev_nl_emb_dic[wordid]
+        if word == "<MASK>":
+            # print(y[0][i])
+            # assert (np.allclose(y[0][i].data.numpy(), np.zeros_like(y[0][i].data.numpy())))
+            assert(np.all(y[1][i].data.numpy() == 0))
+        else:
+            assert(np.all(y[1][i].data.numpy() == 1))
+        if word in nl_emb.over.inner.D:
+            # print(np.linalg.norm(y[0][i].data.numpy() - nl_emb.over.inner[word]))
+            print("word {}({}) mapped to glove dict".format(word, wordid))
+            assert(np.allclose(y[0][i].data.numpy(), nl_emb.over.inner[word]))
+        else:
+            print("word {}({}) mapped to special dict".format(word, wordid))
+            assert(np.allclose(y[0][i].data.numpy(), nl_emb.base.over.inner[word]))
+    # assert(np.allclose(y[0].data.numpy(), nl_emb.over.inner["comic"]))
+
+    loss = y[0].sum()
+    loss.backward()
+    customwordsgrad = np.argwhere(nl_emb.base.over.inner.embedding.weight.grad.data.numpy()[:, 0])
+    print(customwordsgrad)
+    localrevdic = {v: k for k, v in nl_emb.base.over.inner.D.items()}
+    nonzerocustomembtoken = localrevdic[customwordsgrad[0, 0]]
+    print(nonzerocustomembtoken)
+    assert(nonzerocustomembtoken == "<E0>")
+
+    print("DONE: nl_emb correct")
+    # endregion
+
+    # region test typ emb
+    print("type emb")
+    typ_emb = fl_emb.over.inner
+    print(typ_emb)
+    print(typ_emb.D)
+    testtypes = ["<http://dbpedia.org/ontology/MusicalArtist>",
+                 "<http://dbpedia.org/ontology/Artist>",
+                 "<http://dbpedia.org/ontology/Film>"]
+    x = [typ_emb.D[e] for e in testtypes]
+    typ_x = q.var(np.asarray(x, dtype="int64")).v
+    typ_y, _ = typ_emb(typ_x)
+    typ_data = typ_emb.data[typ_x]
+    typ_words_revdic = {v: k for k, v in typ_emb.computer.layers[0].block.D.items()}
+    # q.embed()
+    accs = []
+    for typ_data_row in typ_data:
+        acc = ""
+        for typ_data_row_tokenid in typ_data_row:
+            acc += " " + typ_words_revdic[typ_data_row_tokenid.data[0]]
+        print(acc)
+        accs.append(acc)
+    goldacces = [u" musical artist <MASK> <MASK> <MASK>",
+                 u" artist <MASK> <MASK> <MASK> <MASK>",
+                 u" film <MASK> <MASK> <MASK> <MASK>"]
+    for goldacce, acce in zip(goldacces, accs):
+        print(goldacce, acce)
+        assert(acce == goldacce)
+
+    print(x)
+
+    loss = typ_y.sum()
+    loss.backward()
+    grulayer = typ_emb.computer.layers[2].nnlayer
+    for param in grulayer.parameters():
+        assert(param.grad is not None)
+        assert(param.grad.norm().data[0] > 0)
+
+    print("typ_emb: computer GRU grads non-zero")
+    print("DONE: typ_emb correct")
+    # endregion
+
+    # region rel emb test
+    print("rel emb")
+    rel_emb = fl_emb.base.over.inner
+    print(rel_emb)
+    print(rel_emb.D)
+    testrels = [":<http://dbpedia.org/ontology/spouse>",
+                 ":<http://dbpedia.org/ontology/archipelago>",
+                 ":<http://dbpedia.org/ontology/characterName>",
+                 ":-<http://dbpedia.org/ontology/spouse>",
+                 ":-<http://dbpedia.org/ontology/archipelago>",
+                 ":-<http://dbpedia.org/ontology/characterName>"]
+    x = [rel_emb.D[e] for e in testrels]
+    rel_x = q.var(np.asarray(x, dtype="int64")).v
+    rel_y, _ = rel_emb(rel_x)
+    rel_data = rel_emb.data[rel_x]
+    rel_words_revdic = {v: k for k, v in rel_emb.computer.layers[6].layers[0].block.D.items()}
+    # q.embed()
+    accs = []
+    diracs = []
+    for rel_data_row in rel_data:
+        acc = ""
+        diracs.append("fwd" if rel_data_row.data[0] == 0 else "rev")
+        rel_data_row = rel_data_row[1:]
+        for rel_data_row_tokenid in rel_data_row:
+            acc += " " + rel_words_revdic[rel_data_row_tokenid.data[0]]
+        print(acc)
+        accs.append(acc)
+    print(diracs)
+    goldacces = [u" spouse <MASK> <MASK> <MASK>",
+                 u" archipelago <MASK> <MASK> <MASK>",
+                 u" character name <MASK> <MASK>",
+                 u" spouse <MASK> <MASK> <MASK>",
+                 u" archipelago <MASK> <MASK> <MASK>",
+                 u" character name <MASK> <MASK>",
+                 ]
+    golddiracs = [u"fwd"] * 3 + [u"rev"] * 3
+    for goldacce, golddirac, acce, dirac in zip(goldacces, golddiracs, accs, diracs):
+        print(goldacce, acce)
+        assert(dirac == golddirac)
+        assert (acce == goldacce)
+
+    loss = rel_y.sum()
+    loss.backward()
+    grulayer = rel_emb.computer.layers[6].layers[2].nnlayer
+    for param in grulayer.parameters():
+        print("param")
+        assert (param.grad is not None)
+        assert (param.grad.norm().data[0] > 0)
+
+    print("rel_emb: computer gru param grads non-zero")
+
+    dirembparam = rel_emb.computer.layers[3].embedding.weight
+    assert(dirembparam.grad is not None and dirembparam.grad.norm().data[0] > 0)
+
+    print("rel_emb: direction embedder grad non-zero")
+
+    print(x)
+    print("DONE: rel_emb correct")
+    # endregion
+
+    # region ent emb test
+    print("ent embs")
+    ent_emb = fl_emb.base.base.over.inner
+    print(ent_emb)
+    testents = [u"<http://dbpedia.org/resource/Piotr_Gliński>",
+                u"<http://dbpedia.org/resource/Atlético_Petróleos_de_Luanda_(handball)>",
+                u"<http://dbpedia.org/resource/Raša_(river)>"]
+
+    x = [ent_emb.D[e] for e in testents]
+    ent_x = q.var(np.asarray(x, dtype="int64")).v
+    ent_y, _ = ent_emb(ent_x)
+    ent_data = ent_emb.base.data[ent_x]
+    ent_words_revdic = {v: k for k, v in ent_emb.base.computer.layers[0].block.D.items()}
+    # q.embed()
+    accs = []
+    for ent_data_row in ent_data:
+        acc = ""
+        for ent_data_row_tokenid in ent_data_row:
+            acc += " " + ent_words_revdic[ent_data_row_tokenid.data[0]]
+        print(acc)
+        accs.append(acc)
+    goldacces = [u" piotr glinski" + u" <MASK>" * 8,
+                 u" atletico petroleos de luanda" + u" <MASK>"*6,
+                 u" rasa" + u" <MASK>"*9]
+    for goldacce, acce in zip(goldacces, accs):
+        print(goldacce, acce)
+        assert (acce == goldacce)
+
+    ent_typ_map_data = ent_emb.merg.data[ent_x]
+    print(ent_typ_map_data)
+    ent_typ_data = ent_emb.merg.computer.layers[0].data[ent_typ_map_data.squeeze()]
+    ent_words_revdic = {v: k for k, v in ent_emb.merg.computer.layers[0].computer.layers[0].block.D.items()}
+    # q.embed()
+    accs = []
+    for ent_data_row in ent_typ_data:
+        acc = ""
+        for ent_data_row_tokenid in ent_data_row:
+            acc += " " + ent_words_revdic[ent_data_row_tokenid.data[0]]
+        print(acc)
+        accs.append(acc)
+    goldacces = [u" scientist" + u" <MASK>" * 4,
+                 u" soccer club" + u" <MASK>" * 3,
+                 u" stream" + u" <MASK>" * 4]
+
+    for goldacce, acce in zip(goldacces, accs):
+        print(goldacce, acce)
+        assert (acce == goldacce)
+
+    loss = ent_y.sum()
+    loss.backward()
+    grulayer = ent_emb.base.computer.layers[2].nnlayer
+    for param in grulayer.parameters():
+        print("param")
+        assert (param.grad is not None)
+        assert (param.grad.norm().data[0] > 0)
+
+    print("ent_emb: label computer gru param grads non-zero")
+
+    grulayer = ent_emb.merg.computer.layers[0].computer.layers[2].nnlayer
+    for param in grulayer.parameters():
+        print("param")
+        assert (param.grad is not None)
+        assert (param.grad.norm().data[0] > 0)
+
+    print("ent_emb: type label computer gru param grads non-zero")
+
+    print("DONE: ent emb correct")
+    # endregion
+
+    # region special tokens
+    print("special tokens test")
+    special_emb = fl_emb.base.base.base.over.inner
+    print(special_emb)
+    print(special_emb.D)
+    for k, v in special_emb.D.items():
+        print(k, v, fl_emb.D[k])
+    testspecial = ["<<TYPE>>",
+                   "<<COUNT>>",
+                   "<<BRANCH>>",
+                   "<<JOIN>>",
+                   "<<EQUALS>>",
+                   "<RARE>",
+                   "<START>",
+                   "<END>",
+                   "<MASK>",]
+    x = [special_emb.D[e] for e in testspecial]
+    special_x = q.var(np.asarray(x, dtype="int64")).v
+    special_y, _ = special_emb(special_x)
+
+    loss = special_y.sum()
+    loss.backward()
+    assert(special_emb.embedding.weight.grad.norm().data[0] > 0)
+    print("special_emb: embedding grad non-zero")
+
+    print("retrieved special token's vectors")
+    # endregion
+
+    # region test all fl_emb
+
+    sepparams = set([param for param in typ_emb.parameters()]) \
+                | set([param for param in rel_emb.parameters()]) \
+                | set([param for param in ent_emb.parameters()]) \
+                | set([param for param in special_emb.parameters()])
+    sepparamgrads = {sepparam: sepparam.grad.data.numpy() + 0
+                      for sepparam in sepparams
+                      if sepparam.grad is not None}
+
+    alltokens = testtypes + testrels + testents + testspecial
+    expectedvecs = torch.cat([typ_y, rel_y, ent_y, special_y], 0)
+    x = [fl_emb.D[token] for token in alltokens]
+    all_x = q.var(np.asarray(x, dtype="int64")).v
+    all_y, mask = fl_emb(all_x)
+
+    expected_np = expectedvecs.data.numpy()
+    returned_np = all_y.data.numpy()
+
+    print(np.linalg.norm(expected_np - returned_np))
+    assert(np.allclose(expected_np, returned_np))
+
+    mask = mask.data.numpy()
+    assert(mask[-1] == 0)
+    assert(np.all(mask[:-1] == 1))
+
+    fl_emb.zero_grad()
+
+    loss = all_y.sum()
+    loss.backward()
+    print("all_emb: loss backwarded without throwing errors")
+
+    allparams = set([param for param in fl_emb.parameters()])
+    print("{} allparams, {} sepparams".format(len(allparams), len(sepparamgrads)))
+
+    q.embed()
+
+    for allparam in allparams:
+        if allparam in sepparamgrads:
+            print("paramgrad")
+            sepparamgrad = sepparamgrads[allparam]
+            assert(allparam.grad is not None
+               and np.allclose(allparam.grad.data.numpy(), sepparamgrad))
+
+    print("fl_emb: gradients are equal to separated mode")
+
+    print("fl_emb overriding correct")
+    # endregion
+
+    # q.embed()
 
 
 def load_all(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
@@ -26,7 +324,7 @@ def load_all(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     tt.tock("loaded vnts")
     qpids, questionsm, querysm = loadedq
 
-    q.embed()
+    # q.embed()
 
     return (qpids, questionsm, querysm, vntmat), (nl_emb, fl_emb, fl_linout)
 
@@ -94,10 +392,14 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     gloveemb = q.PretrainedWordEmb(glovedim, incl_maskid=False, incl_rareid=False)
 
     tt.tick("building reps")
-    # get NL reps
+    # region get NL reps
     baseemb_question = q.ZeroWordEmb(dim=glovedim, worddic=questionsm.D)
-
-    nl_emb = baseemb_question.override(gloveemb)
+    specialtokens = set(questionsm.D.keys()) - set(gloveemb.D.keys())
+    specialtokensdic = dict(zip(specialtokens, range(len(specialtokens))))
+    specialtokenemb = q.WordEmb(dim=glovedim, worddic=specialtokensdic)
+    nl_emb = baseemb_question.override(specialtokenemb)
+    nl_emb = nl_emb.override(gloveemb)
+    # endregion
 
     # region typ reps
     typsm = lexinfo["typsm"]
@@ -233,8 +535,10 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
                 computer=typ_rep_inner_for_ent, worddic=typdic)
     else:
         typ_emb_for_ent = typ_emb
-    ent_typ_emb = q.ComputedWordEmb(data=typtrans,
-                computer=typ_emb_for_ent, worddic=entdic)
+    ent_typ_emb = q.ComputedWordEmb(
+        data=typtrans,
+        computer=q.Stack(typ_emb_for_ent, q.argmap.spec(0)),
+        worddic=entdic)
 
     if not shared_computers:
         typ_rep_inner_for_ent = q.RecurrentStack(
@@ -244,8 +548,10 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
         )
         typ_emb_for_ent = q.ComputedWordEmb(data=typsm.matrix,
                 computer=typ_rep_inner_for_ent, worddic=typdic)
-    ent_typ_linout = q.ComputedWordLinout(data=typtrans,
-        computer=typ_emb_for_ent, worddic=entdic)
+    ent_typ_linout = q.ComputedWordLinout(
+        data=typtrans,
+        computer=q.Stack(typ_emb_for_ent, q.argmap.spec(0)),
+        worddic=entdic)
 
     ent_emb_final = ent_emb.merge(ent_typ_emb, mode=mergemode)
     ent_linout_final = ent_linout.merge(ent_typ_linout, mode=mergemode)
@@ -272,8 +578,12 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
         assert (basedict[k] == v)
     print("querysm.D and basedict consistent")
 
-    specialdict = set(basedict.keys()) - set(reldic.keys()) - set(entdic.keys()) - set(typdic.keys())
-    specialdict = dict(zip(list(specialdict), range(len(specialdict))))
+    specialdictkeys = set(basedict.keys()) - set(reldic.keys()) - set(entdic.keys()) - set(typdic.keys())
+    specialdictsortedkeys = [k for k, v in sorted([(k, basedict[k]) for k in specialdictkeys], key=lambda x: x[1])]
+    specialdict = dict(zip(specialdictsortedkeys, range(len(specialdictsortedkeys))))
+
+    assert(specialdict["<MASK>"] == 0)
+
     special_emb = q.WordEmb(dim=dim, worddic=specialdict)
     special_linout = q.WordLinout(indim=dim, worddic=specialdict)
 
@@ -426,4 +736,5 @@ def edit_distance(a, b):
 if __name__ == "__main__":
     # print(replace_longest_common_substring_span_re("microsoft visual studio", "<E0>", "Name the company founded in US and created Visual Studio"))
     # get_vnts()
+    test_reps()
     q.argprun(load_all)

@@ -241,7 +241,7 @@ class GANTrainer(object):
                                 errD=errD.data[0], errG=errG.data[0],
                                 scoreD_real=scoreD_real_vec.mean().data[0],
                                 scoreD_fake=scoreD_fake_vec.mean().data[0],
-                                lip_loss=lip_loss.data[0] if lip_loss is not None else 0.,
+                                lip_loss=lip_loss.data[0] if lip_loss is not None else -999.,
                                 valid_EMD=valid_EMD, valid_fake2real=valid_fake2real,
                                 valid_real2fake=valid_real2fake, valid_fakeandreal=valid_fakeandreal,
                                 when="after_G")
