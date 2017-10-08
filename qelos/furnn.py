@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import qelos as q
 from qelos.rnn import GRUCell, Recurrent, Reccable, RNUBase
 from qelos.qutils import name2fn
 from qelos.basic import Forward
@@ -59,3 +60,4 @@ class MemGRUCell(GRUCell):
         M_t = M_t.view(x_t.size(0), -1)
 
         return c_t, M_t
+
