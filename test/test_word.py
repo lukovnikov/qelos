@@ -179,6 +179,25 @@ class TestGlove(TestCase):
         self.assertTrue(np.allclose(thevector, truevector))
         self.assertEqual(self.glove.embedding.weight.size(), (4002, 50))
 
+    def test_loaded_with_dic(self):
+        D = "<MASK> <RARE> cat dog person earlgreytea".split()
+        D = dict(zip(D, range(len(D))))
+        m = q.PretrainedWordEmb(50, worddic=D)
+
+    def test_subclone(self):
+        D = "<MASK> <RARE> cat dog person earlgreytea".split()
+        D = dict(zip(D, range(len(D))))
+        subclone = self.glove.subclone(D, fixed=True)
+
+        for k, v in D.items():
+            if k not in subclone.D:
+                self.assertTrue(k not in self.glove.D)
+            else:
+                subclonemb = subclone(q.var(np.asarray([subclone.D[k]])).v)[0].data.numpy()
+                gloveemb = self.glove(q.var(np.asarray([self.glove.D[k]])).v)[0].data.numpy()
+                self.assertTrue(np.allclose(subclonemb, gloveemb))
+        pass
+
 
 class TestComputedWordEmb(TestCase):
     def setUp(self):

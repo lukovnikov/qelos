@@ -329,7 +329,7 @@ class PretrainedWordVec(object):
         path = os.path.join(os.path.dirname(__file__), relpath)
         return path
 
-    def loadvalue(self, path, dim, indim=None, maskid=True, rareid=True):
+    def loadvalue(self, path, dim, indim=None, worddic=None, maskid=True, rareid=True):
         # TODO: nonstandard mask and rareid?
         tt = ticktock(self.__class__.__name__)
         tt.tick()
@@ -352,9 +352,10 @@ class PretrainedWordVec(object):
         if self.useloadcache:
             self.loadcache[path] = (W, words)
 
-        # adapt
+        # select
         if indim is not None:
             W = W[:indim, :]
+
         if rareid:
             W = np.concatenate([np.zeros_like(W[0, :])[np.newaxis, :], W], axis=0)
         if maskid:
@@ -378,12 +379,25 @@ class PretrainedWordVec(object):
             D[word] = i
             i += 1
         tt.tock("dictionary created")
+
+        if worddic is not None:
+            vocsize = max(worddic.values()) + 1
+            new_weight = np.zeros((vocsize, W.shape[1]), dtype=W.dtype)
+            new_dic = {}
+            for k, v in worddic.items():
+                if k in D:
+                    new_weight[v, :] = W[D[k], :]
+                    new_dic[k] = v
+
+            W = new_weight
+            D = new_dic
+
         return W, D
 
 
 class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
-    def __init__(self, dim, vocabsize=None, path=None, fixed=True, incl_maskid=True, incl_rareid=True, **kw):
+    def __init__(self, dim, vocabsize=None, path=None, worddic=None, fixed=True, incl_maskid=True, incl_rareid=True, value=None, **kw):
         """
         WordEmb that sets the weight of nn.Embedder to loaded pretrained vectors.
         Adds a maskid and rareid as specified on the class.
@@ -399,11 +413,35 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
         :param incl_rareid: includes a <RARE> token in dictionary and assigns it id 1 if incl_maskid was True, and id 0 otherwise
         """
         assert("worddic" not in kw)
-        path = self._get_path(dim, path=path)
-        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=incl_maskid, rareid=incl_rareid)
+        self.path = path
+        self.dim = dim
+        if value is None:
+            path = self._get_path(dim, path=path)
+            value, wdic = self.loadvalue(path, dim, indim=vocabsize,
+                                         worddic=worddic, maskid=incl_maskid,
+                                         rareid=incl_rareid)
+        else:
+            wdic = worddic
         self.allwords = wdic.keys()
         super(PretrainedWordEmb, self).__init__(dim=dim, value=value,
                                                 worddic=wdic, fixed=fixed, **kw)
+
+    def subclone(self, worddic, fixed=True):
+        vocsize = max(worddic.values()) + 1
+        dim = self.embedding.weight.size(1)
+
+        cloneweight = np.zeros((vocsize, dim), dtype="float32")
+        clonedic = {}
+        for k, v in worddic.items():
+            if k in self.D:
+                cloneweight[v] = self.embedding.weight[self.D[k]].data.numpy()
+                clonedic[k] = v
+
+        ret = PretrainedWordEmb(cloneweight.shape[1],
+                worddic=clonedic, fixed=fixed, value=cloneweight)
+
+        return ret
+
 
 
 class WordLinoutBase(WordVecBase, nn.Module):
@@ -602,7 +640,7 @@ class ComputedWordLinout(WordLinoutBase):
 
 
 class PretrainedWordLinout(WordLinout, PretrainedWordVec):
-    def __init__(self, dim, vocabsize=None, path=None, fixed=True,
+    def __init__(self, dim, vocabsize=None, path=None, worddic=None, fixed=True,
                  incl_maskid=True, incl_rareid=True, bias=False,
                  cosnorm=False,
                  **kw):
@@ -623,7 +661,7 @@ class PretrainedWordLinout(WordLinout, PretrainedWordVec):
         """
         assert ("worddic" not in kw)
         path = self._get_path(dim, path=path)
-        value, wdic = self.loadvalue(path, dim, indim=vocabsize, maskid=incl_maskid, rareid=incl_rareid)
+        value, wdic = self.loadvalue(path, dim, indim=vocabsize, worddic=worddic, maskid=incl_maskid, rareid=incl_rareid)
         self.allwords = wdic.keys()
         bias = bias and not fixed
         super(PretrainedWordLinout, self).__init__(dim, weight=value,

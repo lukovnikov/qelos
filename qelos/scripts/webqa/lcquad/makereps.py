@@ -404,13 +404,16 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     gloveemb = q.PretrainedWordEmb(glovedim, incl_maskid=False, incl_rareid=False)
 
     tt.tick("building reps")
-    # region get NL reps
+    # region get NL reps     # TODO: <RARE> should be trainable, <MASK> can also be from specials
     baseemb_question = q.ZeroWordEmb(dim=glovedim, worddic=questionsm.D)
     specialtokens = set(questionsm.D.keys()) - set(gloveemb.D.keys())
     specialtokensdic = dict(zip(specialtokens, range(len(specialtokens))))
     specialtokenemb = q.WordEmb(dim=glovedim, worddic=specialtokensdic)
     nl_emb = baseemb_question.override(specialtokenemb)
-    nl_emb = nl_emb.override(gloveemb)
+    gloveclonedic = set(questionsm.D.keys()) & set(gloveemb.D.keys())
+    gloveclonedic = dict(zip(gloveclonedic, range(len(gloveclonedic))))
+    gloveclone = gloveemb.subclone(gloveclonedic)
+    nl_emb = nl_emb.override(gloveclone)
     # endregion
 
     # region typ reps
