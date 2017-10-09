@@ -63,7 +63,7 @@ def test_reps():
     typ_x = q.var(np.asarray(x, dtype="int64")).v
     typ_y, _ = typ_emb(typ_x)
     typ_data = typ_emb.data[typ_x]
-    typ_words_revdic = {v: k for k, v in typ_emb.computer.layers[0].block.D.items()}
+    typ_words_revdic = {v: k for k, v in typ_emb.computer.layers[1].block.D.items()}
     # q.embed()
     accs = []
     for typ_data_row in typ_data:
@@ -83,7 +83,7 @@ def test_reps():
 
     loss = typ_y.sum()
     loss.backward()
-    grulayer = typ_emb.computer.layers[2].nnlayer
+    grulayer = typ_emb.computer.layers[3].nnlayer
     for param in grulayer.parameters():
         assert(param.grad is not None)
         assert(param.grad.norm().data[0] > 0)
@@ -107,7 +107,7 @@ def test_reps():
     rel_x = q.var(np.asarray(x, dtype="int64")).v
     rel_y, _ = rel_emb(rel_x)
     rel_data = rel_emb.data[rel_x]
-    rel_words_revdic = {v: k for k, v in rel_emb.computer.layers[6].layers[0].block.D.items()}
+    rel_words_revdic = {v: k for k, v in rel_emb.computer.layers[7].layers[1].block.D.items()}
     # q.embed()
     accs = []
     diracs = []
@@ -135,7 +135,7 @@ def test_reps():
 
     loss = rel_y.sum()
     loss.backward()
-    grulayer = rel_emb.computer.layers[6].layers[2].nnlayer
+    grulayer = rel_emb.computer.layers[7].layers[3].nnlayer
     for param in grulayer.parameters():
         print("param")
         assert (param.grad is not None)
@@ -143,7 +143,7 @@ def test_reps():
 
     print("rel_emb: computer gru param grads non-zero")
 
-    dirembparam = rel_emb.computer.layers[3].embedding.weight
+    dirembparam = rel_emb.computer.layers[4].embedding.weight
     assert(dirembparam.grad is not None and dirembparam.grad.norm().data[0] > 0)
 
     print("rel_emb: direction embedder grad non-zero")
@@ -164,7 +164,7 @@ def test_reps():
     ent_x = q.var(np.asarray(x, dtype="int64")).v
     ent_y, _ = ent_emb(ent_x)
     ent_data = ent_emb.base.data[ent_x]
-    ent_words_revdic = {v: k for k, v in ent_emb.base.computer.layers[0].block.D.items()}
+    ent_words_revdic = {v: k for k, v in ent_emb.base.computer.layers[1].block.D.items()}
     # q.embed()
     accs = []
     for ent_data_row in ent_data:
@@ -182,8 +182,8 @@ def test_reps():
 
     ent_typ_map_data = ent_emb.merg.data[ent_x]
     print(ent_typ_map_data)
-    ent_typ_data = ent_emb.merg.computer.layers[0].data[ent_typ_map_data.squeeze()]
-    ent_words_revdic = {v: k for k, v in ent_emb.merg.computer.layers[0].computer.layers[0].block.D.items()}
+    ent_typ_data = ent_emb.merg.computer.layers[1].data[ent_typ_map_data.squeeze()]
+    ent_words_revdic = {v: k for k, v in ent_emb.merg.computer.layers[1].computer.layers[1].block.D.items()}
     # q.embed()
     accs = []
     for ent_data_row in ent_typ_data:
@@ -202,7 +202,7 @@ def test_reps():
 
     loss = ent_y.sum()
     loss.backward()
-    grulayer = ent_emb.base.computer.layers[2].nnlayer
+    grulayer = ent_emb.base.computer.layers[3].nnlayer
     for param in grulayer.parameters():
         print("param")
         assert (param.grad is not None)
@@ -210,7 +210,7 @@ def test_reps():
 
     print("ent_emb: label computer gru param grads non-zero")
 
-    grulayer = ent_emb.merg.computer.layers[0].computer.layers[2].nnlayer
+    grulayer = ent_emb.merg.computer.layers[1].computer.layers[3].nnlayer
     for param in grulayer.parameters():
         print("param")
         assert (param.grad is not None)
@@ -389,6 +389,20 @@ def get_vnts(loaded_questions=None,
     return vntmat
 
 
+def zerobasespecialglovecloneoverride(dim, dic, gloveemb):
+    baseemb = q.ZeroWordEmb(dim=dim, worddic=dic)
+    oogtokens = set(dic.keys()) - set(gloveemb.D.keys())
+    oogtokens = ["<MASK>", "<RARE>"] + list(oogtokens)
+    oogtokensdic = dict(zip(oogtokens, range(len(oogtokens))))
+    oogtokenemb = q.WordEmb(dim=dim, worddic=oogtokensdic)
+    emb = baseemb.override(oogtokenemb)
+    gloveclonedic = set(dic.keys()) & set(gloveemb.D.keys()) - {"<MASK>", "<RARE>"}
+    gloveclonedic = dict(zip(gloveclonedic, range(len(gloveclonedic))))
+    gloveclone = gloveemb.subclone(gloveclonedic)
+    emb = emb.override(gloveclone)
+    return emb
+
+
 def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
         loaded_questions=None, replace_dbp=True,
         lexmatp="../../../../datasets/lcquad/lcquad.multilin.lexmats"
@@ -405,22 +419,15 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
 
     tt.tick("building reps")
     # region get NL reps     # TODO: <RARE> should be trainable, <MASK> can also be from specials
-    baseemb_question = q.ZeroWordEmb(dim=glovedim, worddic=questionsm.D)
-    specialtokens = set(questionsm.D.keys()) - set(gloveemb.D.keys())
-    specialtokensdic = dict(zip(specialtokens, range(len(specialtokens))))
-    specialtokenemb = q.WordEmb(dim=glovedim, worddic=specialtokensdic)
-    nl_emb = baseemb_question.override(specialtokenemb)
-    gloveclonedic = set(questionsm.D.keys()) & set(gloveemb.D.keys())
-    gloveclonedic = dict(zip(gloveclonedic, range(len(gloveclonedic))))
-    gloveclone = gloveemb.subclone(gloveclonedic)
-    nl_emb = nl_emb.override(gloveclone)
+    nl_emb = zerobasespecialglovecloneoverride(glovedim, questionsm.D, gloveemb)
     # endregion
 
     # region typ reps
     typsm = lexinfo["typsm"]
     typdic = lexinfo["typdic"]
-    baseemb_typmat = q.WordEmb(dim=glovedim, worddic=typsm.D)
-    emb_typmat = baseemb_typmat.override(gloveemb)
+    emb_typmat = zerobasespecialglovecloneoverride(glovedim, typsm.D, gloveemb)
+    # baseemb_typmat = q.WordEmb(dim=glovedim, worddic=typsm.D)
+    # emb_typmat = baseemb_typmat.override(gloveemb)
     typ_rep_inner = q.RecurrentStack(
         q.persist_kwargs(),
         emb_typmat,
@@ -468,8 +475,9 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     reldic_rev = {k[0:1]+"-"+k[1:]: v + max(reldic.values()) + 1 for k, v in reldic.items()}
     reldic.update(reldic_rev)
     # fwdorrev = np.concatenate([fwdorrev * 0, fwdorrev * 1], axis=0)
-    baseemb_relmat = q.WordEmb(dim=glovedim, worddic=reldatadic)
-    emb_relmat = baseemb_relmat.override(gloveemb)
+    emb_relmat = zerobasespecialglovecloneoverride(glovedim, reldatadic, gloveemb)
+    # baseemb_relmat = q.WordEmb(dim=glovedim, worddic=reldatadic)
+    # emb_relmat = baseemb_relmat.override(gloveemb)
 
     rel_rep_inner_recu = q.RecurrentStack(
         q.persist_kwargs(),
@@ -527,8 +535,9 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     # region ent reps
     entsm = lexinfo["entsm"]
     entdic = lexinfo["entdic"]
-    baseemb_entmat = q.WordEmb(dim=glovedim, worddic=entsm.D)
-    emb_entmat = baseemb_entmat.override(gloveemb)
+    emb_entmat = zerobasespecialglovecloneoverride(glovedim, entsm.D, gloveemb)
+    # baseemb_entmat = q.WordEmb(dim=glovedim, worddic=entsm.D)
+    # emb_entmat = baseemb_entmat.override(gloveemb)
     ent_rep_inner = q.RecurrentStack(
         q.persist_kwargs(),
         emb_entmat,
