@@ -251,7 +251,8 @@ class Test_RNNLayer(TestCase):
 class TestRecStack(TestCase):
     def test_shapes(self):
         batsize = 5
-        m = q.RecStack(q.GRUCell(9, 10), q.GRUCell(10, 11))
+        m = q.RecStack(
+            q.persist_kwargs(), q.GRUCell(9, 10), q.GRUCell(10, 11))
         x_t = Variable(torch.FloatTensor(np.random.random((batsize, 9))))
         h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))
@@ -263,7 +264,8 @@ class TestRecStack(TestCase):
         batsize = 3
         seqlen = 4
 
-        m = q.RecStack(q.GRUCell(9, 10), q.GRUCell(10, 11))
+        m = q.RecStack(
+            q.persist_kwargs(), q.GRUCell(9, 10), q.GRUCell(10, 11))
         x = Variable(torch.FloatTensor(np.random.random((batsize, seqlen, 9))))
         h_tm1_a = Variable(torch.FloatTensor(np.random.random((batsize, 10))))
         h_tm1_b = Variable(torch.FloatTensor(np.random.random((batsize, 11))))
@@ -383,6 +385,7 @@ class TestRecurrentStack(TestCase):
     def test_shapes(self):
         batsize, seqlen, vocsize, embdim, encdim = 5, 3, 20, 4, 6
         m = q.RecurrentStack(
+            q.persist_kwargs(),
             nn.Embedding(vocsize, embdim),
             q.GRULayer(embdim, encdim),
             q.Forward(encdim, vocsize),

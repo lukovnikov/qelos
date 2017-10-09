@@ -57,6 +57,7 @@ def category(token):
 def dbfy(x):
     return u"<{}>".format(x)
 
+
 def undbfy(x):
     if x[:2] == ":-":
         x = x[2:]

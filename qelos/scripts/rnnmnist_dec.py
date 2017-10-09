@@ -30,7 +30,8 @@ class Encoder(nn.Module):
         self.mode = mode
         if self.mode == "qrnn":
             tt.msg("using q.RNN")
-            self.rnn = RecStack(*[GRUCell(input_size, hidden_size)] +
+            self.rnn = RecStack(*[q.persist_kwargs(),
+                                  GRUCell(input_size, hidden_size)] +
                                  [GRUCell(hidden_size, hidden_size) for i in range(num_layers - 1)]) \
                 .to_layer().return_all()
         elif self.mode == "nn":
@@ -180,6 +181,7 @@ def main(
     decoder = q.ContextDecoder(*[
         nn.Embedding(256, embdim),
         q.RecurrentStack(
+            q.persist_kwargs(),
             q.GRULayer((embdim + hidden_size if ctx_to_decinp else embdim), decdim),
             nn.Linear(decdim, 256),
             nn.LogSoftmax()

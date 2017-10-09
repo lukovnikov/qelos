@@ -1,12 +1,13 @@
 from __future__ import print_function
 import qelos as q
-from qelos.scripts.webqa.load import *
+from qelos.scripts.webqa.lcquad.makereps import load_all
 import torch
 from torch import nn
 import sys
 import numpy as np
 from collections import OrderedDict
 import sparkline
+import pickle
 
 from qelos.scripts.webqa.seq2seq_shared import make_encoder, make_decoder, \
     test_model, ErrorAnalyzer, Model, allgiven_adjust_vnt, get_corechain
@@ -45,24 +46,25 @@ def run(lr=0.1,
     # region I. data
     # load data and reps
     tt.tick("loading data and rep")
-    rel_which = tuple(rel_which.split())
+
     flvecdim = 0
     if decsplit:    flvecdim += decdim // 2
     else:           flvecdim += decdim
     flvecdim += encdim
+
+    # LC-QuaD loading
     (qids, question_sm, query_sm, vnt_mat), (trainids, testids), (src_emb, tgt_emb, tgt_lin) \
-        = load_full(qp="../../../datasets/webqsp/webqsp.time", dim=flvecdim,
-                    glovedim=glovedim, merge_mode=merge_mode,
-                   rel_which=rel_which)
+        = load_all(dim=flvecdim, glovedim=glovedim, mergemode=merge_mode)
+
     vnt_mat = vnt_mat[:, :query_sm.matrix.shape[1], :]
 
     # test tgt_lin
-    testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v
-    testlinvnt = np.zeros((3, vnt_mat.shape[-1]), dtype="int64")
-    testlinvntx = np.asarray([0, 0, 0,  1, 1,   1, 2, 2,  2,   2])
-    testlinvnty = np.asarray([0, 1, 21, 0, 1, 201, 0, 1, 21, 201])
-    testlinvnt[testlinvntx, testlinvnty] = 1
-    testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
+    # testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v
+    # testlinvnt = np.zeros((3, vnt_mat.shape[-1]), dtype="int64")
+    # testlinvntx = np.asarray([0, 0, 0,  1, 1,   1, 2, 2,  2,   2])
+    # testlinvnty = np.asarray([0, 1, 21, 0, 1, 201, 0, 1, 21, 201])
+    # testlinvnt[testlinvntx, testlinvnty] = 1
+    # testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
 
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")
@@ -70,7 +72,8 @@ def run(lr=0.1,
     train_questions, test_questions = question_sm.matrix[trainids], question_sm.matrix[testids]
     train_queries, test_queries = query_sm.matrix[trainids], query_sm.matrix[testids]
     train_vnt, test_vnt = vnt_mat[trainids], vnt_mat[testids]
-    train_qids, test_qids = qids[trainids], qids[testids]
+    train_qids, test_qids = [qids[trainid] for trainid in trainids], \
+                            [qids[testid] for testid in testids]
     print(len(test_qids))
     # q.embed()
 
@@ -124,7 +127,7 @@ def run(lr=0.1,
     tgt_emb_dim = flvecdim
     encoder = make_encoder(src_emb, embdim=src_emb_dim, dim=encdim, dropout=dropout)
     ctxdim = encdim
-    decoder = make_decoder(mode="webqsp")(tgt_emb, tgt_lin, ctxdim=ctxdim,
+    decoder = make_decoder(mode="lcquad")(tgt_emb, tgt_lin, ctxdim=ctxdim,
                            embdim=tgt_emb_dim, dim=decdim,
                            attmode=attmode, decsplit=decsplit,
                            celltype=celltype)
@@ -180,25 +183,26 @@ def run(lr=0.1,
     tt.msg("NLL:\t{}\n Seq Accuracy:\t{}\n Elem Accuracy:\t{}"
           .format(nll, seqacc, elemacc))
 
-    tt.msg("getting EL- and data-corrected seq accuracy")
-    welllinked = pickle.load(open("../../../datasets/webqsp/welllinked_qids.pkl"))
-    ebt = lambda a, b, c: (a, c[:, :-1], b[:, 1:])
-    argmaxer = q.Lambda(lambda x: torch.max(x[0], 2)[1])
-    predictions = q.eval(m).cuda(cuda).on(test_dataloader)\
-        .set_batch_transformer(ebt, argmaxer).run()
-    predictions = predictions.cpu().data.numpy()
-
-    totaltest = 1639.
-    same = predictions != test_queries[:, 1:]
-    mask = test_queries[:, 1:] != 0
-    same = same * mask
-    same = np.sum(same, axis=1)
-    acc = 0.
-    for diff_e, qid in zip(list(same), test_qids):
-        if diff_e == 0 and qid in welllinked:
-            acc += 1
-    tt.msg("{} = corrected seq accuracy".format(acc / totaltest))
-    correctedacc = acc / totaltest
+    # tt.msg("getting EL- and data-corrected seq accuracy")
+    # welllinked = pickle.load(open("../../../datasets/webqsp/welllinked_qids.pkl"))
+    # ebt = lambda a, b, c: (a, c[:, :-1], b[:, 1:])
+    # argmaxer = q.Lambda(lambda x: torch.max(x[0], 2)[1])
+    # predictions = q.eval(m).cuda(cuda).on(test_dataloader)\
+    #     .set_batch_transformer(ebt, argmaxer).run()
+    # predictions = predictions.cpu().data.numpy()
+    #
+    # totaltest = 1639.
+    # same = predictions != test_queries[:, 1:]
+    # mask = test_queries[:, 1:] != 0
+    # same = same * mask
+    # same = np.sum(same, axis=1)
+    # acc = 0.
+    # for diff_e, qid in zip(list(same), test_qids):
+    #     if diff_e == 0 and qid in welllinked:
+    #         acc += 1
+    # tt.msg("{} = corrected seq accuracy".format(acc / totaltest))
+    # correctedacc = acc / totaltest
+    correctedacc = 0
 
     # log
     if log:
@@ -223,12 +227,12 @@ def run(lr=0.1,
                                 ("valid_seq_acc", validlossscores[1]),
                                 ("valid_elem_acc", validlossscores[2])])
 
-        q.log("experiments_seq2seq.log", mode="a", name="seq2seq_run", body=body)
+        q.log("experiments_seq2seq_lcquad.log", mode="a", name="seq2seq_run", body=body)
 
     # error analysis
     if erroranalysis:
         tt.msg("error analysis")
-        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, train_queries, mode="webqsp")
+        erranal = ErrorAnalyzer(question_sm.D, tgt_emb.D, train_queries, mode="lcquad")
         anal_losses = q.lossarray((erranal, lambda x: (x, {})))
         q.test(m).cuda(cuda)\
             .on(test_dataloader, anal_losses)\

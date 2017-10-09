@@ -118,6 +118,7 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     ent_name_base_inner_emb = q.WordEmb(dim=glovedim, worddic=entinfo.names_word.D)
     ent_name_inner_emb = ent_name_base_inner_emb.override(gloveemb)
     ent_name_inner_enc = q.RecurrentStack(
+        q.persist_kwargs(),
         ent_name_inner_emb,
         q.argmap.spec(0, mask=1),
         q.GRULayer(glovedim, dim).return_final("only"),
@@ -129,6 +130,7 @@ def get_ent_emb(dim, gloveemb, mode="cat", computedwhat=q.ComputedWordEmb):
     ent_notabletype_base_inner_emb = q.WordEmb(dim=glovedim, worddic=entinfo.notabletypes_word.D)
     ent_notabletype_inner_emb = ent_notabletype_base_inner_emb.override(gloveemb)
     ent_notabletype_inner_enc = q.RecurrentStack(
+        q.persist_kwargs(),
         ent_notabletype_inner_emb,
         q.argmap.spec(0, mask=1),
         q.GRULayer(glovedim, dim).return_final("only"),
@@ -156,6 +158,7 @@ def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.C
         rel_name_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.names.D)
         rel_name_inner_emb = rel_name_base_inner_emb.override(gloveemb)
         rel_name_inner_enc = q.RecurrentStack(
+            q.persist_kwargs(),
             rel_name_inner_emb,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only"),
@@ -169,6 +172,7 @@ def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.C
         rel_urlwords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.urlwords.D)
         rel_urlwords_inner_emb = rel_urlwords_base_inner_emb.override(gloveemb)
         rel_urlwords_inner_enc = q.RecurrentStack(
+            q.persist_kwargs(),
             rel_urlwords_inner_emb,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only"),
@@ -181,6 +185,7 @@ def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.C
         # 3. encode url with tokens
         rel_urltokens_inner_emb = q.WordEmb(dim=embdim, worddic=relinfo.urltokens.D)
         rel_urltokens_comp = q.RecurrentStack(
+            q.persist_kwargs(),
             rel_urltokens_inner_emb,
             q.argmap.spec(0, mask=1),
             q.GRULayer(embdim, dim).return_final("only"),
@@ -209,6 +214,7 @@ def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.C
         rel_domainwords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.domainwords.D)
         rel_domainwords_inner_emb = rel_domainwords_base_inner_emb.override(gloveemb)
         rel_domainwords_inner_enc = q.RecurrentStack(
+            q.persist_kwargs(),
             rel_domainwords_inner_emb,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only"),
@@ -223,6 +229,7 @@ def get_rel_emb(dim, gloveemb, mode="cat", which=("urlwords",), computedwhat=q.C
         rel_rangewords_base_inner_emb = q.WordEmb(dim=glovedim, worddic=relinfo.rangewords.D)
         rel_rangewords_inner_emb = rel_rangewords_base_inner_emb.override(gloveemb)
         rel_rangewords_inner_enc = q.RecurrentStack(
+            q.persist_kwargs(),
             rel_rangewords_inner_emb,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only"),

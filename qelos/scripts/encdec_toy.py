@@ -64,6 +64,7 @@ def main(
     embedder = nn.Embedding(vocsize, embdim)
 
     encoder = q.RecurrentStack(
+        q.persist_kwargs(),
         embedder,
         q.SRUCell(encdim).to_layer(),
         q.SRUCell(encdim).to_layer(),
@@ -74,9 +75,11 @@ def main(
         decoder = q.AttentionDecoder(attention=q.Attention().forward_gen(encdim, encdim, encdim),
                                      embedder=embedder,
                                      core=q.RecurrentStack(
+                                         q.persist_kwargs(),
                                          q.GRULayer(embdim, encdim)
                                         ),
                                      smo=q.Stack(
+                                         q.persist_kwargs(),
                                          nn.Linear(encdim+encdim, vocsize),
                                          q.LogSoftmax()
                                         ),
@@ -86,12 +89,14 @@ def main(
         decoder = q.AttentionDecoderCell(attention=q.Attention().forward_gen(encdim, encdim+embdim, encdim),
                                          embedder=embedder,
                                          core=q.RecStack(
+                                             q.persist_kwargs(),
                                              q.GRUCell(embdim+encdim, encdim,
                                                        use_cudnn_cell=False,
                                                        rec_batch_norm=None,
                                                        activation="crelu")
                                          ),
                                          smo=q.Stack(
+                                             q.persist_kwargs(),
                                              nn.Linear(encdim+encdim, vocsize),
                                              q.LogSoftmax()
                                          ),

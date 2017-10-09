@@ -44,6 +44,10 @@ class StackSpecFunction(Lambda):
             return a[spece]
 
 
+class persist_kwargs(nn.Module):
+    pass
+
+
 class argmap(StackSpecFunction):
     """
     Only used inside stacks.
@@ -154,6 +158,7 @@ class Stack(nn.Module):
         self.layers = q.ModuleList()
         self.add(*layers)
         self._saved_slots = {}      # not for params
+        self._persist_kwargs = False
 
     def add(self, *layers):
         self._add(*layers)
@@ -162,35 +167,35 @@ class Stack(nn.Module):
         self.layers.extend(list(layers))
 
     def forward(self, *x, **kw):
-        y_l = x
-        args, kwargs = None, None
-        argmapped = False
+        args, kwargs = x, kw
         for layer in self.layers:
-            if argmapped:
-                rargs = args
-                rkw = {}
+            rargs = args
+            rkw = {}
+            if self._persist_kwargs:
                 rkw.update(kw)
-                rkw.update(kwargs)
-            else:
-                rargs = y_l
-                rkw = kw
+            rkw.update(kwargs)
             if isinstance(layer, q.argmap):
                 args, kwargs = layer(rargs, rkw, self._saved_slots)
-                argmapped = True
             elif isinstance(layer, argsave):
                 globols = layer(rargs, rkw, self._saved_slots)
+            elif isinstance(layer, q.persist_kwargs):
+                self._persist_kwargs = True
             else:
-                y_l = layer(*rargs, **rkw)
-                argmapped = False
-            if not q.issequence(y_l) and not argmapped:
-                y_l = tuple([y_l])
-        if argmapped:
-            ret = args
+                layerret = layer(*rargs, **rkw)
+                if isinstance(layerret, tuple) \
+                    and len(layerret) == 2 \
+                        and isinstance(layerret[1], dict):
+                    args, kwargs = layerret
+                else:
+                    args, kwargs = layerret, {}
+                if not q.issequence(args):
+                    args = tuple([args])
+        if len(args) == 1:
+            args = args[0]
+        if len(kwargs) > 0:
+            return args, kwargs
         else:
-            ret = y_l
-        if len(ret) == 1:
-            ret = ret[0]
-        return ret
+            return args
 
     # TODO: stack generator
 

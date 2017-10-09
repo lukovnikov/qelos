@@ -328,6 +328,7 @@ def run(
     elif mode == "aynrnn":
         maxlen = max(traindata.shape[1], testdata.shape[1])
         enc = q.RecurrentStack(
+            q.persist_kwargs(),
             emb,
             q.argsave.spec(mask=1),
             q.argmap.spec(0),
@@ -347,6 +348,7 @@ def run(
     elif mode == "ayncnn":
         maxlen = max(traindata.shape[1], testdata.shape[1])
         enc = q.RecurrentStack(
+            q.persist_kwargs(),
             emb,
             q.argsave.spec(mask=1),
             q.argmap.spec(0),
@@ -369,6 +371,7 @@ def run(
         encoutdim = encdim * 2
         if bidir:
             enc = q.RecurrentStack(
+                q.persist_kwargs(),
                 emb,
                 q.argsave.spec(mask=1),
                 q.argmap.spec(0),
@@ -381,6 +384,7 @@ def run(
             )
         else:
             enc = q.RecurrentStack(
+                q.persist_kwargs(),
                 emb,
                 q.argsave.spec(mask=1),
                 q.argmap.spec(0),
@@ -396,6 +400,7 @@ def run(
 
     # output tagging model
     out = q.RecurrentStack(
+        q.persist_kwargs(),
         nn.Linear(encoutdim, len(tdic), bias=False),
         nn.LogSoftmax())
 

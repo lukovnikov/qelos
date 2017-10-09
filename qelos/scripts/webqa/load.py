@@ -42,7 +42,11 @@ def load_full(p=defaultp, qp=defaultqp, dim=50, glovedim=50,
                 assert(vnt_mat[i, j, next_symbol] == 1)
 
     tt.tock("checked loaded vnts")
-    return (question_sm, query_sm, vnt_mat, tx_sep, qids), (src_emb, tgt_emb, tgt_lin)
+
+    trainids = np.arange(0, tx_sep, dtype="int64")
+    testids = np.arange(tx_sep, question_sm.matrix.shape[0], dtype="int64")
+
+    return (qids, question_sm, query_sm, vnt_mat), (trainids, testids), (src_emb, tgt_emb, tgt_lin)
 
 
 def load_both():

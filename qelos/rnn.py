@@ -951,7 +951,7 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
     """
     def add(self, *layers):
         for layer in layers:
-            if not isinstance(layer, (Reccable, q.argmap, q.argsave)):
+            if not isinstance(layer, (Reccable, q.argmap, q.argsave, q.persist_kwargs)):
                 layer = ReccableWrap(layer)
             self._add(layer)
 
@@ -1042,7 +1042,7 @@ class RecurrentStack(RecStack):
 
     def add(self, *layers):
         for layer in layers:
-            if not isinstance(layer, (Recurrent, q.argmap, q.argsave)):
+            if not isinstance(layer, (Recurrent, q.argmap, q.argsave, q.persist_kwargs)):
                 layer = RecurrentWrapper(layer)
             self._add(layer)
 

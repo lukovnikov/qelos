@@ -15,6 +15,7 @@ class TestDecoder(TestCase):
         embdim, encdim, outdim = 10, 16, 10
         # model def
         decoder_cell = q.DecoderCell(
+            q.persist_kwargs(),
             nn.Embedding(vocsize, embdim, padding_idx=0),
             q.GRUCell(embdim, encdim),
             q.Forward(encdim, vocsize),
@@ -35,6 +36,7 @@ class TestDecoder(TestCase):
         # model def
         decoder_cell = q.ContextDecoderCell(
             nn.Embedding(vocsize, embdim, padding_idx=0),
+            q.persist_kwargs(),
             q.GRUCell(embdim + ctxdim, encdim),
             q.Forward(encdim, vocsize),
             q.Softmax()
@@ -56,6 +58,7 @@ class TestDecoder(TestCase):
         decoder = q.ContextDecoder(
             nn.Embedding(vocsize, embdim, padding_idx=0),
             q.RecurrentStack(
+                q.persist_kwargs(),
                 q.GRULayer(embdim + ctxdim, encdim),
                 q.Forward(encdim, vocsize),
                 q.Softmax()
@@ -83,11 +86,13 @@ class TestAttentionDecoderCell(TestCase):
             attention=q.Attention().forward_gen(inpdim, encdim+embdim, encdim),
             embedder=nn.Embedding(vocsize, embdim),
             core=q.RecStack(
+                q.persist_kwargs(),
                 q.GRUCell(embdim + inpdim, encdim),
                 q.GRUCell(encdim, encdim),
                 coreff
             ),
             smo=q.Stack(
+                q.persist_kwargs(),
                 q.Forward(encdim+inpdim, encdim),
                 q.Forward(encdim, vocsize),
                 q.Softmax()
@@ -109,7 +114,7 @@ class TestAttentionDecoderCell(TestCase):
         inp = np.random.randint(0, vocsize, (batsize, seqlen))
         inp = Variable(torch.LongTensor(inp))
 
-        decoded = decoder(inp, ctx, ctxmask)
+        decoded = decoder(inp, ctx, ctxmask=ctxmask)
 
         self.assertEqual((batsize, seqlen, vocsize), decoded.size())
         self.assertTrue(np.allclose(
@@ -117,6 +122,126 @@ class TestAttentionDecoderCell(TestCase):
             np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
         print(decoded.size())
 
+    def test_outmask(self):
+        batsize, seqlen, inpdim = 5, 7, 8
+        vocsize, embdim, encdim = 20, 9, 10
+        ctxtoinitff = q.Forward(inpdim, encdim)
+        coreff = q.Forward(encdim, encdim)
+        initstategen = q.Lambda(lambda *x, **kw: coreff(ctxtoinitff(x[1][:, -1, :])), register_modules=coreff)
+
+        decoder_cell = q.AttentionDecoderCell(
+            attention=q.Attention().forward_gen(inpdim, encdim + embdim, encdim),
+            embedder=nn.Embedding(vocsize, embdim),
+            core=q.RecStack(
+                q.persist_kwargs(),
+                q.GRUCell(embdim + inpdim, encdim),
+                q.GRUCell(encdim, encdim),
+                coreff
+            ),
+            smo=q.Stack(
+                q.argsave.spec(mask={"mask"}),
+                q.argmap.spec(0),
+                q.Forward(encdim + inpdim, encdim),
+                q.Forward(encdim, vocsize),
+                q.argmap.spec(0, mask=["mask"]),
+                q.Softmax(),
+                q.argmap.spec(0),
+            ),
+            init_state_gen=initstategen,
+            ctx_to_decinp=True,
+            ctx_to_smo=True,
+            state_to_smo=True,
+            decinp_to_att=True
+        )
+        decoder = decoder_cell.to_decoder()
+
+        ctx = np.random.random((batsize, seqlen, inpdim))
+        ctx = Variable(torch.FloatTensor(ctx))
+        ctxmask = np.ones((batsize, seqlen))
+        ctxmask[:, -2:] = 0
+        ctxmask[[0, 1], -3:] = 0
+        ctxmask = Variable(torch.FloatTensor(ctxmask))
+
+        outmask = np.random.randint(0, 2, (batsize, seqlen, vocsize)).astype("uint8")
+        outmask = q.var(outmask).v
+
+        inp = np.random.randint(0, vocsize, (batsize, seqlen))
+        inp = Variable(torch.LongTensor(inp))
+
+        decoded = decoder(inp, ctx, ctxmask=ctxmask, outmask=outmask)
+
+        self.assertEqual((batsize, seqlen, vocsize), decoded.size())
+        self.assertTrue(np.allclose(
+            np.sum(decoded.data.numpy(), axis=-1),
+            np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
+        self.assertTrue(np.all((decoded.data.numpy() == 0) == (outmask.data.numpy() == 0)))
+        print(decoded.size())
+
+
+    def test_outmask_batched_sparse(self):
+        batsize, seqlen, inpdim = 5, 7, 8
+        vocsize, embdim, encdim = 20, 9, 10
+        ctxtoinitff = q.Forward(inpdim, encdim)
+        coreff = q.Forward(encdim, encdim)
+        initstategen = q.Lambda(lambda *x, **kw: coreff(ctxtoinitff(x[1][:, -1, :])), register_modules=coreff)
+
+        decoder_cell = q.AttentionDecoderCell(
+            attention=q.Attention().forward_gen(inpdim, encdim + embdim, encdim),
+            embedder=nn.Embedding(vocsize, embdim),
+            core=q.RecStack(
+                q.persist_kwargs(),
+                q.GRUCell(embdim + inpdim, encdim),
+                q.GRUCell(encdim, encdim),
+                coreff
+            ),
+            smo=q.Stack(
+                q.argsave.spec(mask={"mask"}),
+                q.argmap.spec(0),
+                q.Forward(encdim + inpdim, encdim),
+                q.Forward(encdim, vocsize),
+                q.argmap.spec(0, mask=["mask"]),
+                q.Softmax(),
+                q.argmap.spec(0),
+            ),
+            init_state_gen=initstategen,
+            ctx_to_decinp=True,
+            ctx_to_smo=True,
+            state_to_smo=True,
+            decinp_to_att=True
+        )
+        decoder = decoder_cell.to_decoder()
+
+        ctx = np.random.random((batsize, seqlen, inpdim))
+        ctx = Variable(torch.FloatTensor(ctx))
+        ctxmask = np.ones((batsize, seqlen))
+        ctxmask[:, -2:] = 0
+        ctxmask[[0, 1], -3:] = 0
+        ctxmask = Variable(torch.FloatTensor(ctxmask))
+
+        outmaskbinary = np.random.randint(0, 2, (batsize, seqlen, vocsize)).astype("uint8")
+        maxnumoutmask = outmaskbinary.sum(-1).max()
+        outmask_bs = np.zeros((batsize, seqlen, int(maxnumoutmask)+2), dtype="int64")
+        outmask_bs[:, :, 1] = vocsize
+        for i in range(batsize):
+            for j in range(seqlen):
+                l = 2
+                for k in range(vocsize):
+                    if outmaskbinary[i, j, k] == 1:
+                        outmask_bs[i, j, l] = k+1
+                        l += 1
+        outmask = q.var(outmask_bs).v
+
+        inp = np.random.randint(0, vocsize, (batsize, seqlen))
+        inp = Variable(torch.LongTensor(inp))
+
+        decoded = decoder(inp, ctx, ctxmask=ctxmask, outmask=outmask)
+
+        self.assertEqual((batsize, seqlen, vocsize), decoded.size())
+        self.assertTrue(np.allclose(
+            np.sum(decoded.data.numpy(), axis=-1),
+            np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
+        self.assertTrue(np.all((decoded.data.numpy() == 0) == (outmaskbinary == 0)))
+        print(decoded.size())
 
 
 class TestHierarchicalAttentionDecoderCell(TestCase):
@@ -131,11 +256,13 @@ class TestHierarchicalAttentionDecoderCell(TestCase):
             attention=q.Attention().forward_gen(inpdim, encdim+embdim, encdim),
             embedder=nn.Embedding(vocsize, embdim),
             core=q.RecStack(
+                q.persist_kwargs(),
                 q.GRUCell(embdim + inpdim, encdim),
                 q.GRUCell(encdim, encdim),
                 coreff
             ),
             smo=q.Stack(
+                q.persist_kwargs(),
                 q.Forward(encdim+inpdim, encdim),
                 q.Forward(encdim, vocsize),
                 q.Softmax()
@@ -180,11 +307,13 @@ class TestAttentionDecoder(TestCase):
             attention=q.Attention().forward_gen(inpdim, encdim+embdim, encdim),
             embedder=nn.Embedding(vocsize, embdim),
             core=q.RecurrentStack(
+                q.persist_kwargs(),
                 q.GRULayer(embdim, encdim),
                 q.GRULayer(encdim, encdim),
                 coreff
             ),
             smo=q.Stack(
+                q.persist_kwargs(),
                 q.Forward(encdim+inpdim, encdim),
                 q.Forward(encdim, vocsize),
                 q.Softmax(),

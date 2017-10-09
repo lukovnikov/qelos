@@ -8,7 +8,7 @@ from scipy.sparse import dok_matrix
 
 
 def test_reps():
-    (qpids, questionsm, querysm, vntmat), (nl_emb, fl_emb, fl_linout) \
+    (qpids, questionsm, querysm, vntmat), (_,_), (nl_emb, fl_emb, fl_linout) \
         = load_all()
 
     # region test nl emb
@@ -284,7 +284,7 @@ def test_reps():
     allparams = set([param for param in fl_emb.parameters()])
     print("{} allparams, {} sepparams".format(len(allparams), len(sepparamgrads)))
 
-    q.embed()
+    # q.embed()
 
     for allparam in allparams:
         if allparam in sepparamgrads:
@@ -324,9 +324,21 @@ def load_all(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     tt.tock("loaded vnts")
     qpids, questionsm, querysm = loadedq
 
+    txsplit = load_tx_split()
+    trainids = []
+    testids = []
+    for i, qpid in enumerate(qpids):
+        qid = qpid.split(".")[0]
+        if txsplit[qid] == 0:
+            trainids.append(i)
+        elif txsplit[qid] == 1:
+            testids.append(i)
+    trainids = np.asarray(trainids, dtype="int64")
+    testids = np.asarray(testids, dtype="int64")
+
     # q.embed()
 
-    return (qpids, questionsm, querysm, vntmat), (nl_emb, fl_emb, fl_linout)
+    return (qpids, questionsm, querysm, vntmat), (trainids, testids), (nl_emb, fl_emb, fl_linout)
 
 
 def get_vnts(loaded_questions=None,
@@ -407,6 +419,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     baseemb_typmat = q.WordEmb(dim=glovedim, worddic=typsm.D)
     emb_typmat = baseemb_typmat.override(gloveemb)
     typ_rep_inner = q.RecurrentStack(
+        q.persist_kwargs(),
         emb_typmat,
         q.argmap.spec(0, mask=1),
         q.GRULayer(glovedim, dim).return_final("only")
@@ -414,6 +427,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     typ_emb = q.ComputedWordEmb(data=typsm.matrix, computer=typ_rep_inner, worddic=typdic)
     if not shared_computers:
         typ_rep_inner = q.RecurrentStack(
+            q.persist_kwargs(),
             emb_typmat,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only")
@@ -455,12 +469,14 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     emb_relmat = baseemb_relmat.override(gloveemb)
 
     rel_rep_inner_recu = q.RecurrentStack(
+        q.persist_kwargs(),
         emb_relmat,
         q.argmap.spec(0, mask=1),
         q.GRULayer(glovedim, dim).return_final("only")
     )
     rel_direction_emb_emb = q.WordEmb(dim=dim, worddic={"FWD": 0, "REV": 1})
     rel_rep_inner = q.Stack(
+        q.persist_kwargs(),
         q.Lambda(lambda x: (x[:, 0], x[:, 1:])),
         q.argsave.spec(direction=0, content=1),
         q.argmap.spec(["direction"]),
@@ -484,12 +500,14 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
 
     if not shared_computers:
         rel_rep_inner_recu = q.RecurrentStack(
+            q.persist_kwargs(),
             emb_relmat,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only")
         )
         rel_direction_emb_emb = q.WordEmb(dim=dim, worddic={"FWD": 0, "REV": 1})
         rel_rep_inner = q.Stack(
+            q.persist_kwargs(),
             q.Lambda(lambda x: (x[:, 0], x[:, 1:])),
             q.argsave.spec(direction=0, content=1),
             q.argmap.spec(["direction"]),
@@ -509,6 +527,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     baseemb_entmat = q.WordEmb(dim=glovedim, worddic=entsm.D)
     emb_entmat = baseemb_entmat.override(gloveemb)
     ent_rep_inner = q.RecurrentStack(
+        q.persist_kwargs(),
         emb_entmat,
         q.argmap.spec(0, mask=1),
         q.GRULayer(glovedim, dim).return_final("only")
@@ -516,6 +535,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     ent_emb = q.ComputedWordEmb(data=entsm.matrix, computer=ent_rep_inner, worddic=entdic)
     if not shared_computers:
         ent_rep_inner = q.RecurrentStack(
+            q.persist_kwargs(),
             emb_entmat,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only")
@@ -527,6 +547,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     typtrans = lexinfo["verybesttypes"]
     if not shared_computers:
         typ_rep_inner_for_ent = q.RecurrentStack(
+            q.persist_kwargs(),
             emb_typmat,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only")
@@ -537,11 +558,13 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
         typ_emb_for_ent = typ_emb
     ent_typ_emb = q.ComputedWordEmb(
         data=typtrans,
-        computer=q.Stack(typ_emb_for_ent, q.argmap.spec(0)),
+        computer=q.Stack(
+            q.persist_kwargs(), typ_emb_for_ent, q.argmap.spec(0)),
         worddic=entdic)
 
     if not shared_computers:
         typ_rep_inner_for_ent = q.RecurrentStack(
+            q.persist_kwargs(),
             emb_typmat,
             q.argmap.spec(0, mask=1),
             q.GRULayer(glovedim, dim).return_final("only")
@@ -550,7 +573,8 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
                 computer=typ_rep_inner_for_ent, worddic=typdic)
     ent_typ_linout = q.ComputedWordLinout(
         data=typtrans,
-        computer=q.Stack(typ_emb_for_ent, q.argmap.spec(0)),
+        computer=q.Stack(
+            q.persist_kwargs(), typ_emb_for_ent, q.argmap.spec(0)),
         worddic=entdic)
 
     ent_emb_final = ent_emb.merge(ent_typ_emb, mode=mergemode)
@@ -603,6 +627,11 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     tt.tock("reps built")
 
     return nl_emb, fl_emb, fl_linout
+
+
+def load_tx_split(p="../../../../datasets/lcquad/lcquad.tx.split"):
+    tx = pickle.load(open(p))
+    return tx
 
 
 def load_questions(p="../../../../datasets/lcquad/lcquad.multilin",

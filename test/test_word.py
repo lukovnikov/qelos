@@ -481,6 +481,7 @@ class TestComputedWordLinout(TestCase):
     def test_masked_with_rnn_computer(self):
         data = np.random.random((7, 5, 10)).astype("float32")
         computer = q.RecurrentStack(
+            q.persist_kwargs(),
             q.GRULayer(10, 15)
         ).return_final()
         worddic = "<MASK> <RARE> first second third fourth fifth"

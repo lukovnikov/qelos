@@ -87,12 +87,13 @@ def run(window=100, subsample=10000, inspectdata=False,
     # make model
     emb = q.WordEmb(embdim, worddic=chardic)
     recm = q.RecurrentStack(
+        q.persist_kwargs(),
         emb,
         q.argmap.spec(0, mask=1),
         rnu(embdim, encdim),
     ).return_final()
 
-    m = q.Stack(recm, nn.Linear(encdim, vocsize), nn.LogSoftmax())
+    m = q.Stack(q.persist_kwargs(), recm, nn.Linear(encdim, vocsize), nn.LogSoftmax())
 
     # print(m)
 

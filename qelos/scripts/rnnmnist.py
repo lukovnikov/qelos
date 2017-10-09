@@ -65,7 +65,8 @@ def main(
             self.num_layers = num_layers
             if mode == "qrnn":
                 tt.msg("using q.RNN")
-                self.rnn = RecStack(*[GRUCell(input_size, hidden_size, use_cudnn_cell=False, rec_batch_norm="main")] +
+                self.rnn = RecStack(*[q.persist_kwargs(),
+                                      GRUCell(input_size, hidden_size, use_cudnn_cell=False, rec_batch_norm="main")] +
                                      [GRUCell(hidden_size, hidden_size) for i in range(num_layers - 1)])\
                             .to_layer().return_all()
             elif mode == "nn":
@@ -73,7 +74,8 @@ def main(
                 self.rnn = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
             elif mode == "stack":
                 self.rnn = q.RecurrentStack(
-                    *([q.GRULayer(input_size, hidden_size)] +
+                    *([q.persist_kwargs(),
+                       q.GRULayer(input_size, hidden_size)] +
                       [q.GRULayer(hidden_size, hidden_size) for i in range(num_layers - 1)]
                     )
                 )
