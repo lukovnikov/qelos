@@ -337,7 +337,7 @@ def makeiter(dl):
             dli = inner()
 
 
-def run(lr=0.00005,
+def run(lr=0.001,
         embdim=128,
         noisedim=128,
         gendim=256,
