@@ -96,7 +96,6 @@ def run(lr=0.1,
     (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
         = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
 
-
     for k, v in query_sm.D.items():
         assert(tgt_emb.D[k] == v)
     tt.msg("tgt_emb uses the same ids as query_sm")

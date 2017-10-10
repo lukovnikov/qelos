@@ -383,6 +383,30 @@ def load_all(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     tt.tock("loaded vnts")
     qpids, questionsm, querysm = loadedq
 
+    # test tokens in vnt
+    for i in range(querysm.matrix.shape[0]):
+        for j in range(querysm.matrix.shape[1]):
+            curtoken = querysm.matrix[i, j]
+            curvnts = vntmat[i, j, 2:] - 1
+            curvnts = set(curvnts) - {-1}
+            curvntval = curtoken in curvnts
+            if not curvntval:
+                print("{}: {}-th token not in vnt".format(qpids[i], j))
+    tt.msg("all tokens in vnt")
+
+    # check property ids
+    nonpropertyids = {fl_emb.D[proptoken]
+                   for proptoken in fl_emb.D.keys()
+                   if not re.match(":-?<http://dbpedia\.org/property/[^>]+>", proptoken)}
+    queryids = set(np.unique(querysm.matrix))
+    overlap = nonpropertyids & queryids
+    assert(len(overlap) == len(queryids))
+    vntids = set(np.unique(vntmat[:, :, 2:]-1)) - {-1}
+    overlap = nonpropertyids & vntids
+    assert(len(overlap) == len(vntids))
+    tt.msg("all non-/property/ symbols ({}) used in queries ({}) and vnt ({})"
+           .format(len(nonpropertyids), len(queryids), len(vntids)))
+
     txsplit = load_tx_split()
     trainids = []
     testids = []
@@ -839,4 +863,4 @@ if __name__ == "__main__":
     # print(replace_longest_common_substring_span_re("microsoft visual studio", "<E0>", "Name the company founded in US and created Visual Studio"))
     # get_vnts()
     test_reps()
-    q.argprun(load_all)
+    # q.argprun(load_all)
