@@ -55,16 +55,18 @@ def run(lr=0.1,
     # LC-QuaD loading
     (qids, question_sm, query_sm, vnt_mat), (trainids, testids), (src_emb, tgt_emb, tgt_lin) \
         = load_all(dim=flvecdim, glovedim=glovedim, mergemode=merge_mode)
+    vntvocsize = vnt_mat[0, 0, 1]
+    # end
 
     vnt_mat = vnt_mat[:, :query_sm.matrix.shape[1], :]
 
     # test tgt_lin
-    # testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v
-    # testlinvnt = np.zeros((3, vnt_mat.shape[-1]), dtype="int64")
-    # testlinvntx = np.asarray([0, 0, 0,  1, 1,   1, 2, 2,  2,   2])
-    # testlinvnty = np.asarray([0, 1, 21, 0, 1, 201, 0, 1, 21, 201])
-    # testlinvnt[testlinvntx, testlinvnty] = 1
-    # testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
+    testlinx = q.var(np.random.random((3, flvecdim)).astype("float32")).v
+    testlinvnt = np.zeros((3, vntvocsize), dtype="int64")
+    testlinvntx = np.asarray([0, 0, 0,  1, 1,   1, 2, 2,  2,   2])
+    testlinvnty = np.asarray([0, 1, 21, 0, 1, 201, 0, 1, 21, 201])
+    testlinvnt[testlinvntx, testlinvnty] = 1
+    testliny = tgt_lin(testlinx, q.var(testlinvnt).v)
 
     tt.tock("loaded data and rep")
     tt.tick("making data loaders")

@@ -286,16 +286,75 @@ def test_reps():
 
     # q.embed()
 
+    oogparams = {
+        typ_emb.computer.layers[1].block.base.over.inner.embedding.weight,
+        rel_emb.computer.layers[7].layers[1].block.base.over.inner.embedding.weight,
+        ent_emb.base.computer.layers[1].block.base.over.inner.embedding.weight,
+    }
+
     for allparam in allparams:
-        if allparam in sepparamgrads:
-            print("paramgrad")
-            sepparamgrad = sepparamgrads[allparam]
-            assert(allparam.grad is not None
-               and np.allclose(allparam.grad.data.numpy(), sepparamgrad))
+        if allparam.requires_grad:
+            assert(allparam.grad is not None)
+            if allparam.grad.data.norm() == 0:
+                print(allparam.size())
+                assert(allparam in oogparams)
+            else:
+                assert(allparam.grad.data.norm() > 0)
+            if allparam in sepparamgrads:
+                print("paramgrad")
+                sepparamgrad = sepparamgrads[allparam]
+                closeenough = np.allclose(allparam.grad.data.numpy(), sepparamgrad)
+                if not closeenough:
+                    print("norm diff: {}".format(np.linalg.norm(allparam.grad.data.numpy() - sepparamgrad)))
+                assert(closeenough)
 
     print("fl_emb: gradients are equal to separated mode")
 
     print("fl_emb overriding correct")
+    # endregion
+
+    # region test all fl_linouts
+    print("testing fl_linout")
+    vntvocsize = vntmat[0, 0, 1]    # sparse batchable
+    linvnt = np.zeros((5, vntvocsize), dtype="uint8")
+    typids = np.asarray([fl_linout.D[abc] for abc in testtypes], dtype="int64")
+    linvnt[0, typids] = 1
+    relids = np.asarray([fl_linout.D[abc] for abc in testrels], dtype="int64")
+    linvnt[1, relids] = 1
+    entids = np.asarray([fl_linout.D[abc] for abc in testents], dtype="int64")
+    linvnt[2, entids] = 1
+    specids = np.asarray([fl_linout.D[abc] for abc in testspecial], dtype="int64")
+    linvnt[3, specids] = 1
+    allids = np.asarray([fl_linout.D[abc] for abc in alltokens], dtype="int64")
+    linvnt[4, allids] = 1
+
+    lindim = 50
+    lin_inp = q.var(np.random.random((5, lindim)).astype("float32")).v
+    lin_out = fl_linout(lin_inp, mask=q.var(linvnt).v)
+
+    fl_linout.zero_grad()
+    loss = lin_out.sum()
+    loss.backward()
+
+    oogparams = {
+        fl_linout.over.inner.computer.layers[1].block.base.over.inner.embedding.weight,
+        fl_linout.base.over.inner.computer.layers[7].layers[1].block.base.over.inner.embedding.weight,
+        fl_linout.base.base.over.inner.base.computer.layers[1].block.base.over.inner.embedding.weight
+    }
+
+    for param in q.params_of(fl_linout):
+        print("fl_linout paramgrad")
+        assert(param.grad is not None)
+        if param.grad.data.norm() == 0:
+            assert(param in oogparams)
+        if param.grad.data.norm() == 0:
+            print(param.size())
+
+    # q.embed()
+    print("fl_linout worked without error (no assertions!!)")
+
+
+
     # endregion
 
     # q.embed()
@@ -556,7 +615,7 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     # endregion
 
     # region ent typ reps
-    typtrans = lexinfo["verybesttypes"]
+    typtrans = lexinfo["verybesttypes"][:, 0]
     if not shared_computers:
         typ_rep_inner_for_ent = q.RecurrentStack(
             q.persist_kwargs(),
@@ -586,7 +645,9 @@ def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
     ent_typ_linout = q.ComputedWordLinout(
         data=typtrans,
         computer=q.Stack(
-            q.persist_kwargs(), typ_emb_for_ent, q.argmap.spec(0)),
+            q.persist_kwargs(),
+            typ_emb_for_ent,
+            q.argmap.spec(0)),
         worddic=entdic)
 
     ent_emb_final = ent_emb.merge(ent_typ_emb, mode=mergemode)
