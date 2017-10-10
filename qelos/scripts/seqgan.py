@@ -390,8 +390,8 @@ def run(lr=0.00005,
         raise q.SumTingWongException("unknown mode {}".format(mode))
 
     # train
-    optimD = torch.optim.RMSprop(q.params_of(netD4D), lr=lr)
-    optimG = torch.optim.RMSprop(q.params_of(netG4G), lr=lr)
+    optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr)
+    optimG = torch.optim.Adam(q.params_of(netG4G), lr=lr)
     gantrainer = q.GANTrainer(mode="WGAN-GP", one_sided=True, noise_dim=noisedim,
                               penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
