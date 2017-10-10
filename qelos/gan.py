@@ -101,7 +101,7 @@ class GANTrainer(object):
 
     def train(self, netD, netG, niter=0, niterD=10, niterG=1, batsizeG=100,
               data_gen=None, valid_data_gen=None, cuda=False,
-              netR=None, sample_real_for_gen=False):
+              netR=None, sample_real_for_gen=False, feed_real_to_gen=False):
         """
         :param netD:    nn.Module for discriminator function,
                         or, tuple of two nn.Modules,
@@ -121,6 +121,7 @@ class GANTrainer(object):
                         allows specifying different network for processing real examples
         :return:
         """
+        assert(not (sample_real_for_gen and feed_real_to_gen))
         print("status: supporting different nets for discriminator and generator training")
         data_gen = data_gen if data_gen is not None else self.data_iter
         valid_data_gen = valid_data_gen if valid_data_gen is not None else self.valid_data_iter
@@ -180,8 +181,9 @@ class GANTrainer(object):
                     for p in netD.parameters():
                         p.data.clamp_(*self.clamp_weights_rng)
                 data = next(data_gen)
-
-                if sample_real_for_gen:     # ensure data sizes consistency
+                if feed_real_to_gen:
+                    data4gen = data
+                elif sample_real_for_gen:     # ensure data sizes consistency
                     data4gen = next(data_gen)
                     if data.size(0) != data4gen.size(0):
                         minimumsize = min(data.size(0), data4gen.size(0))
@@ -270,16 +272,16 @@ class GANTrainer(object):
                     p.requires_grad = False
                 netG.zero_grad()
 
-                if not sample_real_for_gen:
-                    vgnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
-                    vgnoise.data.normal_(0, 1)
-                    fake = netG(vgnoise)
-                else:
+                if sample_real_for_gen or feed_real_to_gen:
                     real4gen = next(data_gen)
                     real4gen = q.var(real4gen).cuda(cuda).v
                     vgnoise = q.var(torch.zeros(real4gen.size(0), self.noise_dim)).cuda(cuda).v
                     vgnoise.data.normal_(0, 1)
                     fake = netG(vgnoise, real4gen)
+                else:
+                    vgnoise = q.var(torch.zeros(batsizeG, self.noise_dim)).cuda(cuda).v
+                    vgnoise.data.normal_(0, 1)
+                    fake = netG(vgnoise)
 
                 errG = netD(fake)
                 if self.modeD == "critic":

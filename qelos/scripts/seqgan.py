@@ -118,20 +118,26 @@ def test_acha_net_g():
 
 
 class ContextDecoderACHAWrappper(nn.Module):
-    def __init__(self, decoder, amortizer=None, soft_next=False, vocsize=None, **kw):
+    def __init__(self, decoder, amortizer=None, clcutter=None, soft_next=False, vocsize=None, **kw):
         super(ContextDecoderACHAWrappper, self).__init__(**kw)
         self.decoder = decoder
         self.amortizer = amortizer
         self.soft_next = soft_next
         self.vocsize = vocsize
         self.idx2onehot = q.IdxToOnehot(vocsize)
+        self.clcutter = clcutter
 
-    def forward(self, noise, sequences):
+    def forward(self, noise, sequences, maxtime=None):
+        if self.clcutter is not None:
+            sequences = self.clcutter(sequences)
         overrideseq = sequences[:, 1:].contiguous()
         sequences = sequences[:, :-1]
         if self.soft_next:
             sequences = self.idx2onehot(sequences)
-        dec = self.decoder(sequences, noise)        # (batsize, seqlen, vocsize)
+        kw = {}
+        if maxtime is not None:
+            kw["maxtime"] = maxtime
+        dec = self.decoder(sequences, noise, **kw)        # (batsize, seqlen, vocsize)
         seqlen, vocsize = dec.size(1), dec.size(2)
         override = self.idx2onehot(overrideseq)
         amortizer = min(self.amortizer.v+1, seqlen)
@@ -143,7 +149,7 @@ class ContextDecoderACHAWrappper(nn.Module):
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
-                     seqlen, noisedim, soft_next=False, temperature=1.):
+                     seqlen, noisedim, soft_next=False, temperature=1., mode="acha-sync"):
 
     def get_amortizer_update_rule(offset=0, headstart=500, interval=200):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
@@ -155,9 +161,33 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                     print("AMORTIZED FROM {} TO {}".format(current_value, ret))
                 return ret
         return amortizer_update_rule
-    amortizer_override = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
-    tf_amor_offset = seqlen * 200 + 500
-    amortizer_teacherforce = q.DynamicHyperparam(update_rule=get_amortizer_update_rule(offset=tf_amor_offset))
+    if mode == "acha-async":
+        amortizer_override = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
+        tf_amor_offset = seqlen * 200 + 500
+        amortizer_teacherforce = q.DynamicHyperparam(update_rule=get_amortizer_update_rule(offset=tf_amor_offset))
+        amortizer_curriculum = None
+        amortizers = [amortizer_override, amortizer_teacherforce]
+    elif mode == "acha-sync":
+        amortizer_override = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
+        amortizer_teacherforce = amortizer_override
+        amortizer_curriculum = None
+        amortizers = [amortizer_override]
+    elif mode == "clth":
+        amortizer_override = q.Hyperparam(0)
+        amortizer_teacherforce = q.Hyperparam(0)    # no unteacherforce
+        amortizer_curriculum = q.DynamicHyperparam(update_rule=get_amortizer_update_rule(0))
+        amortizers = [amortizer_curriculum]
+
+    def get_cl_cutter(clamort):
+        def cl_cutter(seq):
+            if clamort is not None:
+                upto = min(clamort.v + 2, seq.size(1))
+                out = seq[:, :upto]
+                return out
+            else:
+                return seq
+
+        return cl_cutter
 
     netG = q.ContextDecoderCell(
         nn.Embedding(vocsize, embdim) if not soft_next else nn.Linear(vocsize, embdim),
@@ -165,11 +195,14 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
         nn.Linear(gendim, vocsize),
         q.Softmax(temperature=temperature),
     )
-    netG.teacher_unforce_after(seqlen-1, amortizer_teacherforce,
-                         q.Lambda(lambda x: torch.max(x[0], 1)[1]) if not soft_next else q.Lambda(lambda x: x[0])
-    )
+    if amortizer_curriculum is None:
+        netG.teacher_unforce_after(seqlen-1, amortizer_teacherforce,
+                             q.Lambda(lambda x: torch.max(x[0], 1)[1]) if not soft_next else q.Lambda(lambda x: x[0])
+        )
     netG = netG.to_decoder()
-    netG = ContextDecoderACHAWrappper(netG, amortizer=amortizer_override, soft_next=soft_next, vocsize=vocsize)
+    netG = ContextDecoderACHAWrappper(netG, amortizer=amortizer_override,
+            clcutter=get_cl_cutter(amortizer_curriculum),
+            soft_next=soft_next, vocsize=vocsize)
 
     # DISCRIMINATOR
     netD = q.RecurrentStack(
@@ -184,21 +217,28 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
         q.Lambda(lambda x: x.squeeze(1))
     )
 
-    netR = q.Stack(q.Lambda(lambda x: x[:, 1:].contiguous()),
+    netRclcutter = get_cl_cutter(amortizer_curriculum)
+    netR = q.Stack(q.Lambda(lambda x: netRclcutter(x)),
+                   q.Lambda(lambda x: x[:, 1:].contiguous()),
                    q.IdxToOnehot(vocsize))
 
-    def sample(noise=None, cuda=False, gen=None):
+    def sample(noise=None, cuda=False, gen=None, rawlen=None):
         gold = None
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
-        if gen is None:
+        if gen is None or rawlen is not None:
             data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
         else:
             data = next(gen)[0:1]
             gold = data
             data = q.var(data).cuda(cuda).v
-        o = netG(noise, data)
+        if rawlen is not None:
+            netG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
+            o = netG.decoder(noise, maxtime=rawlen)
+        else:
+            o = netG(noise, data)
+
         do = q.var(o.data.new(o.size())).cuda(o).v
         do.data = o.data + 0
         do.requires_grad = True
@@ -209,18 +249,22 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                 netDparamswithgrad.append(param)
                 param.requires_grad = False
 
-        score = netD(do)
-        loss = -score.sum()
-        loss.backward()
-        dograds = do.grad
-
         _, y = torch.max(o, 2)
 
-        for param in netDparamswithgrad:
-            param.requires_grad = True
-        return y, o[0], score, dograds[0], gold[0]
+        score = netD(do)
 
-    return (netD, netD), (netG, netG), netR, sample, [amortizer_teacherforce, amortizer_override]
+        if rawlen is None:
+            loss = -score.sum()
+            loss.backward()
+            dograds = do.grad
+
+            for param in netDparamswithgrad:
+                param.requires_grad = True
+            return y, o[0], score, dograds[0], gold[0]
+        else:
+            return y, o[0], score, None, None
+
+    return (netD, netD), (netG, netG), netR, sample, amortizers
 
 
 # region data loading
@@ -315,7 +359,7 @@ def run(lr=0.00005,
         torch.cuda.set_device(gpu)
 
     if niter == -1:
-        niter = (seqlen * 200 + 500)*2 + 500        # seqlen * amortize_step + amortize_headstart + afterburn
+        niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
         print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
@@ -337,7 +381,8 @@ def run(lr=0.00005,
     if mode == "normal":
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_normal(vocsize, embdim, gendim, discdim,
-                               cd["<START>"], seqlen, noisedim, temperature=temperature)
+                               cd["<START>"], seqlen, noisedim, temperature=temperature,
+                               mode="clth")
     elif mode == "mine":
         raise NotImplemented()
         (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
@@ -364,14 +409,14 @@ def run(lr=0.00005,
         idxseq = np.arange(0, x.shape[1]) % 10
         print("".join([str(a) for a in list(idxseq)]))
 
-    def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False):
-        y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen)
+    def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False, rawlen=None):
+        y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
         y = y.cpu().data.numpy()
         if ret_all:
             return pp(y), o, score, ograds, gold
         return pp(y)
 
-    print(samplepp(cuda=False, gen=testgen))
+    # print(samplepp(cuda=False, rawlen=30))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
                      data_gen=traingen, cuda=cuda, netR=netR,
