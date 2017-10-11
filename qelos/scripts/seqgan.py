@@ -148,6 +148,81 @@ class ContextDecoderACHAWrappper(nn.Module):
         return out
 
 
+def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
+                     seqlen, noisedim, soft_next=False, temperature=1.):
+    # TODO: variable-length sequences (masks!!!)
+    class Generator(nn.Module):
+        def __init__(self):
+            super(Generator, self).__init__()
+            decodercell = q.ContextDecoderCell(
+                nn.Linear(vocsize, embdim, bias=False),
+                q.GRUCell(embdim+noisedim, gendim),
+                nn.Linear(gendim, vocsize),
+                q.Softmax(temperature=temperature)
+            )
+
+            startsymbols = np.zeros((1, vocsize), dtype="float32")
+            startsymbols[0, startsym] = 1
+            startsymbols = q.val(startsymbols).v
+            self.startsymbols = startsymbols
+            decodercell.teacher_unforce(seqlen-1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
+
+            self.decoder = decodercell.to_decoder()
+
+        def forward(self, noise):
+            decret = self.decoder(noise)    # (batsize, seqlen, vocsize)
+            batsize = noise.size(0)
+            ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
+                             decret], 1)
+            return ret
+
+    class Critic(nn.Module):
+        def __init__(self):
+            super(Critic, self).__init__()
+            self.net = q.RecurrentStack(
+                nn.Linear(vocsize, discdim, bias=False),
+                q.GRUCell(discdim, discdim, use_cudnn_cell=False).to_layer(),
+                nn.Linear(discdim, vocsize, bias=False)
+            )
+
+        def forward(self, x):   # (batsize, seqlen, vocsize)
+            inpx = x[:, :-1, :]
+            netouts = self.net(inpx)
+            outx = x[:, 1:, :]
+            scores = outx * netouts
+            vocagg_scores = scores.sum(2)
+            seqagg_scores = vocagg_scores.sum(1)
+            return seqagg_scores
+
+    netR = q.IdxToOnehot(vocsize)
+    netD = Critic()
+    netG = Generator()
+
+    amortizers = []
+
+    def sample(noise=None, cuda=False, gen=None, rawlen=None):
+        if noise is None:
+            noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
+            noise.data.normal_(0, 1)
+        if rawlen is not None:
+            o = netG.decoder(noise, maxtime=rawlen)
+        else:
+            o = netG(noise)
+
+        _, y = torch.max(o, 2)
+        do = o.clone()
+
+        score = netD(do)
+        return y, o[0], score, None, None
+
+    return (netD, netD), (netG, netG), netR, sample, amortizers
+
+
+
+
+
+
+
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
                      seqlen, noisedim, soft_next=False, temperature=1., mode="acha-sync"):
 
@@ -349,7 +424,7 @@ def run(lr=0.001,
         seqlen=32,
         cuda=False,
         gpu=1,
-        mode="normal",       # "normal"
+        mode="ganesh",       # "normal", "ganesh"
         subsample=1000,
         inspectdata=False,
         pw=10,
@@ -383,6 +458,10 @@ def run(lr=0.001,
             = make_nets_normal(vocsize, embdim, gendim, discdim,
                                cd["<START>"], seqlen, noisedim, temperature=temperature,
                                mode="clth")
+    elif mode == "ganesh":
+        (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
+            = make_nets_ganesh(vocsize, embdim, gendim, discdim,
+                               cd["<START>"], seqlen, noisedim, temperature=temperature)
     elif mode == "mine":
         raise NotImplemented()
         (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
@@ -411,16 +490,15 @@ def run(lr=0.001,
 
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False, rawlen=None):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
-        y = y.cpu().data.numpy()
+        y = y.cpu().data.numpy()[:, 1:]
         if ret_all:
             return pp(y), o, score, ograds, gold
         return pp(y)
 
-    # print(samplepp(cuda=False, rawlen=30))
+    print(samplepp(cuda=False))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
-                     data_gen=traingen, cuda=cuda, netR=netR,
-                     sample_real_for_gen=True)
+                     data_gen=traingen, cuda=cuda, netR=netR)
 
     q.embed()
 

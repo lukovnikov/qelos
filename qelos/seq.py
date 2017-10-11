@@ -129,8 +129,10 @@ class Decoder(nn.Module):
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         self.reset_state()
         batsize = x[0].size(0)
-        if hasattr(self.block, "_max_time") and self.block._max_time is None:
-            maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
+        if "maxtime" in kw:
+            maxtime = kw["maxtime"]
+        elif not hasattr(self.block, "_max_time") or self.block._max_time is None:
+            maxtime = x[0].size(1)
         else:
             maxtime = self.block._max_time
         new_init_states = self._compute_init_states(*x, **kw)
@@ -442,9 +444,10 @@ class ContextDecoderCell(DecoderCell):
                 assert(t == 0)
                 if self._start_symbols is not None:
                     ctx = x[0]
-                    y_t = torch.LongTensor(ctx.size(0))
-                    y_t.fill_(self._start_symbols)
-                    y_t = var(y_t).cuda(ctx).v
+                    y_t = self._start_symbols.repeat(ctx.size(0), 1)
+                    # y_t = torch.LongTensor(ctx.size(0))
+                    # y_t.fill_(self._start_symbols)
+                    # y_t = var(y_t).cuda(ctx).v
                 else:
                     y_t = x[0]
                     ctx = x[1]
