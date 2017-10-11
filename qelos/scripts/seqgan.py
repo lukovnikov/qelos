@@ -151,6 +151,32 @@ class ContextDecoderACHAWrappper(nn.Module):
 def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
                      seqlen, noisedim, soft_next=False, temperature=1.):
     # TODO: variable-length sequences (masks!!!)
+    def get_amortizer_update_rule(offset=0, headstart=500, interval=200):
+        def amortizer_update_rule(current_value=0, iter=0, state=None):
+            if iter < (offset + headstart):
+                return 0
+            else:
+                ret = 1 + (iter - (offset + headstart)) // interval
+                if current_value != ret:
+                    print("AMORTIZED FROM {} TO {}".format(current_value, ret))
+                return ret
+        return amortizer_update_rule
+    amortizer_curriculum = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
+    amortizers = [amortizer_curriculum]
+
+    amortizer_curriculum._value = 35
+
+    def get_cl_cutter(clamort):
+        def cl_cutter(seq):
+            if clamort is not None:
+                upto = min(clamort.v + 2, seq.size(1))
+                out = seq[:, :upto]
+                return out
+            else:
+                return seq
+
+        return cl_cutter
+
     class Generator(nn.Module):
         def __init__(self):
             super(Generator, self).__init__()
@@ -170,7 +196,7 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
             self.decoder = decodercell.to_decoder()
 
         def forward(self, noise):
-            decret = self.decoder(noise)    # (batsize, seqlen, vocsize)
+            decret = self.decoder(noise, maxtime=min(amortizer_curriculum.v+1, seqlen-1))    # (batsize, seqlen, vocsize)
             batsize = noise.size(0)
             ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
                              decret], 1)
@@ -194,11 +220,15 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
             seqagg_scores = vocagg_scores.sum(1)
             return seqagg_scores
 
-    netR = q.IdxToOnehot(vocsize)
+    netRclcutter = get_cl_cutter(amortizer_curriculum)
+    netR = q.Stack(q.Lambda(lambda x: netRclcutter(x)),
+                   q.Lambda(lambda x: x[:, 1:].contiguous()),
+                   q.IdxToOnehot(vocsize))
+    # netR = q.IdxToOnehot(vocsize)
     netD = Critic()
     netG = Generator()
 
-    amortizers = []
+    # amortizers = []
 
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
         if noise is None:
@@ -216,11 +246,6 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
         return y, o[0], score, None, None
 
     return (netD, netD), (netG, netG), netR, sample, amortizers
-
-
-
-
-
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
