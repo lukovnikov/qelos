@@ -28,11 +28,12 @@ class DCB(object):
 
 
 class Logger(object):
-    def __init__(self, name="", ):
+    def __init__(self, name="", logiter=50):
         self.tt = q.ticktock(name)
+        self.logiter = logiter
 
     def log(self, _iter=None, niter=None, errD=None, errG=None, scoreD_real=None, scoreD_fake=None, lip_loss=None, **kw):
-        if (_iter+1) % 2 == 0:
+        if (_iter+1) % self.logiter == 0:
             self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f} Loss Lip: {:.4f}"
                          .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake, lip_loss))
 
@@ -454,6 +455,7 @@ def run(lr=0.0003,
         pw=10,
         temperature=1.,
         clrate=500,
+        logiter=50,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -500,7 +502,7 @@ def run(lr=0.0003,
     optimG = torch.optim.Adam(q.params_of(netG4G), lr=lr)
     gantrainer = q.GANTrainer(mode="WGAN-GP", one_sided=True, noise_dim=noisedim,
                               penalty_weight=pw,
-                 optimizerD=optimD, optimizerG=optimG, logger=Logger("gan"))
+                 optimizerD=optimD, optimizerG=optimG, logger=Logger("gan", logiter=logiter))
 
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
