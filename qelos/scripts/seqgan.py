@@ -220,7 +220,7 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
 
     netRclcutter = get_cl_cutter(amortizer_curriculum)
     netR = q.Stack(q.Lambda(lambda x: netRclcutter(x)),
-                   q.Lambda(lambda x: x[:, 1:].contiguous()),
+                   q.Lambda(lambda x: x.contiguous()),
                    q.IdxToOnehot(vocsize))
     # netR = q.IdxToOnehot(vocsize)
     netD = Critic()
