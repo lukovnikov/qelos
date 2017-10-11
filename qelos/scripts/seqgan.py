@@ -149,9 +149,10 @@ class ContextDecoderACHAWrappper(nn.Module):
 
 
 def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
-                     seqlen, noisedim, soft_next=False, temperature=1.):
+                     seqlen, noisedim, soft_next=False, temperature=1.,
+                     clrate=200):
     # TODO: variable-length sequences (masks!!!)
-    def get_amortizer_update_rule(offset=0, headstart=500, interval=200):
+    def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
             if iter < (offset + headstart):
                 return 0
@@ -435,7 +436,7 @@ def makeiter(dl):
             dli = inner()
 
 
-def run(lr=0.001,
+def run(lr=0.0003,
         embdim=128,
         noisedim=128,
         gendim=256,
@@ -452,12 +453,14 @@ def run(lr=0.001,
         inspectdata=False,
         pw=10,
         temperature=1.,
+        clrate=500,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
 
     if niter == -1:
-        niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
+        # niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
+        clrate * seqlen
         print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
@@ -484,7 +487,8 @@ def run(lr=0.001,
     elif mode == "ganesh":
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_ganesh(vocsize, embdim, gendim, discdim,
-                               cd["<START>"], seqlen, noisedim, temperature=temperature)
+                               cd["<START>"], seqlen, noisedim, temperature=temperature,
+                               clrate=clrate)
     elif mode == "mine":
         raise NotImplemented()
         (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
