@@ -269,6 +269,48 @@ class Querier(object):
                 ret += u"VALUES {} {{ {} }}\n".format(var, val)
             return ret
 
+    def get_twohop_chains_from_entity(self, entity, incl_reverse=True):
+        queries = []
+        queries.append((u"SELECT DISTINCT ?p1 ?p2 WHERE {{\n {} ?p1 ?var1 .\n ?var1 ?p2 ?var2 }} LIMIT 100000".format(entity), True, True))
+        if incl_reverse:
+            queries.append((u"SELECT DISTINCT ?p1 ?p2 WHERE {{\n ?var1 ?p1 {} .\n ?var1 ?p2 ?var2 }} LIMIT 100000".format(entity), False, True))
+            queries.append((u"SELECT DISTINCT ?p1 ?p2 WHERE {{\n ?var1 ?p1 {} .\n ?var2 ?p2 ?var1 }} LIMIT 100000".format(entity), False, False))
+            queries.append((u"SELECT DISTINCT ?p1 ?p2 WHERE {{\n {} ?p1 ?var1 .\n ?var2 ?p2 ?var1 }} LIMIT 100000".format(entity), True, False))
+        ret = set()
+        for query, p1rev, p2rev in queries:
+            res = self._exec_query(query)
+            results = res["results"]["bindings"]
+            for result in results:
+                rete_p1 = result["p1"]["value"]
+                rete_p2 = result["p2"]["value"]
+                toadd = True
+                if self.relwhitelist is not None:
+                    toadd = rete_p1 in self.relwhitelist
+                    toadd = toadd and rete_p2 in self.relwhitelist
+                else:
+                    for rel_filterer in self.rel_filter:
+                        toadd = False
+                        if re.match(rel_filterer, rete_p1) and re.match(rel_filterer, rete_p2):
+                            toadd = True
+                            break
+                    for rel_blacklister in self.rel_blacklist:
+                        if re.match(rel_blacklister, rete_p1) or re.match(rel_blacklister, rete_p2):
+                            toadd = False
+                            break
+                    for rel_unblacklister in self.rel_unblacklist:
+                        if re.match(rel_unblacklister, rete_p1) or re.match(rel_unblacklister, rete_p2):
+                            # TODO THIS IS WRONG !!!
+                            toadd = True
+                            break
+                if toadd:
+                    rete_p1 = u":{}{}".format(u"-" if p1rev == False else u"",
+                                           dbfy(rete_p1))
+                    rete_p2 = u":{}{}".format(u"-" if p2rev == False else u"",
+                                           dbfy(rete_p2))
+                    ret.add((rete_p1, rete_p2))
+        return ret
+
+
     def get_relations_of_value(self, triples, replacements, outvar, only_reverse=False, incl_reverse=True, innerlimit=None):
         entityquery = self.get_entity_query(triples, replacements, outvar, limit=innerlimit)
 
@@ -529,6 +571,83 @@ def get_vnt_for_dataset(p="../../../../datasets/lcquad/",
         # q.embed()
 
 
+def get_propchains_for_ent(ent, upto=1):
+    que = Querier(relwhitelistp="../../../../datasets/lcquad/relations.txt")
+    chains = set()
+    prevchains = set()
+    newprevchains = set()
+    i = 1
+    singlerelchains = que.get_relations_of_id(ent, incl_reverse=True)
+    for singlerelchain in singlerelchains:
+        chains.add((singlerelchain,))
+        prevchains.add((singlerelchain,))
+    i += 1
+    if upto >= 2:
+        for prevchain in prevchains:
+            m = re.match(":(-?)(.+)", prevchain[0])
+            if m.group(1) == "-":
+                triples = [("?var0", m.group(2), ent)]
+            else:
+                triples = [(ent, m.group(2), "?var0")]
+            newrels = que.get_relations_of_value(triples, {}, "?var0")
+            for newrel in newrels:
+                chains.add((prevchain[0], newrel))
+        # tworelchains = que.get_twohop_chains_from_entity(ent, incl_reverse=True)
+        # for tworelchain in tworelchains:
+        #     chains.add(tworelchain)
+    if upto > 2:
+        raise q.SumTingWongException("chains of more than 2 hops not supported")
+    return chains
+
+
+def chains_replace_property(chains):
+    newchains = set()
+    for chain in chains:
+        newchain = []
+        for chainrel in chain:
+            m = re.match("(:-?<http://dbpedia\.org/)property/([^>]+>)", chainrel)
+            if m:
+                newrel = m.group(1) + u"ontology/" + m.group(2)
+            else:
+                newrel = chainrel
+            newchain.append(newrel)
+        newchain = tuple(newchain)
+        newchains.add(newchain)
+    return newchains
+
+
+def get_prop_chains_for_dataset(p="../../../../datasets/lcquad/",
+                        files=("lcquad.multilin",),
+                        outp="lcquad.multilin.chains",
+                        upto=2, replace_property=True):
+    tt = q.ticktock("propchains builder")
+    for file in files:
+        tt.tick("doing {}".format(file))
+        filep = p + file
+        chains = {}
+        with codecs.open(filep, encoding="utf-8-sig") as f:
+            i = 0
+            for line in f:
+                m = re.match("(Q\d+\.P\d+):\s(.+)", line)
+                if m:
+                    qpid, parse = m.group(1), m.group(2)
+                    startent = parse.split()[0]
+                    qpidchains = get_propchains_for_ent(startent, upto=upto)
+                    if replace_property:
+                        qpidchains = chains_replace_property(qpidchains)
+                    chains[qpid] = qpidchains
+                    i += 1
+                    if i % 1 == 0:
+                        tt.msg("{} {}, len: {}".format(i, qpid, str(len(qpidchains))))
+                    # break
+        if outp is None:
+            outp = p + file + ".vnt"
+        pickle.dump(chains, open(outp, "w"))
+        tt.tock("done {}".format(file))
+        # reloaded = pickle.load(open(p+file+".vnt"))
+        # q.embed()
+
+
 def run(query="<http://dbpedia.org/resource/Buckhurst_Hill_County_High_School> :<http://dbpedia.org/ontology/localAuthority> <<BRANCH>> :-<http://dbpedia.org/property/placeOfBurial> <http://dbpedia.org/resource/Elizabeth_of_Rhuddlan> <<JOIN>> <<RETURN>>"):
     q = Querier()
     print(q.get_types_of_id("<http://dbpedia.org/resource/Lenka>"))
@@ -538,4 +657,4 @@ def run(query="<http://dbpedia.org/resource/Buckhurst_Hill_County_High_School> :
 
 
 if __name__ == "__main__":
-    q.argprun(run)
+    q.argprun(get_prop_chains_for_dataset)
