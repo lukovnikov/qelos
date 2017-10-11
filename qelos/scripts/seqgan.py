@@ -164,8 +164,6 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
     amortizer_curriculum = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
     amortizers = [amortizer_curriculum]
 
-    amortizer_curriculum._value = 35
-
     def get_cl_cutter(clamort):
         def cl_cutter(seq):
             if clamort is not None:
