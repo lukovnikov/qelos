@@ -460,7 +460,7 @@ def run(lr=0.0003,
 
     if niter == -1:
         # niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
-        clrate * seqlen
+        niter = clrate * (seqlen + 2)
         print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
