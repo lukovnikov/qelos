@@ -122,6 +122,56 @@ class TestAttentionDecoderCell(TestCase):
             np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
         print(decoded.size())
 
+    def test_states_split(self):
+        batsize, seqlen, inpdim = 5, 7, 8
+        vocsize, embdim, encdim = 20, 9, 10
+        ctxtoinitff = q.Forward(inpdim, encdim)
+        coreff = q.Forward(encdim, encdim)
+        # initstategen = q.Lambda(lambda *x, **kw: coreff(ctxtoinitff(x[1][:, -1, :])), register_modules=coreff)
+        initstategen = q.Lambda(lambda *x, **kw: x[1][:, -1, :])
+
+        decoder_cell = q.AttentionDecoderCell(
+            attention=q.Attention().forward_gen(inpdim//2, encdim//2 + embdim, encdim),
+            embedder=nn.Embedding(vocsize, embdim),
+            core=q.RecStack(
+                q.persist_kwargs(),
+                q.GRUCell(embdim + inpdim//2, encdim),
+                q.GRUCell(encdim, encdim),
+                coreff
+            ),
+            smo=q.Stack(
+                q.persist_kwargs(),
+                q.Forward(encdim//2 + inpdim//2, encdim),
+                q.Forward(encdim, vocsize),
+                q.Softmax()
+            ),
+            state_split=True,
+            att_after_update=True,
+            init_state_gen=initstategen,
+            ctx_to_decinp=True,
+            ctx_to_smo=True,
+            state_to_smo=True,
+            decinp_to_att=True
+        )
+        decoder = decoder_cell.to_decoder()
+
+        ctx = np.random.random((batsize, seqlen, inpdim))
+        ctx = Variable(torch.FloatTensor(ctx))
+        ctxmask = np.ones((batsize, seqlen))
+        ctxmask[:, -2:] = 0
+        ctxmask[[0, 1], -3:] = 0
+        ctxmask = Variable(torch.FloatTensor(ctxmask))
+        inp = np.random.randint(0, vocsize, (batsize, seqlen))
+        inp = Variable(torch.LongTensor(inp))
+
+        decoded = decoder(inp, ctx, ctxmask=ctxmask)
+
+        self.assertEqual((batsize, seqlen, vocsize), decoded.size())
+        self.assertTrue(np.allclose(
+            np.sum(decoded.data.numpy(), axis=-1),
+            np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
+        print(decoded.size())
+
     def test_outmask(self):
         batsize, seqlen, inpdim = 5, 7, 8
         vocsize, embdim, encdim = 20, 9, 10
@@ -176,7 +226,6 @@ class TestAttentionDecoderCell(TestCase):
             np.ones_like(np.sum(decoded.data.numpy(), axis=-1))))
         self.assertTrue(np.all((decoded.data.numpy() == 0) == (outmask.data.numpy() == 0)))
         print(decoded.size())
-
 
     def test_outmask_batched_sparse(self):
         batsize, seqlen, inpdim = 5, 7, 8

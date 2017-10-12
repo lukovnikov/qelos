@@ -83,6 +83,7 @@ def make_encoder(src_emb, embdim=100, dim=100, dropout=0.0, **kw):
     #                  --> 2nd BiGRU
     #       2nd BiGRU  --> top GRU
     """
+    statemergefwd = q.Forward(dim, dim, use_bias=False)
     encoder = q.RecurrentStack(
         q.persist_kwargs(),
         src_emb,        # embs, masks
@@ -97,10 +98,19 @@ def make_encoder(src_emb, embdim=100, dim=100, dropout=0.0, **kw):
         q.argsave.spec(final=0),
         q.argmap.spec(1, ["bypass"]),
         q.Lambda(lambda x, y: x + y),
+        statemergefwd,        # to mix up fwd and rev states
         # q.argmap.spec(0, mask=["mask"]),
         # q.GRULayer(dim * 2, dim).return_final(True),
         q.argmap.spec(0, ["mask"], ["final"]),
     )   # returns (all_states, mask, final_state)
+    encoder = q.Stack(
+        q.persist_kwargs(),
+        encoder,
+        q.argsave.spec(all=0, mask=1, final=2),
+        q.argmap.spec(2),
+        statemergefwd,
+        q.argmap.spec(["all"], ["mask"], 0),
+    )
     return encoder
 
 
@@ -120,12 +130,12 @@ class make_decoder(object):
         coreindim = embdim + ctxdim     # if ctx_to_decinp is True else embdim
 
         coretocritdim = dim if not decsplit else dim // 2
-        critdim = dim + embdim          # if decinp_to_att is True else dim
+        critdim = coretocritdim + embdim          # if decinp_to_att is True else dim
 
         if attmode == "bilin":
             attention = q.Attention().bilinear_gen(ctxdim, critdim)
         elif attmode == "fwd":
-            attention = q.Attention().forward_gen(ctxdim, critdim)
+            attention = q.Attention().forward_gen(ctxdim, critdim, dim)
         else:
             raise q.SumTingWongException()
 
@@ -145,6 +155,7 @@ class make_decoder(object):
                                  # q.LogSoftmax(),
                                  # q.argmap.spec(0),
                              ),
+                             att_after_update=True,
                              ctx_to_decinp=True,
                              ctx_to_smo=True,
                              state_to_smo=True,

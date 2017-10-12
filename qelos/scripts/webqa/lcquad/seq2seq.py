@@ -21,11 +21,11 @@ def run(lr=0.1,
         glovedim=50,
         encdim=100,
         decdim=100,
-        decsplit=False,
+        decsplit=True,
         attmode="bilin",        # "bilin" or "fwd"
         merge_mode="sum",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
-        celltype="tree",          # "normal", "tree"
+        celltype="normal",          # "normal", "tree"
         batsize=128,
         cuda=False,
         gpu=1,
@@ -48,9 +48,8 @@ def run(lr=0.1,
     tt.tick("loading data and rep")
 
     flvecdim = 0
-    if decsplit:    flvecdim += decdim // 2
-    else:           flvecdim += decdim
-    flvecdim += encdim
+    if decsplit:    flvecdim = decdim // 2 + encdim // 2
+    else:           flvecdim = decdim + encdim
 
     # LC-QuaD loading
     (qids, question_sm, query_sm, vnt_mat), (trainids, testids), (src_emb, tgt_emb, tgt_lin) \

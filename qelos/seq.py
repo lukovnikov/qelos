@@ -19,7 +19,7 @@ class AttentionGenerator(nn.Module):
 
     def forward(self, data, crit, mask=None):   # should work for 3D/2D and 3D/3D
         if self.data_selector is not None:
-            data = self.data_selector(data)
+            data = self.data_selector(data).contiguous()
         scores = self.dist(data, crit)      # (batsize, seqlen)
         if scores.dim() == 3:       # (batsize, dseqlen, cseqlen)
             assert(crit.dim() == 3)
@@ -448,6 +448,8 @@ class AttentionDecoderCell(DecoderCell):
         self.decinp_to_att = decinp_to_att
         self.decinp_to_smo = decinp_to_smo
         self.state_split = state_split
+        if state_split:
+            self.attention.split_data()
         # returns
         self.return_out = return_out
         self.return_att = return_att
@@ -470,6 +472,8 @@ class AttentionDecoderCell(DecoderCell):
             x_t_emb, _ = x_t_emb
         if self.att_after_update:
             ctx_tm1 = self._state[0]
+            if self.state_split and t == 0:
+                ctx_tm1 = ctx_tm1[:, ctx_tm1.size(1)//2:]       # equivalent is handled by attention splitter
             i_t = torch.cat([x_t_emb, ctx_tm1], 1) if self.ctx_to_decinp else x_t_emb
             o_t = self.core(i_t, t=t)
             ctx_t, att_weights_t = self._get_ctx_t(ctx, ctxmask, o_t, x_t_emb)
