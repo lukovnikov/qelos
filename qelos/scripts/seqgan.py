@@ -211,7 +211,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
         return cl_cutter
 
     class Generator(nn.Module):
-        def __init__(self):
+        def __init__(self, gmode=False):
             super(Generator, self).__init__()
             decodercell = q.ContextDecoderCell(
                 nn.Linear(vocsize, embdim, bias=False),
@@ -227,6 +227,8 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
 
             self.decoder = decodercell.to_decoder()
+            self.gmode = gmode
+            self.idxtoonehot = q.IdxToOnehot(vocsize)
 
         def forward(self, noise):
             if clrate is not None and clrate > 0:
@@ -236,6 +238,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             batsize = noise.size(0)
             ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
                              decret], 1)
+            if not self.gmode:
+                _, ret = torch.max(ret, 2)
+                ret = self.idxtoonehot(ret)
             return ret
 
     class DualCritic(nn.Module):
@@ -251,9 +256,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         def forward(self, x):   # (batsize, seqlen, ...), seqlen >= 3
             x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
-            if not self.gmode:
-                _, x = torch.max(x, 2)
-                x = self.idxtoonehot(x)
+            # if not self.gmode:
+            #     _, x = torch.max(x.detach(), 2)
+            #     x = self.idxtoonehot(x)
             self.cell_present._detach_states = self.gmode
             inppast = x[:, :-1, :]
             pastouts = self.net_past(inppast)
@@ -284,9 +289,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         def forward(self, x):  # (batsize, seqlen, ...), seqlen >= 3
             x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
-            if not self.gmode:
-                _, x = torch.max(x, 2)
-                x = self.idxtoonehot(x)
+            # if not self.gmode:
+            #     _, x = torch.max(x, 2)
+            #     x = self.idxtoonehot(x)
             self.cell._detach_states = self.gmode
             y = self.net(x)
             pastouts = y[:, :-1, :]
@@ -324,7 +329,8 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         return criticd, criticg
 
-    netG = Generator()
+    netG4D = Generator(gmode=False)
+    netG4G = Generator(gmode=True)
     netD4D, netD4G = make_critics()
 
     if clrate is not None and clrate > 0:
@@ -340,9 +346,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
         if rawlen is not None:
-            o = netG.decoder(noise, maxtime=rawlen)
+            o = netG4G.decoder(noise, maxtime=rawlen)
         else:
-            o = netG(noise)
+            o = netG4G(noise)
 
         _, y = torch.max(o, 2)
         do = o.clone()
@@ -350,7 +356,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
         score = netD4D(do)
         return y, o[0], score, None, None
 
-    return (netD4D, netD4G), (netG, netG), netR, sample, [amortizer_curriculum]
+    return (netD4D, netD4G), (netG4D, netG4G), netR, sample, [amortizer_curriculum]
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
