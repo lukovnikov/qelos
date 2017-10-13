@@ -253,9 +253,13 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
     class SpecialCriticCell(q.rnn.GRUCell):
         """ embeds, does one-hot for states, no one-hot for outputs"""
+        def __init__(self, *args, **kwargs):
+            super(SpecialCriticCell, self).__init__(*args, **kwargs)
+            self.idxtoonehot = idxtoonehot
+
         def _forward(self, x_t, h_tm1, t=None): #x_t: dist
             _, x_t_onehot = torch.max(x_t, 1)
-            x_t_onehot = idxtoonehot(x_t_onehot)
+            x_t_onehot = self.idxtoonehot(x_t_onehot)
             x_t_onehot_emb = specialcriticemb(x_t_onehot)
             _, h_t = super(SpecialCriticCell, self)._forward(x_t_onehot_emb, h_tm1, t=t)
 
