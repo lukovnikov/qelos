@@ -7,26 +7,6 @@ from IPython import embed
 import sparkline
 
 
-class DCB(object):
-    def __init__(self, vocsize, dim):
-        super(DCB, self).__init__()
-        self.weight = nn.Parameter(torch.randn(vocsize, dim))
-        self.reset_parameters()
-        self.embedder = nn.Embedding(vocsize, dim)
-        self.embedder.weight = self.weight
-        self.linout = nn.Linear(dim, vocsize, bias=False)
-        self.linout.weight = self.weight
-
-    def reset_parameters(self):
-        nn.init.xavier_normal(self.weight.data)
-
-    def get_embedder(self):
-        return self.embedder
-
-    def get_linout(self):
-        return self.linout
-
-
 class Logger(object):
     def __init__(self, name="", logiter=50):
         self.tt = q.ticktock(name)
@@ -44,56 +24,6 @@ def get_data_gen(vocsize, batsize, seqlen):
         while True:
             yield np.random.randint(0, vocsize, (batsize, seqlen)).astype("int64")
     return data_gen
-
-
-def make_nets_mine():
-    dcb = DCB(vocsize, embdim)
-
-    g_rnu = q.GRUCell(embdim+noisedim, gendim)
-
-    # generator
-    netG4D = q.ContextDecoderCell(
-        dcb.get_embedder(),
-        g_rnu,
-        dcb.get_linout(),
-        nn.LogSoftmax(),
-        q.Lambda(lambda x: torch.max(x, 1)[1])
-    )
-    netG4D.teacher_unforce(seqlen, block=lambda x: x[0], startsymbols=1)
-    netG4D = netG4D.to_decoder()
-
-    netG4G = q.ContextDecoderCell(
-        dcb.get_embedder(),
-        g_rnu,
-    )
-    netG4G.teacher_unforce(seqlen,
-                           q.Stack(
-                               dcb.get_linout(),
-                               nn.LogSoftmax(),
-                               q.Lambda(lambda x: torch.max(x, 1)[1])
-                           ),
-                           startsymbols=1)
-    netG4G = netG4G.to_decoder()
-
-    # discriminator
-    d_rnn = q.GRULayer(embdim, discdim)
-    d_scorer = nn.Linear(discdim, 1)
-
-    netD4D = q.RecurrentStack(
-        dcb.get_embedder(),
-        d_rnn,
-    ).return_final()
-    netD4D = q.Stack(netD4D, d_scorer)
-
-    netD4G = q.RecurrentStack(
-        d_rnn,
-    ).return_final()
-    netD4G = q.Stack(netD4G, d_scorer)
-
-    # real processing
-    netR = q.RecurrentStack(
-        dcb.get_embedder(),
-    )
 
 
 def test_acha_net_g():
@@ -246,6 +176,141 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
         return y, o[0], score, None, None
 
     return (netD, netD), (netG, netG), netR, sample, amortizers
+
+
+def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
+                        seqlen, noisedim, soft_next=False, temperature=1., clrate=0):
+
+    def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
+        def amortizer_update_rule(current_value=0, iter=0, state=None):
+            if iter < (offset + headstart):
+                return 0
+            else:
+                ret = 1 + (iter - (offset + headstart)) // max(interval, 1)
+                if current_value != ret:
+                    print("AMORTIZED FROM {} TO {}".format(current_value, ret))
+                return ret
+
+        return amortizer_update_rule
+
+    amortizer_curriculum = q.DynamicHyperparam(update_rule=get_amortizer_update_rule())
+    amortizers = [amortizer_curriculum]
+
+    def get_cl_cutter(clamort):
+        def cl_cutter(seq):
+            if clamort is not None:
+                upto = min(clamort.v + 2, seq.size(1))
+                out = seq[:, :upto]
+                return out
+            else:
+                return seq
+
+        return cl_cutter
+
+    class Generator(nn.Module):
+        def __init__(self):
+            super(Generator, self).__init__()
+            decodercell = q.ContextDecoderCell(
+                nn.Linear(vocsize, embdim, bias=False),
+                q.GRUCell(embdim + noisedim, gendim),
+                nn.Linear(gendim, vocsize),
+                q.Softmax(temperature=temperature)
+            )
+
+            startsymbols = np.zeros((1, vocsize), dtype="float32")
+            startsymbols[0, startsym] = 1
+            startsymbols = q.val(startsymbols).v
+            self.startsymbols = startsymbols
+            decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
+
+            self.decoder = decodercell.to_decoder()
+
+        def forward(self, noise):
+            if clrate is not None and clrate > 0:
+                decret = self.decoder(noise, maxtime=min(amortizer_curriculum.v+1, seqlen-1))  # (batsize, seqlen, vocsize)
+            else:
+                decret = self.decoder(noise)
+            batsize = noise.size(0)
+            ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
+                             decret], 1)
+            return ret
+
+    class Critic(nn.Module):
+        def __init__(self, netpast, netpresent, cellpresent, distance, gmode=False):
+            super(Critic, self).__init__()
+            self.net_past = netpast
+            self.net_present = netpresent
+            self.cell_present = cellpresent
+            self.distance = distance
+            self.gmode = gmode
+
+        def forward(self, x):   # (batsize, seqlen, ...), seqlen >= 3
+            x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
+            self.cell_present._detach_states = self.gmode
+            inppast = x[:, :-1, :]
+            pastouts = self.net_past(inppast)
+            inppresent = x[:, :, :]
+            presentouts = self.net_present(inppresent)
+            presentouts = presentouts[:, 1:, :]     # what about first present output?
+
+            pastouts = pastouts.detach if self.gmode else pastouts
+
+            batsize, seqlen, _ = pastouts.size()
+            pastouts = pastouts.contiguous().view(batsize * seqlen, -1)
+            presentouts = presentouts.contiguous().view(batsize * seqlen, -1)
+            distances = self.distance(pastouts, presentouts)
+            distances = distances.view(batsize, seqlen)
+            scores = distances.sum(1)
+            return scores
+
+    def make_critics():
+        net_past = q.RecurrentStack(
+                nn.Linear(vocsize, discdim, bias=False),
+                q.GRUCell(discdim, discdim, use_cudnn_cell=False).to_layer(),
+                nn.Linear(discdim, vocsize, bias=False)
+            )
+
+        cell_present = q.GRUCell(discdim, discdim, use_cudnn_cell=False)
+        net_present = q.RecurrentStack(
+            nn.Linear(vocsize, discdim, bias=False),
+            cell_present.to_layer(),
+            nn.Linear(discdim, vocsize, bias=False)
+        )
+
+        distance = q.CosineDistance()
+
+        criticd = Critic(net_past, net_present, cell_present, distance, gmode=False)
+        criticg = Critic(net_past, net_present, cell_present, distance, gmode=True)
+
+        return criticd, criticg
+
+    netG = Generator()
+    netD4D, netD4G = make_critics()
+
+    if clrate is not None and clrate > 0:
+        netRclcutter = get_cl_cutter(amortizer_curriculum)
+        netR = q.Stack(q.Lambda(lambda x: netRclcutter(x)),
+                       q.Lambda(lambda x: x.contiguous()),
+                       q.IdxToOnehot(vocsize))
+    else:
+        netR = q.IdxToOnehot(vocsize)
+
+    def sample(noise=None, cuda=False, gen=None, rawlen=None):
+        if noise is None:
+            noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
+            noise.data.normal_(0, 1)
+        if rawlen is not None:
+            o = netG.decoder(noise, maxtime=rawlen)
+        else:
+            o = netG(noise)
+
+        _, y = torch.max(o, 2)
+        do = o.clone()
+
+        score = netD4D(do)
+        return y, o[0], score, None, None
+
+    return (netD4D, netD4G), (netG, netG), netR, sample, [amortizer_curriculum]
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
@@ -437,9 +502,9 @@ def makeiter(dl):
             dli = inner()
 
 
-def run(lr=0.0003,
-        embdim=128,
-        noisedim=128,
+def run(lr=0.001,
+        embdim=64,
+        noisedim=64,
         gendim=256,
         discdim=256,
         batsize=256,
@@ -449,12 +514,12 @@ def run(lr=0.0003,
         seqlen=32,
         cuda=False,
         gpu=1,
-        mode="ganesh",       # "normal", "ganesh"
+        mode="wrongfool",       # "normal", "ganesh", "wrongfool"
         subsample=1000,
         inspectdata=False,
         pw=10,
         temperature=1.,
-        clrate=500,
+        clrate=0,
         logiter=50,
         ):
     if cuda:
@@ -491,9 +556,11 @@ def run(lr=0.0003,
             = make_nets_ganesh(vocsize, embdim, gendim, discdim,
                                cd["<START>"], seqlen, noisedim, temperature=temperature,
                                clrate=clrate)
-    elif mode == "mine":
-        raise NotImplemented()
-        (netD4D, netD4G), (netG4D, netG4G), netR = make_nets_mine()
+    elif mode == "wrongfool":
+        (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
+            = make_nets_wrongfool(vocsize, embdim, gendim, discdim,
+                               cd["<START>"], seqlen, noisedim, temperature=temperature,
+                               clrate=clrate)
     else:
         raise q.SumTingWongException("unknown mode {}".format(mode))
 

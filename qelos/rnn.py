@@ -135,6 +135,7 @@ class RNUBase(RecStateful):
         self._init_states = None
         self._states = None
         self._y_tm1 = None
+        self._detach_states = False
 
     def to_layer(self):
         return RNNLayer(self)
@@ -223,6 +224,8 @@ class RNUBase(RecStateful):
     def forward(self, x_t, t=None, mask_t=None):
         batsize = x_t.size(0)
         states = self.get_states(batsize)
+        if self._detach_states:
+            states = [state.detach() for state in states]
         ret = self._forward(x_t, *states, t=t)
         y_t = ret[0]
         newstates = ret[1:]
