@@ -210,25 +210,25 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         return cl_cutter
 
+    decodercell = q.ContextDecoderCell(
+        nn.Linear(vocsize, embdim, bias=False),
+        q.GRUCell(embdim + noisedim, gendim),
+        nn.Linear(gendim, vocsize),
+        q.Softmax(temperature=temperature)
+    )
+    startsymbols = np.zeros((1, vocsize), dtype="float32")
+    startsymbols[0, startsym] = 1
+    startsymbols = q.val(startsymbols).v
+    decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
+
+    decoder = decodercell.to_decoder()
+
     class Generator(nn.Module):
         def __init__(self, gmode=False):
             super(Generator, self).__init__()
-            decodercell = q.ContextDecoderCell(
-                nn.Linear(vocsize, embdim, bias=False),
-                q.GRUCell(embdim + noisedim, gendim),
-                nn.Linear(gendim, vocsize),
-                q.Softmax(temperature=temperature)
-            )
-
-            startsymbols = np.zeros((1, vocsize), dtype="float32")
-            startsymbols[0, startsym] = 1
-            startsymbols = q.val(startsymbols).v
-            self.startsymbols = startsymbols
-            decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
-
-            self.decoder = decodercell.to_decoder()
             self.gmode = gmode
             self.idxtoonehot = q.IdxToOnehot(vocsize)
+            self.decoder = decoder
 
         def forward(self, noise):
             if clrate is not None and clrate > 0:
@@ -236,11 +236,11 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             else:
                 decret = self.decoder(noise)
             batsize = noise.size(0)
-            ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
+            ret = torch.cat([startsymbols.repeat(batsize, 1).unsqueeze(1),
                              decret], 1)
-            # if not self.gmode:
-            #     _, ret = torch.max(ret, 2)
-            #     ret = self.idxtoonehot(ret)
+            if not self.gmode:
+                _, ret = torch.max(ret, 2)
+                ret = self.idxtoonehot(ret)
             return ret
 
     class DualCritic(nn.Module):
