@@ -251,9 +251,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         def forward(self, x):   # (batsize, seqlen, ...), seqlen >= 3
             x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
-            # if not self.gmode:
-            #     _, x = torch.max(x, 2)
-            #     x = self.idxtoonehot(x)
+            if not self.gmode:
+                _, x = torch.max(x, 2)
+                x = self.idxtoonehot(x)
             self.cell_present._detach_states = self.gmode
             inppast = x[:, :-1, :]
             pastouts = self.net_past(inppast)
@@ -277,15 +277,16 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             self.net = net
             self.cell = cell
             self.distance = q.BilinearDistance(discdim, discdim)
+            # self.distance = q.DotDistance()
             self.gmode = gmode
             self.aggparam = None
             self.idxtoonehot = q.IdxToOnehot(vocsize)
 
         def forward(self, x):  # (batsize, seqlen, ...), seqlen >= 3
             x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
-            # if not self.gmode:
-            #     _, x = torch.max(x, 2)
-            #     x = self.idxtoonehot(x)
+            if not self.gmode:
+                _, x = torch.max(x, 2)
+                x = self.idxtoonehot(x)
             self.cell._detach_states = self.gmode
             y = self.net(x)
             pastouts = y[:, :-1, :]
