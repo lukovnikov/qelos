@@ -257,16 +257,20 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             super(SpecialCriticCell, self).__init__(*args, **kwargs)
             self.idxtoonehot = idxtoonehot
             self.specialcriticemb = specialcriticemb
+            self.gmode = False
 
         def _forward(self, x_t, h_tm1, t=None): #x_t: dist
-            _, x_t_onehot = torch.max(x_t, 1)
-            x_t_onehot = self.idxtoonehot(x_t_onehot)
-            x_t_onehot_emb = self.specialcriticemb(x_t_onehot)
-            _, h_t = super(SpecialCriticCell, self)._forward(x_t_onehot_emb, h_tm1, t=t)
+            if self.gmode:  #
+                _, x_t_onehot = torch.max(x_t, 1)
+                x_t_onehot = self.idxtoonehot(x_t_onehot)
+                x_t_onehot_emb = self.specialcriticemb(x_t_onehot)
+                _, h_t = super(SpecialCriticCell, self)._forward(x_t_onehot_emb, h_tm1, t=t)
 
-            x_t_emb = self.specialcriticemb(x_t)
-            y_t, _ = super(SpecialCriticCell, self)._forward(x_t_emb, h_tm1, t=t)
-
+                x_t_emb = self.specialcriticemb(x_t)
+                y_t, _ = super(SpecialCriticCell, self)._forward(x_t_emb, h_tm1, t=t)
+            else:   # not in g-mode --> generator outputting sharp if argmax_in_g
+                x_t_emb = self.specialcriticemb(x_t)
+                y_t, h_t = super(SpecialCriticCell, self)._forward(x_t_emb, h_tm1, t=t)
             return y_t, h_t
 
 
@@ -289,11 +293,13 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             #     x = self.idxtoonehot(x)
             self.cell_present._detach_states = self.gmode
             inppast = x[:, :-1, :]
-            if argmax_in_d_mode:
+            if self.gmode and argmax_in_d_mode:
                 _, inppast = torch.max(inppast, 2)
                 inppast = self.idxtoonehot(inppast)
             pastouts = self.net_past(inppast)
             inppresent = x[:, :, :]
+            if isinstance(self.cell_present, SpecialCriticCell):
+                self.cell_present.gmode = self.gmode
             presentouts = self.net_present(inppresent)
             presentouts = presentouts[:, 1:, :]     # what about first present output?
 
