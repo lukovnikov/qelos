@@ -253,7 +253,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             presentouts = self.net_present(inppresent)
             presentouts = presentouts[:, 1:, :]     # what about first present output?
 
-            pastouts = pastouts.detach if self.gmode else pastouts
+            pastouts = pastouts.detach() if self.gmode else pastouts
 
             batsize, seqlen, _ = pastouts.size()
             pastouts = pastouts.contiguous().view(batsize * seqlen, -1)
