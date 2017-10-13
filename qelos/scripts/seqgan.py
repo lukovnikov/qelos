@@ -222,13 +222,17 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
     decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]), startsymbols=startsymbols)
 
     decoder = decodercell.to_decoder()
+    idxtoonehot = q.IdxToOnehot(vocsize)
+
+    argmax_in_d_mode = True
 
     class Generator(nn.Module):
         def __init__(self, gmode=False):
             super(Generator, self).__init__()
             self.gmode = gmode
-            self.idxtoonehot = q.IdxToOnehot(vocsize)
+            self.idxtoonehot = idxtoonehot
             self.decoder = decoder
+            self.argmax_in_d_mode = argmax_in_d_mode
 
         def forward(self, noise):
             if clrate is not None and clrate > 0:
@@ -238,10 +242,28 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             batsize = noise.size(0)
             ret = torch.cat([startsymbols.repeat(batsize, 1).unsqueeze(1),
                              decret], 1)
-            if not self.gmode:
+            if not self.gmode and self.argmax_in_d_mode:
                 _, ret = torch.max(ret, 2)
                 ret = self.idxtoonehot(ret)
             return ret
+
+
+    specialcriticemb = nn.Linear(vocsize, discdim, bias=False)
+
+
+    class SpecialCriticCell(q.rnn.GRUCell):
+        """ embeds, does one-hot for states, no one-hot for outputs"""
+        def _forward(self, x_t, h_tm1, t=None): #x_t: dist
+            _, x_t_onehot = torch.max(x_t, 1)
+            x_t_onehot = idxtoonehot(x_t_onehot)
+            x_t_onehot_emb = specialcriticemb(x_t_onehot)
+            _, h_t = super(SpecialCriticCell, self)._forward(x_t_onehot_emb, h_tm1, t=t)
+
+            x_t_emb = specialcriticemb(x_t)
+            y_t, _ = super(SpecialCriticCell, self)._forward(x_t_emb, h_tm1, t=t)
+
+            return y_t, h_t
+
 
     class DualCritic(nn.Module):
         def __init__(self, netpast, netpresent, cellpresent, gmode=False):
@@ -262,6 +284,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             #     x = self.idxtoonehot(x)
             self.cell_present._detach_states = self.gmode
             inppast = x[:, :-1, :]
+            if argmax_in_d_mode:
+                _, inppast = torch.max(inppast, 2)
+                inppast = self.idxtoonehot(inppast)
             pastouts = self.net_past(inppast)
             inppresent = x[:, :, :]
             presentouts = self.net_present(inppresent)
@@ -278,12 +303,14 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             scores = distances.sum(1)
             return scores
 
+    singlecriticdist = q.BilinearDistance(discdim, discdim)
+
     class SingleCritic(nn.Module):
         def __init__(self, net, cell, gmode=False):
             super(SingleCritic, self).__init__()
             self.net = net
             self.cell = cell
-            self.distance = q.BilinearDistance(discdim, discdim)
+            self.distance = singlecriticdist
             self.distact = nn.Tanh()
             # self.distance = q.DotDistance()
             self.gmode = gmode
@@ -319,11 +346,15 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             )
 
         cell_present = q.GRUCell(discdim, discdim, use_cudnn_cell=False)
-        net_present = q.RecurrentStack(
-            nn.Linear(vocsize, discdim, bias=False),
-            cell_present.to_layer(),
-            # nn.Linear(discdim, discdim, bias=False)
-        )
+        if argmax_in_d_mode:
+            net_present = SpecialCriticCell(discdim, discdim, use_cudnn_cell=False).to_layer()
+            cell_present = net_present
+        else:
+            net_present = q.RecurrentStack(
+                nn.Linear(vocsize, discdim, bias=False),
+                cell_present.to_layer(),
+                # nn.Linear(discdim, discdim, bias=False)
+            )
         if mode == "dual":
             criticd = DualCritic(net_past, net_present, cell_present, gmode=False)
             criticg = DualCritic(net_past, net_present, cell_present, gmode=True)
@@ -565,7 +596,7 @@ def run(lr=0.001,
         cuda=False,
         gpu=1,
         mode="wrongfool",       # "normal", "ganesh", "wrongfool"
-        wrongfoolmode="single",
+        wrongfoolmode="dual",
         subsample=1000,
         inspectdata=False,
         pw=10,

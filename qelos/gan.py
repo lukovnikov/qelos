@@ -175,6 +175,9 @@ class GANTrainer(object):
                 _niterD = 100
             else:
                 _niterD = niterD
+
+            _niterD = 1     # for debugging
+
             for j in range(_niterD):
                 netD.zero_grad()
                 if self.mode == "WGAN":
