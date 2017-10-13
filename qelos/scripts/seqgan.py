@@ -281,7 +281,8 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             self.net_present = netpresent
             self.cell_present = cellpresent
             self.distance = q.DotDistance()
-            self.distact = q.Lambda(lambda x: x) #nn.Tanh()
+            # self.distact = q.Lambda(lambda x: x)
+            self.distact = nn.Tanh()
             self.gmode = gmode
             self.aggparam = None
             self.idxtoonehot = q.IdxToOnehot(vocsize)
