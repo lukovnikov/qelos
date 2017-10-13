@@ -179,7 +179,8 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
 
 
 def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
-                        seqlen, noisedim, soft_next=False, temperature=1., clrate=0):
+                        seqlen, noisedim, soft_next=False, temperature=1.,
+                        clrate=0, mode="dual"):     # "dual" or "single"
 
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
@@ -243,9 +244,14 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             self.cell_present = cellpresent
             self.distance = distance
             self.gmode = gmode
+            self.aggparam = None
+            self.idxtoonehot = q.IdxToOnehot(vocsize)
 
         def forward(self, x):   # (batsize, seqlen, ...), seqlen >= 3
             x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
+            if not self.gmode:
+                _, x = torch.max(x, 2)
+                x = self.idxtoonehot(x)
             self.cell_present._detach_states = self.gmode
             inppast = x[:, :-1, :]
             pastouts = self.net_past(inppast)
@@ -277,7 +283,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             nn.Linear(discdim, vocsize, bias=False)
         )
 
-        distance = q.CosineDistance()
+        distance = q.DotDistance()
 
         criticd = Critic(net_past, net_present, cell_present, distance, gmode=False)
         criticg = Critic(net_past, net_present, cell_present, distance, gmode=True)
