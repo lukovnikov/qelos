@@ -250,6 +250,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             self.net_present = netpresent
             self.cell_present = cellpresent
             self.distance = q.DotDistance()
+            self.distact = nn.Tanh()
             self.gmode = gmode
             self.aggparam = None
             self.idxtoonehot = q.IdxToOnehot(vocsize)
@@ -273,6 +274,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             presentouts = presentouts.contiguous().view(batsize * seqlen, -1)
             distances = self.distance(pastouts, presentouts)
             distances = distances.view(batsize, seqlen)
+            distances = self.distact(distances)
             scores = distances.sum(1)
             return scores
 
@@ -282,6 +284,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             self.net = net
             self.cell = cell
             self.distance = q.BilinearDistance(discdim, discdim)
+            self.distact = nn.Tanh()
             # self.distance = q.DotDistance()
             self.gmode = gmode
             self.aggparam = None
@@ -304,6 +307,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             presentouts = presentouts.contiguous().view(batsize * seqlen, -1)
             distances = self.distance(pastouts, presentouts)
             distances = distances.view(batsize, seqlen)
+            distances = self.distact(distances)
             scores = distances.sum(1)
             return scores
 
