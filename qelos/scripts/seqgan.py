@@ -256,14 +256,15 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
         def __init__(self, *args, **kwargs):
             super(SpecialCriticCell, self).__init__(*args, **kwargs)
             self.idxtoonehot = idxtoonehot
+            self.specialcriticemb = specialcriticemb
 
         def _forward(self, x_t, h_tm1, t=None): #x_t: dist
             _, x_t_onehot = torch.max(x_t, 1)
             x_t_onehot = self.idxtoonehot(x_t_onehot)
-            x_t_onehot_emb = specialcriticemb(x_t_onehot)
+            x_t_onehot_emb = self.specialcriticemb(x_t_onehot)
             _, h_t = super(SpecialCriticCell, self)._forward(x_t_onehot_emb, h_tm1, t=t)
 
-            x_t_emb = specialcriticemb(x_t)
+            x_t_emb = self.specialcriticemb(x_t)
             y_t, _ = super(SpecialCriticCell, self)._forward(x_t_emb, h_tm1, t=t)
 
             return y_t, h_t
@@ -351,8 +352,8 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
         cell_present = q.GRUCell(discdim, discdim, use_cudnn_cell=False)
         if argmax_in_d_mode:
-            net_present = SpecialCriticCell(discdim, discdim, use_cudnn_cell=False).to_layer()
-            cell_present = net_present
+            cell_present = SpecialCriticCell(discdim, discdim, use_cudnn_cell=False)
+            net_present = cell_present.to_layer()
         else:
             net_present = q.RecurrentStack(
                 nn.Linear(vocsize, discdim, bias=False),
