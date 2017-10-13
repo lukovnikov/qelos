@@ -238,9 +238,9 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             batsize = noise.size(0)
             ret = torch.cat([self.startsymbols.repeat(batsize, 1).unsqueeze(1),
                              decret], 1)
-            if not self.gmode:
-                _, ret = torch.max(ret, 2)
-                ret = self.idxtoonehot(ret)
+            # if not self.gmode:
+            #     _, ret = torch.max(ret, 2)
+            #     ret = self.idxtoonehot(ret)
             return ret
 
     class DualCritic(nn.Module):
