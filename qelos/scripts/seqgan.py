@@ -180,7 +180,9 @@ def make_nets_ganesh(vocsize, embdim, gendim, discdim, startsym,
 
 def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
                         seqlen, noisedim, soft_next=False, temperature=1.,
-                        clrate=0, mode="dual"):     # "dual" or "single"
+                        clrate=0, mode="single"):     # "dual" or "single"
+
+    print("wrongfool mode: {}".format(mode))
 
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
@@ -236,13 +238,13 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
                              decret], 1)
             return ret
 
-    class Critic(nn.Module):
-        def __init__(self, netpast, netpresent, cellpresent, distance, gmode=False):
-            super(Critic, self).__init__()
+    class DualCritic(nn.Module):
+        def __init__(self, netpast, netpresent, cellpresent, gmode=False):
+            super(DualCritic, self).__init__()
             self.net_past = netpast
             self.net_present = netpresent
             self.cell_present = cellpresent
-            self.distance = distance
+            self.distance = q.DotDistance()
             self.gmode = gmode
             self.aggparam = None
             self.idxtoonehot = q.IdxToOnehot(vocsize)
@@ -269,24 +271,55 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
             scores = distances.sum(1)
             return scores
 
+    class SingleCritic(nn.Module):
+        def __init__(self, net, cell, gmode=False):
+            super(SingleCritic, self).__init__()
+            self.net = net
+            self.cell = cell
+            self.distance = q.BilinearDistance(discdim, discdim)
+            self.gmode = gmode
+            self.aggparam = None
+            self.idxtoonehot = q.IdxToOnehot(vocsize)
+
+        def forward(self, x):  # (batsize, seqlen, ...), seqlen >= 3
+            x = torch.cat([x[:, :1, :], x], 1)  # HACK: to have something for first real output from present
+            # if not self.gmode:
+            #     _, x = torch.max(x, 2)
+            #     x = self.idxtoonehot(x)
+            self.cell._detach_states = self.gmode
+            y = self.net(x)
+            pastouts = y[:, :-1, :]
+            presentouts = y[:, 1:, :]  # what about first present output?
+
+            pastouts = pastouts.detach() if self.gmode else pastouts
+
+            batsize, seqlen, _ = pastouts.size()
+            pastouts = pastouts.contiguous().view(batsize * seqlen, -1)
+            presentouts = presentouts.contiguous().view(batsize * seqlen, -1)
+            distances = self.distance(pastouts, presentouts)
+            distances = distances.view(batsize, seqlen)
+            scores = distances.sum(1)
+            return scores
+
     def make_critics():
         net_past = q.RecurrentStack(
                 nn.Linear(vocsize, discdim, bias=False),
                 q.GRUCell(discdim, discdim, use_cudnn_cell=False).to_layer(),
-                nn.Linear(discdim, vocsize, bias=False)
+                # nn.Linear(discdim, discdim, bias=False)
             )
 
         cell_present = q.GRUCell(discdim, discdim, use_cudnn_cell=False)
         net_present = q.RecurrentStack(
             nn.Linear(vocsize, discdim, bias=False),
             cell_present.to_layer(),
-            nn.Linear(discdim, vocsize, bias=False)
+            # nn.Linear(discdim, discdim, bias=False)
         )
-
-        distance = q.DotDistance()
-
-        criticd = Critic(net_past, net_present, cell_present, distance, gmode=False)
-        criticg = Critic(net_past, net_present, cell_present, distance, gmode=True)
+        if mode == "dual":
+            criticd = DualCritic(net_past, net_present, cell_present, gmode=False)
+            criticg = DualCritic(net_past, net_present, cell_present, gmode=True)
+        elif mode == "single":
+            criticd = SingleCritic(net_present, cell_present, gmode=False)
+            criticg = SingleCritic(net_present, cell_present, gmode=True)
 
         return criticd, criticg
 
@@ -521,6 +554,7 @@ def run(lr=0.001,
         cuda=False,
         gpu=1,
         mode="wrongfool",       # "normal", "ganesh", "wrongfool"
+        wrongfoolmode="single",
         subsample=1000,
         inspectdata=False,
         pw=10,
@@ -566,7 +600,7 @@ def run(lr=0.001,
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_wrongfool(vocsize, embdim, gendim, discdim,
                                cd["<START>"], seqlen, noisedim, temperature=temperature,
-                               clrate=clrate)
+                               clrate=clrate, mode=wrongfoolmode)
     else:
         raise q.SumTingWongException("unknown mode {}".format(mode))
 
