@@ -411,7 +411,7 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
 def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
                         seqlen, noisedim, soft_next=False, temperature=1.,
-                        clrate=0, mode="acha-sync"):     # "dual" or "single"
+                        clrate=0, mode="acha-sync", g_sharp=True):     # "dual" or "single"
 
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
@@ -448,45 +448,72 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
         nn.Linear(gendim, vocsize),
         q.Softmax(temperature=temperature)
     )
-    startsymbols = np.zeros((1, vocsize), dtype="float32")
-    startsymbols[0, startsym] = 1
-    startsymbols = q.val(startsymbols).v
+    # startsymbols = np.zeros((1, vocsize), dtype="float32")
+    # startsymbols[0, startsym] = 1
+    # startsymbols = q.val(startsymbols).v
     # decodercell.teacher_unforce(seqlen - 1, q.Lambda(lambda x: x[0]),
     #                             startsymbols=startsymbols)
 
     # decoder = decodercell.to_decoder()
     idxtoonehot = q.IdxToOnehot(vocsize)
 
+    # g_sharp = True
+    netR_sharp = g_sharp
+
+    if netR_sharp:
+        netR = q.Stack(q.Lambda(lambda x: clcutter(x)),
+                       q.Lambda(lambda x: x[:, 1:].contiguous()),
+                       q.IdxToOnehot(vocsize)
+                       )
+    else:
+        netR = q.Stack(q.Lambda(lambda x: clcutter(x)),
+                       q.Lambda(lambda x: x[:, 1:].contiguous()),
+                       q.IdxToOnehot(vocsize),
+                       q.Softmax(temperature=0.3),
+                       )
+
     clcutter = get_cl_cutter(amortizer_curriculum)
 
     class Generator(nn.Module):
-        def __init__(self, **kw):
+        def __init__(self, sharp=False, sharp_free=False, **kw):
             super(Generator, self).__init__(**kw)
             self.decodercell = decodercell
             self.idx2onehot = idxtoonehot
-            self.decodercell.teacher_unforce_after(seqlen-1, amortizer_teacherforce,
-                                                   q.Lambda(lambda x: x[0]))
+            if sharp_free:
+                freeblock = q.Stack(q.Lambda(lambda x: torch.max(x[0], 1)[1]),
+                                    self.idx2onehot)
+            else:
+                freeblock = q.Lambda(lambda x: x[0])
+            self.decodercell.teacher_unforce_after(seqlen-1,
+                                                   amortizer_teacherforce,
+                                                   freeblock)
             self.decoder = self.decodercell.to_decoder()
+            self.sharp = sharp
+            self.override_softmax = q.Softmax(temperature=0.3)
 
         def forward(self, noise, sequences, maxtime=None):
             if clcutter is not None:
                 sequences = clcutter(sequences)
+            sequences = self.idx2onehot(sequences)
             overrideseq = sequences[:, 1:].contiguous()
             sequences = sequences[:, :-1].contiguous()
+            if not netR_sharp:
+                overrideseq = self.override_softmax(overrideseq)
             kw = {}
             if maxtime is not None:
                 kw["maxtime"] = maxtime
-            sequences = self.idx2onehot(sequences)
             dec = self.decoder(sequences, noise, **kw)  # (batsize, seqlen, vocsize)
+            if self.sharp:
+                _, dec = torch.max(dec, 2)
+                dec = self.idx2onehot(dec)
             decseqlen, decvocsize = dec.size(1), dec.size(2)
-            override = self.idx2onehot(overrideseq)
             amortizer = min(amortizer_override.v + 1, decseqlen)
             if amortizer == decseqlen:
                 out = dec
             else:
-                overridelen = override.size(1) - amortizer
+                overridelen = overrideseq.size(1) - amortizer
                 copylen = decseqlen - overridelen
-                out = torch.cat([override[:, :overridelen], dec[:, -copylen:]], 1)
+                out = torch.cat([overrideseq[:, :overridelen], dec[:, -copylen:]], 1)
             return out
 
     disccell = q.RecStack(
@@ -508,12 +535,10 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
             sum = self.summ(recout[:, -1, :])
             return sum.unsqueeze(1)
 
-    netR = q.Stack(q.Lambda(lambda x: clcutter(x)),
-                   q.Lambda(lambda x: x[:, 1:].contiguous()),
-                   q.IdxToOnehot(vocsize))
-
-    netG = Generator()
-    netD = Discriminator()
+    netG4D = Generator(sharp=g_sharp, sharp_free=True)
+    netG4G = Generator(sharp=False, sharp_free=True)
+    netD4D = Discriminator()
+    netD4G = Discriminator()
 
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
         gold = None
@@ -528,19 +553,19 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
             data = q.var(data).cuda(cuda).v
         if rawlen is not None:
             if gen is None:  # completely unforce, generate rawlen
-                netG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
-                o = netG.decoder(noise, maxtime=rawlen)
+                netG4G.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
+                o = netG4G.decoder(noise, maxtime=rawlen)
             else:  # generate from data up to rawlen
-                o = netG(noise, data, maxtime=rawlen)
+                o = netG4G(noise, data, maxtime=rawlen)
         else:
-            o = netG(noise, data)
+            o = netG4G(noise, data)
 
         _, y = torch.max(o, 2)
 
-        score = netD(o)
+        score = netD4D(o)
         return y, o[0], score, None, None
 
-    return (netD, netD), (netG, netG), netR, sample, amortizers
+    return (netD4D, netD4G), (netG4D, netG4G), netR, sample, amortizers
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
@@ -758,6 +783,7 @@ def run(lr=0.0003,
         temperature=1.,
         clrate=0,
         logiter=50,
+        gsharp=True,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -787,7 +813,8 @@ def run(lr=0.0003,
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim,
                                cd["<START>"], seqlen, noisedim,
-                               temperature=temperature, clrate=clrate)
+                               temperature=temperature, clrate=clrate,
+                               g_sharp=gsharp)
     elif mode == "normal":
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_normal(vocsize, embdim, gendim, discdim,
