@@ -75,7 +75,9 @@ class ContextDecoderACHAWrappper(nn.Module):
         if amortizer == seqlen:
             out = dec
         else:
-            out = torch.cat([override[:, :-amortizer], dec[:, -amortizer:]], 1)
+            overridelen = override.size(1) - amortizer
+            copylen = seqlen - overridelen
+            out = torch.cat([override[:, :overridelen], dec[:, -copylen:]], 1)
         return out
 
 
@@ -407,7 +409,8 @@ def make_nets_wrongfool(vocsize, embdim, gendim, discdim, startsym,
 
 
 def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
-                     seqlen, noisedim, soft_next=False, temperature=1., mode="acha-sync"):
+                     seqlen, noisedim, soft_next=False, temperature=1.,
+                     mode="acha-sync"):
 
     def get_amortizer_update_rule(offset=0, headstart=500, interval=200):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
@@ -470,7 +473,7 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
 
     netD = q.Stack(
         netD,
-        q.Forward(discdim, discdim, activation="relu"),
+        # q.Forward(discdim, discdim, activation="relu"),
         nn.Linear(discdim, 1),
         q.Lambda(lambda x: x.squeeze(1))
     )
@@ -485,15 +488,18 @@ def make_nets_normal(vocsize, embdim, gendim, discdim, startsym,
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
-        if gen is None or rawlen is not None:
+        if rawlen is not None and gen is None:      # start form startsyms
             data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
-        else:
+        else:   # start from data
             data = next(gen)[0:1]
             gold = data
             data = q.var(data).cuda(cuda).v
         if rawlen is not None:
-            netG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
-            o = netG.decoder(noise, maxtime=rawlen)
+            if gen is None:     # completely unforce, generate rawlen
+                netG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
+                o = netG.decoder(noise, maxtime=rawlen)
+            else:   # generate from data up to rawlen
+                o = netG(noise, data, maxtime=rawlen)
         else:
             o = netG(noise, data)
 
@@ -596,6 +602,7 @@ def makeiter(dl):
 
 
 def run(lr=0.001,
+        wreg=0.001,
         embdim=64,
         noisedim=64,
         gendim=256,
@@ -607,7 +614,7 @@ def run(lr=0.001,
         seqlen=32,
         cuda=False,
         gpu=1,
-        mode="wrongfool",       # "normal", "ganesh", "wrongfool"
+        mode="normal",       # "normal", "ganesh", "wrongfool"
         wrongfoolmode="dual",
         subsample=1000,
         inspectdata=False,
@@ -643,8 +650,9 @@ def run(lr=0.001,
     if mode == "normal":
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_normal(vocsize, embdim, gendim, discdim,
-                               cd["<START>"], seqlen, noisedim, temperature=temperature,
-                               mode="clth")
+                               cd["<START>"], seqlen, noisedim,
+                               temperature=temperature,
+                               mode="acha-sync")
     elif mode == "ganesh":
         (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers \
             = make_nets_ganesh(vocsize, embdim, gendim, discdim,
@@ -659,8 +667,8 @@ def run(lr=0.001,
         raise q.SumTingWongException("unknown mode {}".format(mode))
 
     # train
-    optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr)
-    optimG = torch.optim.Adam(q.params_of(netG4G), lr=lr)
+    optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr, weight_decay=wreg)
+    optimG = torch.optim.Adam(q.params_of(netG4G), lr=lr, weight_decay=wreg)
     gantrainer = q.GANTrainer(mode="WGAN-GP", one_sided=True, noise_dim=noisedim,
                               penalty_weight=pw,
                  optimizerD=optimD, optimizerG=optimG, logger=Logger("gan", logiter=logiter))
@@ -685,10 +693,10 @@ def run(lr=0.001,
             return pp(y), o, score, ograds, gold
         return pp(y)
 
-    print(samplepp(cuda=False))
+    print(samplepp(cuda=False, rawlen=40))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
-                     data_gen=traingen, cuda=cuda, netR=netR)
+                     data_gen=traingen, cuda=cuda, netR=netR, sample_real_for_gen=mode=="normal")
 
     q.embed()
 
