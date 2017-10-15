@@ -218,7 +218,7 @@ def run(lrgan=0.0003,
         y = y.cpu().data.numpy()[:, 1:]
         return pp(y)
 
-    print(samplepp(cuda=False, rawlen=40))
+    print(samplepp(cuda=cuda, rawlen=40))
 
     gantrainer.train(netD, netG, niter=niter, niterD=niterD, niterG=niterG,
                      data_gen=traingen, cuda=cuda, netR=netR)
