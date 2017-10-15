@@ -13,7 +13,7 @@ class Logger(object):
         self.logiter = logiter
 
     def log(self, _iter=None, niter=None, errD=None, errG=None, scoreD_real=None, scoreD_fake=None, lip_loss=None, **kw):
-        if (_iter+1) % self.logiter == 0:
+        if (_iter+0) % self.logiter == 0:
             self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f} Loss Lip: {:.4f}"
                          .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake, lip_loss))
 
