@@ -55,9 +55,15 @@ class GANTrainer(object):
         self.pagandist = q.LNormDistance(2)
         # dynamic hyperparams
         self.dynamichyperparams = []
+        # chained trainers      # multi-task training
+        self.chained_trainers = []
 
     def add_dyn_hyperparams(self, dynhparam):
         self.dynamichyperparams.append(dynhparam)
+        return self
+
+    def chain_trainer(self, trainer):
+        self.chained_trainers.append(trainer)
         return self
 
     def perturb(self, x):
@@ -138,7 +144,7 @@ class GANTrainer(object):
             netG4D = netG[0]
             netG4G = netG[1]
         else:
-            netG4D, netG4G = netG
+            netG4D, netG4G = netG, netG
 
         if cuda:
             netD4D.cuda()
@@ -334,4 +340,7 @@ class GANTrainer(object):
                                 valid_EMD=valid_EMD, valid_fake2real=valid_fake2real,
                                 valid_real2fake=valid_real2fake, valid_fakeandreal=valid_fakeandreal,
                                 when="after_G")
+
+            for chained_trainer in self.chained_trainers:
+                chained_trainer.do_next_iter()
 

@@ -444,7 +444,10 @@ class ContextDecoderCell(DecoderCell):
                 assert(t == 0)
                 if self._start_symbols is not None:
                     ctx = x[0]
-                    y_t = self._start_symbols.repeat(ctx.size(0), 1)
+                    if self._start_symbols.size() == 2:
+                        y_t = self._start_symbols.repeat(ctx.size(0), 1)
+                    else:
+                        y_t = self._start_symbols.repeat(ctx.size(0))
                     # y_t = torch.LongTensor(ctx.size(0))
                     # y_t.fill_(self._start_symbols)
                     # y_t = var(y_t).cuda(ctx).v

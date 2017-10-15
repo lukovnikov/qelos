@@ -1,4 +1,4 @@
-from qelos.train import lossarray, train, test, TensorDataset, LossWithAgg
+from qelos.train import lossarray, train, test, TensorDataset, LossWithAgg, aux_train
 
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \
@@ -38,7 +38,7 @@ from qelos.furnn import MemGRUCell
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     iscallable, isstring, isfunction, StringMatrix, tokenize, dtoo, emit, get_emitted, \
-    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log
+    wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log, makeiter
 
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
     params_of, DynamicHyperparam, Hyperparam

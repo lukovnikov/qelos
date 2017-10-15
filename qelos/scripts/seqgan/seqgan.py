@@ -520,6 +520,7 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
         nn.Linear(vocsize, embdim, bias=False),
         q.GRUCell(embdim, discdim, use_cudnn_cell=False),
     )
+    discnet = disccell.to_layer()
 
     disc_summary = q.Stack(
         nn.Linear(discdim, 1),
@@ -529,13 +530,13 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
         def __init__(self):
             super(Discriminator, self).__init__()
             self.cell = disccell
-            self.recnet = self.cell.to_layer()
+            self.recnet = discnet
             self.summ = disc_summary
 
         def forward(self, x):   # sequence of onehot
             recout = self.recnet(x)
-            sum = self.summ(recout[:, -1, :])
-            return sum.unsqueeze(1)
+            summ = self.summ(recout[:, -1, :])
+            return summ.unsqueeze(1)
 
     netG4D = Generator(sharp=g_sharp, sharp_free=True)
     netG4G = Generator(sharp=False, sharp_free=True)
