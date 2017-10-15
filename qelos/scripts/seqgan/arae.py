@@ -182,6 +182,13 @@ def run(lrgan=0.0003,
     (encoder, decoder, ae), (netD, netG, netR), sampler \
         = makenets(vocsize, embdim, encdim, noisedim, seqlen, startsym)
 
+    def samplepp(cuda=True, rawlen=None):
+        y = sampler(cuda=cuda, rawlen=rawlen)
+        y = y.cpu().data.numpy()[:, 1:]
+        return pp(y)
+
+    print(samplepp(cuda=False, rawlen=40))
+
     # gan training
     optimD = torch.optim.Adam(q.params_of(netD), lr=lrgan, weight_decay=wreg)
     optimG = torch.optim.Adam(set(q.params_of(netG)) | set(q.params_of(netR)), lr=lrgan, weight_decay=wreg)
@@ -213,12 +220,6 @@ def run(lrgan=0.0003,
     #     idxseq = np.arange(0, x.shape[1]) % 10
     #     print("".join([str(a) for a in list(idxseq)]))
     #
-    def samplepp(cuda=True, rawlen=None):
-        y = sampler(cuda=cuda, rawlen=rawlen)
-        y = y.cpu().data.numpy()[:, 1:]
-        return pp(y)
-
-    print(samplepp(cuda=cuda, rawlen=40))
 
     gantrainer.train(netD, netG, niter=niter, niterD=niterD, niterG=niterG,
                      data_gen=traingen, cuda=cuda, netR=netR)
