@@ -521,14 +521,16 @@ def make_nets_wrongfool_acha(vocsize, embdim, gendim, discdim, startsym,
         q.GRUCell(embdim, discdim, use_cudnn_cell=False),
     )
 
+    disc_summary = q.Stack(
+        nn.Linear(discdim, 1),
+    )
+
     class Discriminator(nn.Module):
         def __init__(self):
             super(Discriminator, self).__init__()
             self.cell = disccell
             self.recnet = self.cell.to_layer()
-            self.summ = q.Stack(
-                nn.Linear(discdim, 1),
-            )
+            self.summ = disc_summary
 
         def forward(self, x):   # sequence of onehot
             recout = self.recnet(x)
@@ -783,7 +785,7 @@ def run(lr=0.0003,
         temperature=1.,
         clrate=0,
         logiter=50,
-        gsharp=True,
+        gsharp=False,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
