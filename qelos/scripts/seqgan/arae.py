@@ -74,7 +74,9 @@ def makenets(vocsize, embdim, encdim, noisedim, seqlen, startsym):
 
         deccell.teacher_force()
 
-        return dec
+        _, ret = torch.max(dec, 2)
+
+        return ret
 
 
     return (encoder, decoder, ae), (netD, netG, encoder), sample
