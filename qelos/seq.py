@@ -430,9 +430,24 @@ class ContextDecoderCell(DecoderCell):
         if "teacherforce_mask" in xkw:
             teacherforce_mask = xkw["teacherforce_mask"]
             teacherforce_mask_t = teacherforce_mask[:, t].long()
-            teacherforced_outs = self.get_inputs_t(t=t, x=x, xkw={"teacher_force": True}, y_t=y_t)
-            freex = (x[0][:, 0], x[1])
-            freerunning_outs = self.get_inputs_t(t=t, x=freex, xkw={"teacher_force": False}, y_t=y_t)
+
+            innermode = 0   # MIX
+            if teacherforce_mask_t.data.sum() == teacherforce_mask_t.size(0):
+                innermode = 1   # only forced
+            elif teacherforce_mask_t.data.sum() == 0:
+                innermode = 2   # only free
+
+            if innermode == 0 or innermode == 1:
+                teacherforced_outs = self.get_inputs_t(t=t, x=x, xkw={"teacher_force": True}, y_t=y_t)
+            if innermode == 1:
+                return teacherforced_outs
+
+            if innermode == 0 or innermode == 2:
+                freex = (x[0][:, 0], x[1])
+                freerunning_outs = self.get_inputs_t(t=t, x=freex, xkw={"teacher_force": False}, y_t=y_t)
+            if innermode == 2:
+                return freerunning_outs
+
             x_t = teacherforced_outs[0][0] * teacherforce_mask_t \
                   + (1 + (-1) * teacherforce_mask_t) * freerunning_outs[0][0]
             ctx = teacherforced_outs[0][1]

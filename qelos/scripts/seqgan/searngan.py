@@ -84,10 +84,12 @@ def loaddata(p="../../../datasets/hutter/enwik8.h5", window=200, subsample=1000,
 
 def makenets(vocsize, embdim, gendim, discdim, startsym,
              seqlen, noisedim, temperature=1.,
-             clrate=0, mode="acha-sync"):     # "dual" or "single"
+             clrate=0, mode="acha-sync", debug=False):     # "dual" or "single"
 
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
+            if debug:
+                return 5
             if iter < (offset + headstart):
                 return 0
             else:
@@ -319,7 +321,7 @@ def run(lr=0.0003,
         discdim=256,
         batsize=8,
         niter=1,
-        niterD=10,
+        niterD=5,
         niterG=1,
         seqlen=32,
         cuda=False,
@@ -327,8 +329,9 @@ def run(lr=0.0003,
         subsample=1000,
         inspectdata=False,
         pw=10,
-        clrate=10,
+        clrate=1000,
         logiter=50,
+        debug=False
         ):
     if cuda:
         torch.cuda.set_device(gpu)
@@ -357,7 +360,7 @@ def run(lr=0.0003,
     (netD4D, netD4G), (netG4D, netG4G), sampler, amortizers, customgbackward \
         = makenets(vocsize, embdim, gendim, discdim,
                            cd["<START>"], seqlen, noisedim,
-                           clrate=clrate)
+                           clrate=clrate, debug=debug)
 
     # train
     optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr, weight_decay=wreg)
@@ -371,6 +374,9 @@ def run(lr=0.0003,
 
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
+
+    if debug:
+        amortizers[0]._value = 5
 
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False, rawlen=None):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
