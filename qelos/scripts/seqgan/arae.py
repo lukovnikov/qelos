@@ -82,7 +82,6 @@ def makenets(vocsize, embdim, encdim, noisedim, seqlen, startsym):
     return (encoder, decoder, ae), (netD, netG, encoder), sample
 
 
-
 # region data loading
 def makemat(data, window, subsample, startid=None):
     startpositions = np.arange(0, data.shape[0] - window)
