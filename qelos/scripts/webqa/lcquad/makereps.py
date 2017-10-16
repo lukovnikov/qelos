@@ -360,7 +360,8 @@ def test_reps():
     # q.embed()
 
 
-def load_all(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
+def load_all(dim=50, glovedim=50, shared_computers=False,
+             mergemode="sum",
              dirp="../../../../datasets/lcquad/",
              qfile="lcquad.multilin",
              lexfile="lcquad.multilin.lex",
@@ -486,9 +487,10 @@ def zerobasespecialglovecloneoverride(dim, dic, gloveemb):
     return emb
 
 
-def get_reps(dim=50, glovedim=50, shared_computers=False, mergemode="sum",
-        loaded_questions=None, replace_dbp=True,
-        lexmatp="../../../../datasets/lcquad/lcquad.multilin.lexmats"
+def get_reps(dim=50, glovedim=50, shared_computers=False,
+             mergemode="sum",
+             loaded_questions=None, replace_dbp=True,
+             lexmatp="../../../../datasets/lcquad/lcquad.multilin.lexmats"
         ):
     tt = q.ticktock("loader")
     qpids, questionsm, querysm = loaded_questions

@@ -442,6 +442,12 @@ class train(object):
         self._earlystop_criterium = None
         self._earlystop_selector = None
         self._earlystop_select_history = None
+        # chained trainers
+        self._chained_trainers = []
+
+    def chain_trainer(self, trainer):
+        self._chained_trainers.append(trainer)
+        return self
 
     def clip_grad_norm(self, x):
         self._clip_grad_norm = x
@@ -564,6 +570,8 @@ class train(object):
                             tgn
                             )
                         )
+                for chained_trainer in self._chained_trainers:
+                    chained_trainer.do_next_iter()
             ttmsg = "Epoch {}/{} -- train: {}"\
                 .format(
                     self.current_epoch+1,
@@ -618,6 +626,9 @@ class train(object):
         self.epochs = epochs
         self.reset()
         self.initialize()
+        for chained_trainer in self._chained_trainers:
+            chained_trainer.reset()
+            chained_trainer.initialize()
         self.trainlosses.reset()
         self.trainloop()
 
