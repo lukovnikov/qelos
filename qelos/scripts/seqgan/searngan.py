@@ -179,6 +179,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             # select
             decselected = None
             if select_ptrs is not None:
+
                 decreshaped = dec.view(batsize, vocsize, dec.size(1), -1)
                 decreshaped = decreshaped[:, 0].contiguous()
                 decreshaped = decreshaped.view(batsize * dec.size(1), -1)
@@ -285,9 +286,9 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
         scores = scores.detach()
         saved_decisions = netG4G._saved_decselected
         scores = scores.view(saved_decisions.size())
-        logscores = torch.log(1.0 - scores)
+        # logscores = -torch.log(scores)
         logdecisions = -torch.log(saved_decisions)
-        losses = logscores * logdecisions    # TODO: correct loss needed
+        losses = scores * logdecisions    # TODO: correct loss needed
         losses = losses.sum(1)
         loss = losses.mean()
         loss.backward()
