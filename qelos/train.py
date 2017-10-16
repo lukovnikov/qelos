@@ -326,6 +326,99 @@ class eval(object):
         return out
 
 
+class aux_train(object):
+    def __init__(self, model):
+        super(aux_train, self).__init__()
+        self.model = model
+        self.losses = None
+        self.usecuda = False
+        self.cudaargs = ([], {})
+        self.optim = None
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
+        self.dataloader = None
+        self.tt = ticktock("aux_trainer")
+        self._clip_grad_norm = None
+        self._iter = 0
+        self.logiter = 1        # log every iter
+
+    def clip_grad_norm(self, x):
+        self._clip_grad_norm = x
+        return self
+
+    def cuda(self, usecuda, *args, **kwargs):
+        self.usecuda = usecuda
+        self.cudaargs = (args, kwargs)
+        return self
+
+    def initialize(self):
+        if self.usecuda:
+            self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
+            self.losses.cuda(*self.cudaargs[0], **self.cudaargs[1])
+        return self
+
+    def train_on(self, dataloader, losses):
+        self.dataloader = dataloader
+        self.dataiter = q.makeiter(dataloader, unwrap=False)
+        self.losses = losses
+        return self
+
+    def optimizer(self, optimizer):
+        self.optim = optimizer
+        return self
+
+    def set_batch_transformer(self, input_transform=None, output_transform=None):
+        if input_transform is not None:
+            self.transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.transform_batch_out = output_transform
+        return self
+
+    def reset(self):
+        if self.losses is not None:
+            self.losses.reset()
+        self._iter = 0
+        return self
+
+    def do_next_iter(self):
+        batch = next(self.dataiter)
+        self.optim.zero_grad()
+        params = q.params_of(self.model)
+        batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
+        if self.transform_batch_inp is not None:
+            batch = self.transform_batch_inp(*batch)
+        modelouts = self.model(*batch[:-1])
+        modelout2loss = modelouts
+        if self.transform_batch_out is not None:
+            modelout2loss = self.transform_batch_out(modelouts)
+        trainlosses = self.losses(modelout2loss, batch[-1], inputs=batch[:-1])
+        trainlosses[0].backward()
+        # grad total norm
+        tgn0 = None
+        if self._clip_grad_norm is not None:
+            tgn0 = nn.utils.clip_grad_norm(self.model.parameters(), self._clip_grad_norm)
+        if tgn0 is not None:
+            tgn = tgn0
+        else:
+            tgn = 0
+            for param in self.model.parameters():
+                tgn += param.grad.pow(2).sum() if param.grad is not None else 0
+            tgn = tgn.pow(1. / 2)
+            tgn = tgn.data[0]
+
+        self.optim.step()
+
+        if self._iter % self.logiter == 0:
+            self.tt.msg("train - Iter {}: {} - TGN: {:.4f}"
+                .format(
+                    self._iter + 1,
+                    self.losses.pp(),
+                    tgn
+                )
+            )
+        self._iter += 1
+
+
 class train(object):
     def __init__(self, model):
         super(train, self).__init__()

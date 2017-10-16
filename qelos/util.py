@@ -610,4 +610,20 @@ def load_sparse_tensor(f):
     return x
 
 
+def makeiter(dl, unwrap=True):
+    def inner():
+        for i in dl:
+            yield i
+
+    dli = inner()
+    while True:
+        try:
+            ret = next(dli)
+            if unwrap:
+                yield ret[0]
+            else:
+                yield ret
+        except StopIteration as e:
+            dli = inner()
+
 
