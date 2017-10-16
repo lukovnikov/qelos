@@ -41,6 +41,8 @@ class GANTrainer(object):
         self.noise_dim = noise_dim
         self.mode = mode
         self.modeD = modeD
+        if self.mode == "GAN":
+            self.modeD = "disc"
         self.logger = logger
         self._dragan_lg_var = 0.6
         self.data_iter = data_iter
@@ -57,6 +59,12 @@ class GANTrainer(object):
         self.dynamichyperparams = []
         # chained trainers      # multi-task training
         self.chained_trainers = []
+        # custom g backward override
+        self._custom_G_backward = None
+
+    def set_custom_g_backward(self, f):
+        self._custom_G_backward = f
+        return self
 
     def add_dyn_hyperparams(self, dynhparam):
         self.dynamichyperparams.append(dynhparam)
@@ -182,7 +190,7 @@ class GANTrainer(object):
             else:
                 _niterD = niterD
 
-            # _niterD = 1     # for debugging
+            _niterD = 1     # for debugging
 
             for j in range(_niterD):
                 netD.zero_grad()
@@ -219,6 +227,9 @@ class GANTrainer(object):
                 scoreD_fake_vec = netD(fake.detach())        # TODO: netD(fake.detach())  ?
                 #scoreD_fake = scoreD_fake_vec.mean()
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
+                if self.mode == "GAN":
+                    errD = - torch.log(scoreD_real_vec).mean() - torch.log(1 - scoreD_fake_vec).mean()
+                    grad_points = None
                 if self.mode == "WGAN":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     grad_points = None
@@ -293,12 +304,15 @@ class GANTrainer(object):
                     fake = netG(vgnoise)
 
                 errG = netD(fake)
-                if self.modeD == "critic":
-                    errG = -errG.mean()
-                elif self.modeD == "disc":
-                    errG = torch.log(1.0 - errG).mean()
+                if self._custom_G_backward is not None:
+                    errG = self._custom_G_backward(errG)
+                else:
+                    if self.modeD == "critic":
+                        errG = -errG.mean()
+                    elif self.modeD == "disc":
+                        errG = torch.log(1.0 - errG).mean()
 
-                errG.backward()
+                    errG.backward()
                 self.optimizerG.step()
 
             ######### Validate G net ##########

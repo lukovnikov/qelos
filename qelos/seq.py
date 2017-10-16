@@ -427,18 +427,31 @@ class ContextDecoderCell(DecoderCell):
         self._tua_after = after     # hyperparam or int !
 
     def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
-        if self._tua_after is not None:
-            if isinstance(self._tua_after, Hyperparam):
-                tua_after = self._tua_after.v
+        if "teacherforce_mask" in xkw:
+            teacherforce_mask = xkw["teacherforce_mask"]
+            teacherforce_mask_t = teacherforce_mask[:, t].long()
+            teacherforced_outs = self.get_inputs_t(t=t, x=x, xkw={"teacher_force": True}, y_t=y_t)
+            freex = (x[0][:, 0], x[1])
+            freerunning_outs = self.get_inputs_t(t=t, x=freex, xkw={"teacher_force": False}, y_t=y_t)
+            x_t = teacherforced_outs[0][0] * teacherforce_mask_t \
+                  + (1 + (-1) * teacherforce_mask_t) * freerunning_outs[0][0]
+            ctx = teacherforced_outs[0][1]
+            return (x_t, ctx), {}
+        if "teacher_force" not in xkw:
+            if self._tua_after is not None:
+                if isinstance(self._tua_after, Hyperparam):
+                    tua_after = self._tua_after.v
+                else:
+                    tua_after = self._tua_after
+                tua_after = max(1, self._max_time - tua_after)
+                if t < tua_after:
+                    teacher_force = 1
+                else:
+                    teacher_force = 0
             else:
-                tua_after = self._tua_after
-            tua_after = max(1, self._max_time - tua_after)
-            if t < tua_after:
-                teacher_force = 1
-            else:
-                teacher_force = 0
+                teacher_force = self._teacher_force
         else:
-            teacher_force = self._teacher_force
+            teacher_force = xkw["teacher_force"]
         if teacher_force == 0:
             if y_t is None:
                 assert(t == 0)
