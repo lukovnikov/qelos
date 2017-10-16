@@ -14,7 +14,7 @@ class Logger(object):
 
     def log(self, _iter=None, niter=None, errD=None, errG=None, scoreD_real=None, scoreD_fake=None, lip_loss=None, **kw):
         if (_iter+0) % self.logiter == 0:
-            self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f}"
+            self.tt.msg("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f}"
                          .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake))
 
 
@@ -304,7 +304,7 @@ def makeiter(dl):
             dli = inner()
 
 
-def run(lr=0.0003,
+def run(lr=0.00005,
         wreg=0.000001,
         embdim=64,
         noisedim=64,
@@ -355,7 +355,7 @@ def run(lr=0.0003,
 
     # train
     optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr, weight_decay=wreg)
-    optimG = torch.optim.Adam(q.params_of(netG4G), lr=lr, weight_decay=wreg)
+    optimG = torch.optim.Adam(q.params_of(netG4G), lr=0, weight_decay=wreg)
     gantrainer = q.GANTrainer(mode="GAN", noise_dim=noisedim,
                               penalty_weight=pw,
                               optimizerD=optimD, optimizerG=optimG,
