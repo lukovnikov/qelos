@@ -272,7 +272,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
         score_mins, _ = torch.min(scores, 1)
         score_maxs, _ = torch.max(scores, 1)
         scores = (scores - score_mins.unsqueeze(1)) / (score_maxs - score_mins).unsqueeze(1)
-        scores = (scores - 0.5) * 2
+        # scores = (scores - 0.5) * 2
         # logscores = -torch.log(scores)
         logdecisions = -torch.log(saved_decisions)
         losses = scores * logdecisions

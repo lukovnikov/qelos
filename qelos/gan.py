@@ -190,7 +190,7 @@ class GANTrainer(object):
             else:
                 _niterD = niterD
 
-            _niterD = 1     # for debugging
+            # _niterD = 1     # for debugging
 
             for j in range(_niterD):
                 netD.zero_grad()
