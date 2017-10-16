@@ -304,13 +304,14 @@ def makeiter(dl):
             dli = inner()
 
 
-def run(lr=0.00005,
+def run(lrd=0.00005,
+        lrg=0.00005,
         wreg=0.000001,
-        embdim=64,
-        noisedim=64,
-        gendim=256,
-        discdim=256,
-        batsize=8,
+        embdim=128,
+        noisedim=128,
+        gendim=512,
+        discdim=512,
+        batsize=256,
         niter=1,
         niterD=5,
         niterG=1,
@@ -354,8 +355,8 @@ def run(lr=0.00005,
                            clrate=clrate, debug=debug)
 
     # train
-    optimD = torch.optim.Adam(q.params_of(netD4D), lr=lr, weight_decay=wreg)
-    optimG = torch.optim.Adam(q.params_of(netG4G), lr=0, weight_decay=wreg)
+    optimD = torch.optim.RMSprop(q.params_of(netD4D), lr=lrd, weight_decay=wreg)
+    optimG = torch.optim.RMSprop(q.params_of(netG4G), lr=lrg, weight_decay=wreg)
     gantrainer = q.GANTrainer(mode="GAN", noise_dim=noisedim,
                               penalty_weight=pw,
                               optimizerD=optimD, optimizerG=optimG,
