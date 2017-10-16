@@ -208,16 +208,16 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             return ret
 
-    # disccell = q.RecStack(
-    #     nn.Embedding(vocsize, embdim),
-    #     q.GRUCell(embdim, discdim, use_cudnn_cell=False),
-    # )
-    # discnet = disccell.to_layer()
-
-    discnet = q.RecurrentStack(
+    disccell = q.RecStack(
         nn.Embedding(vocsize, embdim),
-        q.GRULayer(embdim, discdim),
+        q.GRUCell(embdim, discdim, use_cudnn_cell=False),
     )
+    discnet = disccell.to_layer()
+
+    # discnet = q.RecurrentStack(
+    #     nn.Embedding(vocsize, embdim),
+    #     q.GRULayer(embdim, discdim),
+    # )
 
     disc_summary = q.Stack(
         nn.Linear(discdim, 1),
