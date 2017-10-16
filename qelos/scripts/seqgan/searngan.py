@@ -286,7 +286,9 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             print(paramdec[0].grad.norm())
         return loss
 
-    return (netD, netD), (netG4D, netG4G), sample, amortizers, customgbackward
+    netR = q.Lambda(lambda x: x[:, 1:])
+
+    return (netD, netD), (netG4D, netG4G), netR, sample, amortizers, customgbackward
 
 
 def makeiter(dl):
@@ -346,7 +348,7 @@ def run(lr=0.0003,
         embed()
 
     # build networks
-    (netD4D, netD4G), (netG4D, netG4G), sampler, amortizers, customgbackward \
+    (netD4D, netD4G), (netG4D, netG4G), netR, sampler, amortizers, customgbackward \
         = makenets(vocsize, embdim, gendim, discdim,
                            cd["<START>"], seqlen, noisedim,
                            clrate=clrate, debug=debug)
@@ -377,7 +379,7 @@ def run(lr=0.0003,
     # print(samplepp(cuda=False, rawlen=40))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
-                     data_gen=traingen, cuda=cuda, sample_real_for_gen=True)
+                     data_gen=traingen, cuda=cuda, sample_real_for_gen=True, netR=netR)
 
     q.embed()
 
