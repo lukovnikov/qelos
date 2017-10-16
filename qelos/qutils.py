@@ -74,12 +74,18 @@ def params_of(module):
 
 
 def batchablesparse2densemask(bs):      # 2D !!!
+    bsshape = None
+    if bs.dim() > 2:
+        bsshape = bs.size()
+        bs = bs.contiguous().view(-1, bs.size(-1))
     vocsize = int(bs.data[0, 1])
     outmask_t = var(torch.ByteTensor(bs.size(0), vocsize + 1)).cuda(bs).v
     outmask_t.data.fill_(0)
     outmask_t.data.scatter_(1, bs.data[:, 2:].long(), 1)
     outmask_t.data = outmask_t.data[:, 1:]
     # assert(test_batchablesparse2densemask(bs, outmask_t))
+    if bsshape is not None:
+        outmask_t = outmask_t.contiguous().view(bsshape[:-1] + (outmask_t.size(-1),))
     return outmask_t
 
 

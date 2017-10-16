@@ -217,6 +217,8 @@ class ErrorAnalyzer(q.LossWithAgg):
 
     def __call__(self, pred, gold, inputs=None):    # (batsize, seqlen, outvocsize)
         pred, att, mask = pred
+        if mask is not None and mask.data[0, 0, 1] > 1:
+            mask = q.batchablesparse2densemask(mask)
         for i in range(len(pred)):
             exampleresult = self.processexample(pred[i], att[i], gold[i], mask[i],
                     inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))

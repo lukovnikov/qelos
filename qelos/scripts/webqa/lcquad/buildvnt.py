@@ -20,6 +20,7 @@ JOIN = 4
 RETURN = 5
 COUNT = 6
 EQUALS = 7
+OFTYPE = 8
 
 BOTTOMUP = 0
 TOPDOWN = 1
@@ -42,6 +43,8 @@ def category(token):
         return EQUALS
     elif token == "<<RETURN>>":
         return RETURN
+    elif token == "<<TYPE>>":
+        return OFTYPE
     else:
         raise q.SumTingWongException("unknown category for token: {}".format(token))
 

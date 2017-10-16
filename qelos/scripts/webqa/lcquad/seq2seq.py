@@ -35,7 +35,11 @@ def run(lr=0.1,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         entityfilter=False,
         onlycorechain=False,
+        debug=False,
         ):
+    if debug:
+        epochs = 0
+        log = False
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
@@ -75,6 +79,10 @@ def run(lr=0.1,
     train_vnt, test_vnt = vnt_mat[trainids], vnt_mat[testids]
     train_qids, test_qids = [qids[trainid] for trainid in trainids], \
                             [qids[testid] for testid in testids]
+
+    if debug:
+        test_questions, test_queries, test_vnt, test_qids = [testmatx[:4] for testmatx in [test_questions, test_queries, test_vnt, test_qids]]
+
     print(len(test_qids))
     # q.embed()
 
