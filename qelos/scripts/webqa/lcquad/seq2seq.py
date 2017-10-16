@@ -26,7 +26,7 @@ def run(lr=0.1,
         merge_mode="sum",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
         celltype="normal",          # "normal", "tree"
-        batsize=128,
+        batsize=2,
         cuda=False,
         gpu=1,
         inspectdata=False,
@@ -136,7 +136,8 @@ def run(lr=0.1,
     # test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
     # training settings
-    lt = lambda a: (a[0], {"mask": a[2]})
+    lt = lambda a: (a[0], {"mask": a[2]})       # need mask because cross entropy loss
+    # lt = lambda a: (a[0], {})
     losses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
                          (q.SeqAccuracy(ignore_index=0), lt),
                          (q.SeqElemAccuracy(ignore_index=0), lt))

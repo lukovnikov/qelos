@@ -228,6 +228,7 @@ class Softmax(nn.Module):
         xndim = x.dim()
         s = x.size()
         seqmask = None
+        maskshape = None
         x = x.contiguous()
         if mask is not None:
             if mask.dim() == x.dim():
@@ -242,6 +243,10 @@ class Softmax(nn.Module):
             if mask is not None:
                 maskshape = mask.size()
                 mask = mask.view(-1, mask.size(-1))
+        if mask is not None and mask.data[0, 1] > 1:  # batchable sparse
+            mask = q.batchablesparse2densemask(mask).float()
+            if maskshape is not None:
+                maskshape = maskshape[:-1] + (mask.size(-1),)
         x = x / temperature
         if mask is None:
             if self._log:
@@ -281,7 +286,7 @@ class Softmax(nn.Module):
             return o_exp
 
 
-class LogSoftmax(Softmax):      # TODO: some numerical instability
+class LogSoftmax(Softmax):      # TODO: some instability
     def __init__(self, temperature=1.):
         super(LogSoftmax, self).__init__(temperature=temperature)
         self._log = True

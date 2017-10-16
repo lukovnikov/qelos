@@ -40,6 +40,8 @@ class GANTrainer(object):
         self.noise_dim = 2
         self.mode = mode
         self.modeD = modeD
+        if self.mode == "GAN":
+            self.modeD = "disc"
         self.logger = logger
         self._dragan_lg_var = 0.6
         self.data_iter = data_iter
@@ -135,6 +137,9 @@ class GANTrainer(object):
                 scoreD_fake_vec = netD(fake.detach())        # TODO: netD(fake.detach())  ?
                 #scoreD_fake = scoreD_fake_vec.mean()
                 # scoreD_fake.backward(mone, retain_graph=(lc > 0))
+                if self.mode == "GAN":
+                    errD = - torch.log(scoreD_real_vec).mean() - torch.log(1 - scoreD_fake_vec).mean()
+                    grad_points = None
                 if self.mode == "WGAN":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     grad_points = None

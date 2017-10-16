@@ -45,4 +45,4 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     save_sparse_tensor, load_sparse_tensor, makeiter
 
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
-    params_of
+    params_of, batchablesparse2densemask

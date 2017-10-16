@@ -61,7 +61,7 @@ class SeqLoss(nn.Module):
         x = probs.view(batsize * seqlen, vocsize)
         y = gold.contiguous().view(batsize * seqlen)
         if mask is not None:
-            mask = mask.contiguous().view(batsize * seqlen, vocsize)
+            mask = mask.contiguous().view(batsize * seqlen, -1)
 
         l, ignoremask = super(SeqLoss, self)._forward(x, y, mask=mask)
 
@@ -152,6 +152,9 @@ class RankingLoss(DiscreteLoss):
         scores = scores - scores.min()
         goldscores = torch.gather(scores, 1, gold.unsqueeze(1)).squeeze()
 
+        if mask is not None and mask[0, 1] > 1:
+            mask = q.batchablesparse2densemask(mask)
+
         if self.negmode == "random":
             sampledist = scores.data.new(scores.size())
             sampledist.fill_(1.)
@@ -223,6 +226,8 @@ class SeqRankingLoss(SeqLoss, RankingLoss):
 
 class Accuracy(DiscreteLoss):
     def _forward(self, x, gold, mask=None):
+        if mask is not None and mask.data[0, 1] > 1:     # batchable sparse
+            mask = q.batchablesparse2densemask(mask)
         x = x * mask.float() if mask is not None else x
         ignoremask = self._get_ignore_mask(gold)
         maxes, best = torch.max(x, 1)
