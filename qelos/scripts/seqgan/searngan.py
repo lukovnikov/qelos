@@ -216,8 +216,8 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
     discnet = q.RecurrentStack(
         nn.Embedding(vocsize, embdim),
-        # q.GRULayer(embdim, discdim),
-        q.GRUCell(embdim, discdim, use_cudnn_cell=True).to_layer(),
+        q.GRULayer(embdim, discdim),
+        # q.GRUCell(embdim, discdim, use_cudnn_cell=True).to_layer(),
     )
 
 
