@@ -210,7 +210,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
     disccell = q.RecStack(
         nn.Embedding(vocsize, embdim),
-        q.GRUCell(embdim, discdim, use_cudnn_cell=False),
+        q.GRUCell(embdim, discdim, use_cudnn_cell=True),
     )
     discnet = disccell.to_layer()
 
