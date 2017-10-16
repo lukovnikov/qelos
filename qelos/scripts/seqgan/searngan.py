@@ -155,9 +155,10 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             if self.gmode:   # training generator
                 batsize = sequences.size(0)
                 teacherforce_mask = teacherforce_mask.unsqueeze(1).repeat(1, vocsize, 1)
-                override_mask_np = override_mask.unsqueeze(1).repeat(1, vocsize, 1).data.numpy()
+                override_mask_np = override_mask.unsqueeze(1).repeat(1, vocsize, 1)\
+                    .cpu().data.numpy()
                 seqs = sequences.unsqueeze(1).repeat(1, vocsize, 1)
-                seqs_np = seqs.data.numpy()
+                seqs_np = seqs.cpu().data.numpy()
                 select_ptrs_np = np.zeros((batsize,), dtype="int64")
                 for i in range(batsize):
                     seqs_np[i, :, -unforce_lens[i]-1] = np.arange(0, vocsize).astype(seqs_np.dtype)
