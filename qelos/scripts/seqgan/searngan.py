@@ -139,7 +139,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             teacherforce_mask_np = np.ones((sequences.size(0), sequences.size(1) - 1)).astype("uint8")
             override_mask_np = np.ones((sequences.size(0), sequences.size(1) - 1)).astype("uint8")
-            unforce_lens = np.random.randint(0, amortizer.v, (sequences.size(0)))
+            unforce_lens = np.random.randint(0, amortizer.v+1, (sequences.size(0)))
             unforce_lens = np.minimum(unforce_lens, sequences.size(1) - 1)
             for i in range(sequences.size(0)):
                 if unforce_lens[i] > 0:
@@ -282,9 +282,16 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
         return y, o[0], score, None, None
 
     def customgbackward(scores):
+        scores = scores.detach()
         saved_decisions = netG4G._saved_decselected
         scores = scores.view(saved_decisions.size())
-        # TODO loss
+        logscores = torch.log(1.0 - scores)
+        logdecisions = -torch.log(saved_decisions)
+        losses = logscores * logdecisions    # TODO: correct loss needed
+        losses = losses.sum(1)
+        loss = losses.mean()
+        loss.backward()
+        return loss
 
     return (netD, netD), (netG4D, netG4G), sample, amortizers, customgbackward
 
@@ -318,7 +325,7 @@ def run(lr=0.0003,
         subsample=1000,
         inspectdata=False,
         pw=10,
-        clrate=0,
+        clrate=10,
         logiter=50,
         ):
     if cuda:
