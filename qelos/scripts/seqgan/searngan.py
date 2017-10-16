@@ -14,8 +14,8 @@ class Logger(object):
 
     def log(self, _iter=None, niter=None, errD=None, errG=None, scoreD_real=None, scoreD_fake=None, lip_loss=None, **kw):
         if (_iter+0) % self.logiter == 0:
-            self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f} Loss Lip: {:.4f}"
-                         .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake, lip_loss))
+            self.tt.live("[{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} Score Real: {:.4f} Score Fake: {:.4f}"
+                         .format(_iter, niter, errD, errG, scoreD_real, scoreD_fake))
 
 
 def get_data_gen(vocsize, batsize, seqlen):
@@ -89,7 +89,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
             if debug:
-                return 5
+                return 0
             if iter < (offset + headstart):
                 return 0
             else:
@@ -124,6 +124,8 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     idxtoonehot = q.IdxToOnehot(vocsize)
 
     clcutter = get_cl_cutter(amortizer)
+
+    paramdec = [None]
 
     class Gen(nn.Module):
         def __init__(self, gmode=False):
@@ -164,7 +166,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
                 select_ptrs_np = np.zeros((batsize,), dtype="int64")
                 for i in range(batsize):
                     seqs_np[i, :, -unforce_lens[i]-1] = np.arange(0, vocsize).astype(seqs_np.dtype)
-                    select_ptrs_np[i] = unforce_lens[i]-1
+                    select_ptrs_np[i] = -unforce_lens[i]-1
                     override_mask_np[i, :, -unforce_lens[i]-1] = 1
                 seqs = q.var(seqs_np).cuda(sequences).v
                 override_mask = q.var(override_mask_np).cuda(sequences).v
@@ -178,6 +180,10 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             # decode with teacherforce mask
             inpseqs = seqs[:, :-1].contiguous()
             dec = self.decoder(inpseqs, noise, teacherforce_mask=teacherforce_mask)
+            if debug:
+                dec = q.var(torch.randn(dec.size()), requires_grad=True).v
+                paramdec[0] = dec
+                dec = q.Softmax()(dec)
 
             # select
             decselected = None
@@ -188,7 +194,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
                 decreshaped = decreshaped.view(batsize * dec.size(1), -1)
                 select_ptrs_add = torch.arange(0, batsize).long()
                 select_ptrs_add *= dec.size(1)
-                select_ptrs += dec.size(1)
+                select_ptrs = dec.size(1) + select_ptrs
                 select_ptrs += q.var(select_ptrs_add).cuda(sequences).v
                 decselected = torch.index_select(decreshaped, 0, select_ptrs)
 
@@ -196,48 +202,22 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             # sample and override
             _, decmax = torch.max(dec, 2)
+            # TODO: add sample option in addition to argmax
             overseqs = seqs[:, 1:].contiguous()
             ret = overseqs * override_mask.long() + (1 + (-1) * override_mask.long()) * decmax
 
             return ret
 
+    # disccell = q.RecStack(
+    #     nn.Embedding(vocsize, embdim),
+    #     q.GRUCell(embdim, discdim, use_cudnn_cell=False),
+    # )
+    # discnet = disccell.to_layer()
 
-    class Generator(nn.Module):
-        def __init__(self, **kw):
-            super(Generator, self).__init__(**kw)
-            self.decodercell = decodercell
-            self.idx2onehot = idxtoonehot
-            freeblock = q.Stack(q.Lambda(lambda x: torch.max(x[0], 1)[1]))
-            self.decodercell.teacher_unforce_after(seqlen-1,
-                                                   amortizer,
-                                                   freeblock)
-            self.decoder = self.decodercell.to_decoder()
-
-        def forward(self, noise, sequences, maxtime=None):
-            if clcutter is not None:
-                sequences = clcutter(sequences)
-            overrideseq = sequences[:, 1:].contiguous()
-            sequences = sequences[:, :-1].contiguous()
-            kw = {}
-            if maxtime is not None:
-                kw["maxtime"] = maxtime
-            dec = self.decoder(sequences, noise, **kw)  # (batsize, seqlen, vocsize)
-            _, dec = torch.max(dec, 2)
-            decseqlen, decvocsize = dec.size(1), dec.size(2)
-            amortizer = min(amortizer.v + 1, decseqlen)
-            if amortizer == decseqlen:
-                out = dec
-            else:
-                overridelen = overrideseq.size(1) - amortizer
-                copylen = decseqlen - overridelen
-                out = torch.cat([overrideseq[:, :overridelen], dec[:, -copylen:]], 1)
-            return out
-
-    disccell = q.RecStack(
+    discnet = q.RecurrentStack(
         nn.Embedding(vocsize, embdim),
-        q.GRUCell(embdim, discdim, use_cudnn_cell=False),
+        q.GRULayer(embdim, discdim),
     )
-    discnet = disccell.to_layer()
 
     disc_summary = q.Stack(
         nn.Linear(discdim, 1),
@@ -247,7 +227,6 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     class Discriminator(nn.Module):
         def __init__(self):
             super(Discriminator, self).__init__()
-            self.cell = disccell
             self.recnet = discnet
             self.summ = disc_summary
 
@@ -289,12 +268,20 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
         scores = scores.detach()
         saved_decisions = netG4G._saved_decselected
         scores = scores.view(saved_decisions.size())
+        # try rescaling scores
+        score_mins, _ = torch.min(scores, 1)
+        score_maxs, _ = torch.max(scores, 1)
+        scores = (scores - score_mins.unsqueeze(1)) / (score_maxs - score_mins).unsqueeze(1)
+        scores = (scores - 0.5) * 2
         # logscores = -torch.log(scores)
         logdecisions = -torch.log(saved_decisions)
-        losses = scores * logdecisions    # TODO: correct loss needed
+        losses = scores * logdecisions
+        # TODO: correct loss needed
         losses = losses.sum(1)
         loss = losses.mean()
         loss.backward()
+        if debug:
+            print(paramdec[0].grad.norm())
         return loss
 
     return (netD, netD), (netG4D, netG4G), sample, amortizers, customgbackward
