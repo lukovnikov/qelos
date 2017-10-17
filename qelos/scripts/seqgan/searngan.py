@@ -187,6 +187,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             self.decoder = self.decodercell.to_decoder()
             self.gmode = gmode
             self._saved_decselected = None
+            self.samplemode = False
 
         def forward(self, noise, sequences, maxtime=None):
             # generate teacher forcing mask,
@@ -256,7 +257,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             # sample and override
             _, decmax = torch.max(dec, 2)
 
-            if not self.gmode:
+            if not self.gmode and not self.samplemode:
                 deccshape = dec.size()
                 deccreshaped = dec.view(-1, dec.size(-1))
                 deccsam = torch.multinomial(deccreshaped, 1).squeeze(1)
@@ -302,6 +303,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     netD = Discriminator()
 
     samplenetG = copy.deepcopy(netG4D)
+    samplenetG.samplemode = True
     samplenetD = copy.deepcopy(netD)
 
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
