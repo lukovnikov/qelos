@@ -5,6 +5,7 @@ import numpy as np
 import h5py
 from IPython import embed
 import sparkline
+import copy
 
 
 class Logger(object):
@@ -251,6 +252,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     netD = Discriminator()
 
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
+        samplenetG = copy.deepcopy(netG4D)
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
@@ -262,16 +264,17 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
         if rawlen is not None:
             raise q.SumTingWongException("rawlen not supported yet")
             if gen is None:  # completely unforce, generate rawlen
-                netG4D.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]))
-                o = netG4D.decoder(noise, maxtime=rawlen)
+                samplenetG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]))
+                o = samplenetG.decoder(noise, maxtime=rawlen)
             else:  # generate from data up to rawlen
-                o = netG4D(noise, data, maxtime=rawlen)
+                o = samplenetG(noise, data, maxtime=rawlen)
         else:
-            o = netG4D(noise, data)
+            o = samplenetG(noise, data)
 
         y = o
 
-        score = netD(o)
+        samplenetD = copy.deepcopy(netD)
+        score = samplenetD(o)
         return y, o[0], score, None, None
 
     def customgbackward(scores):
