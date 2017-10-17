@@ -397,7 +397,9 @@ class PretrainedWordVec(object):
 
 class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
-    def __init__(self, dim, vocabsize=None, path=None, worddic=None, fixed=True, incl_maskid=True, incl_rareid=True, value=None, **kw):
+    def __init__(self, dim, vocabsize=None, path=None,
+                 worddic=None, fixed=True, incl_maskid=True,
+                 incl_rareid=True, value=None, project=None, **kw):
         """
         WordEmb that sets the weight of nn.Embedder to loaded pretrained vectors.
         Adds a maskid and rareid as specified on the class.
@@ -425,6 +427,14 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
         self.allwords = wdic.keys()
         super(PretrainedWordEmb, self).__init__(dim=dim, value=value,
                                                 worddic=wdic, fixed=fixed, **kw)
+
+        self.project = project
+
+    def forward(self, x):
+        ret, mask = super(PretrainedWordEmb, self).forward(x)
+        if self.project is not None:
+            ret = self.project(ret)
+        return ret, mask
 
     def subclone(self, worddic, fixed=True):
         vocsize = max(worddic.values()) + 1
