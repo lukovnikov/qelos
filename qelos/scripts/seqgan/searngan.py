@@ -391,7 +391,7 @@ def run(lrd=0.00005,
         torch.cuda.set_device(gpu)
     if debug:
         pass
-        # inspectdata = True
+        inspectdata = True
     if niter == -1:
         # niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
         niter = clrate * (seqlen + 2)
@@ -434,7 +434,7 @@ def run(lrd=0.00005,
 
     def samplepp(noise=None, cuda=False, gen=testgen, ret_all=False, rawlen=None):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
-        y = y.cpu().data.numpy()[:, 1:]
+        y = y.cpu().data.numpy()
         if ret_all:
             return pp(y), o, score, ograds, gold
         return pp(y)
