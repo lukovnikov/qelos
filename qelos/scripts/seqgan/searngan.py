@@ -26,6 +26,54 @@ def get_data_gen(vocsize, batsize, seqlen):
     return data_gen
 
 
+# region obama loading
+def loadobama(p="../../../datasets/langmod/obama.txt", window=32, subsample=1):
+    tt = q.ticktock("obama loader")
+    tt.tick("loading")
+    stracc = ""
+    tokens = []
+    with open(p) as f:
+        for line in f:
+            line = q.tokenize(line.strip())
+            if len(line) > 0:
+                tokens += line
+    stracc = " ".join(tokens)
+    sm = q.StringMatrix(indicate_start_end=True)
+    sm.tokenize = lambda x: [xe for xe in x]
+    j = 0
+    for i in range(len(stracc)):
+        if stracc[i] == " ":    # valid start
+            j += 1
+            if i + window > len(stracc):
+                break
+            if j == subsample:
+                sm.add(stracc[i+1:i+window])
+                j = 0
+    sm.finalize()
+    D = sm.D
+    matrix = sm.matrix[:, :-1]
+
+    revdic = {v: k for k, v in D.items()}
+
+    def pp(charseq):
+        if charseq.ndim == 1:
+            return "".join([revdic[x] for x in charseq])
+        elif charseq.ndim == 2:
+            ret = []
+            for i in range(len(charseq)):
+                ret.append(pp(charseq[i]))
+            return ret
+
+    select = np.arange(0, matrix.shape[0])
+    np.random.shuffle(select)
+    trainids = select[:int(len(select)*0.8)]
+    validids = select[int(len(select) * 0.8): int(len(select) * 0.9)]
+    testids = select[int(len(select) * 0.9):]
+    tt.tock("loaded")
+    return matrix[trainids], matrix[validids], matrix[testids], revdic, pp
+
+
+
 # region data loading
 def makemat(data, window, subsample, startid=None):
     startpositions = np.arange(0, data.shape[0] - window)
@@ -332,7 +380,7 @@ def run(lrd=0.00005,
         seqlen=32,
         cuda=False,
         gpu=1,
-        subsample=1000,
+        subsample=5,
         inspectdata=False,
         pw=10,
         clrate=1000,
@@ -341,14 +389,17 @@ def run(lrd=0.00005,
         ):
     if cuda:
         torch.cuda.set_device(gpu)
-
+    if debug:
+        pass
+        # inspectdata = True
     if niter == -1:
         # niter = (seqlen * 200 + 500) + 500        # seqlen * amortize_step + amortize_headstart + afterburn
         niter = clrate * (seqlen + 2)
         print("niter: {}".format(niter))
     # get data and dict
     # datagen = get_data_gen(vocsize, batsize, seqlen)()
-    trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=seqlen, subsample=subsample)
+    # trainmat, validmat, testmat, rcd, pp = loaddata_text8(window=seqlen, subsample=subsample)
+    trainmat, validmat, testmat, rcd, pp = loadobama(window=seqlen, subsample=subsample)
     cd = {v: k for k, v in rcd.items()}
     traingen = makeiter(q.dataload(trainmat, batch_size=batsize, shuffle=True))
     validgen = makeiter(q.dataload(validmat, batch_size=batsize, shuffle=False))
