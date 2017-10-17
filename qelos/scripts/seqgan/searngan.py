@@ -6,6 +6,7 @@ import h5py
 from IPython import embed
 import sparkline
 import copy
+import re
 
 
 class Logger(object):
@@ -38,6 +39,7 @@ def loadobama(p="../../../datasets/langmod/obama.txt", window=32, subsample=1):
             if len(line) > 0:
                 tokens += line
     stracc = " ".join(tokens)
+    stracc = re.sub("[\[\]\(\)%&\+\*\<\>]", "", stracc)
     sm = q.StringMatrix(indicate_start_end=True)
     sm.tokenize = lambda x: [xe for xe in x]
     j = 0
