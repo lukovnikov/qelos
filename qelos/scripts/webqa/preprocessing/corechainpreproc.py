@@ -28,6 +28,9 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
 
     qid2qpid = {}
 
+    qid2tx = {}
+    qid2qsm = {}
+    i = 0
     for qid, qpids in qids.items():
         # first parse only
         chosenqpid = list(qpids)[0]
@@ -37,6 +40,9 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
         topicmention = parsedata["topicmention"]
         questiontext = questiontext.replace(topicmention, "<E0>")
         question_sm.add(questiontext)
+        qid2tx[qid] = parsedata["tx"]
+        qid2qsm[qid] = i
+        i += 1
 
     question_sm.finalize()
     # endregion
@@ -46,6 +52,7 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
     que = Querier()
     collectedrels = set(reldic.reldic.keys())
     collectedrels -= {"<NONE>"}
+    print("{} collected rels".format(len(collectedrels)))
     relations = list(collectedrels)
     relations = sorted(relations, key=lambda x: reldic.reldic[x])
     relationinfo = OrderedDict()
@@ -119,10 +126,12 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
     # region saving
     # save question_sm, lexmats, uniquechainsmat, qpid2uchain, qpid2badchains
     outdata = {"question_sm": question_sm,      # question stringmatrix
+               "qid2qsm": qid2qsm,
                "lexmats": lexmats,              # lexmats (see above)
                "uniquechains": uniquechainsmat, # unique chains matrix, rel ids are +1 from rdic
                "poschain": qid2poschain,        # maps qid to row of good chain
                "negchains": qid2negchains,      # maps qid to rows of bad chains
+               "txdic": qid2tx,
                "rdic": rdic,
                "reldic": reldic}
 
