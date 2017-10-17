@@ -108,7 +108,7 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
                 uniquechains[otherchain] = len(uniquechains)
             otherchainid = uniquechains[otherchain]
             qpid2badchains[qpid].add(otherchainid)
-        if len(qpid2badchains) == 0:
+        if len(qpid2badchains[qpid]) == 0:
             print("{} has no bad chains".format(qpid))
 
     print("{} unique chains".format(len(uniquechains)))
