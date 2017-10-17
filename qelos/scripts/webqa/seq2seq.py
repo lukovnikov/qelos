@@ -75,7 +75,8 @@ def run(lr=0.1,
     train_questions, test_questions = question_sm.matrix[trainids], question_sm.matrix[testids]
     train_queries, test_queries = query_sm.matrix[trainids], query_sm.matrix[testids]
     train_vnt, test_vnt = vnt_mat[trainids], vnt_mat[testids]
-    train_qids, test_qids = qids[trainids], qids[testids]
+    train_qids, test_qids = [qids[trainid] for trainid in trainids], \
+                            [qids[testid] for testid in testids]
     print(len(test_qids))
     # q.embed()
 
