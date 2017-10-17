@@ -381,7 +381,7 @@ def run(lrd=0.00005,
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
 
-    def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False, rawlen=None):
+    def samplepp(noise=None, cuda=False, gen=testgen, ret_all=False, rawlen=None):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
         y = y.cpu().data.numpy()[:, 1:]
         if ret_all:
