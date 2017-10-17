@@ -11,7 +11,7 @@ from qelos.scripts.webqa.preprocessing.buildvnt import category, ARGOPT, VAR, RE
 
 class Querier(object):
     def __init__(self, address="http://drogon:9890/sparql", **kw):
-        address = "http://localhost:9890/sparql"        # TODO remote testing
+        # address = "http://localhost:9890/sparql"        # TODO remote testing
         super(Querier, self).__init__(**kw)
         self.sparql = SPARQLWrapper(address)
         self.sparql.setReturnFormat(JSON)

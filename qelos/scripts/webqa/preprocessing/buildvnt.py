@@ -483,6 +483,114 @@ def get_vnt_for_butd(butd="WebQTest-523	what is the largest nation in <E0>	<E0> 
     return qid, vnts, traverser.query_fn
 
 
+class RelDicAcc(object):
+    def __init__(self):
+        self.reldic = {"<NONE>": 0}
+        self.relcounts = {"<NONE>": 0}
+
+    def get_id_for_rel(self, rel):
+        if rel not in self.reldic:
+            newid = len(self.reldic)
+            self.reldic[rel] = newid
+            self.relcounts[newid] = 0
+        id = self.reldic[rel]
+        self.relcounts[id] += 1
+        return id
+
+
+def get_propchains_for_ent(ent, upto=1, reldic=None):
+    que = Querier()
+    chains = set()
+    prevchains = set()
+    newprevchains = set()
+    i = 1
+    singlerelchains = que.get_relations_of_mid(ent, incl_reverse=False)
+    for singlerelchain in singlerelchains:
+        if reldic is not None:
+            tochains = reldic.get_id_for_rel(singlerelchain)
+        else:
+            tochains = singlerelchain
+        chains.add((tochains,))
+        prevchains.add((singlerelchain,))
+    i += 1
+    if upto >= 2:
+        for prevchain in prevchains:
+            m = re.match(":(-?)(.+)", prevchain[0])
+            if m.group(1) == "-":
+                triples = [("var0", m.group(2), ent)]
+            else:
+                triples = [(ent, m.group(2), "var0")]
+            newrels = que.get_relations_of_var((triples, {}, {}), "var0", incl_reverse=False)
+            for newrel in newrels:
+                if reldic is not None:
+                    toadd = (reldic.get_id_for_rel(prevchain[0]), reldic.get_id_for_rel(newrel))
+                else:
+                    toadd = (prevchain[0], newrel)
+                chains.add(toadd)
+        # tworelchains = que.get_twohop_chains_from_entity(ent, incl_reverse=True)
+        # for tworelchain in tworelchains:
+        #     chains.add(tworelchain)
+    if upto > 2:
+        raise q.SumTingWongException("chains of more than 2 hops not supported")
+    return chains
+
+
+def get_prop_chains_for_dataset(p="../../../../datasets/webqsp/webqsp.",
+                         files=("test.json", "train.json"),
+                         outfile="webqsp.all.chains",
+                         upto=2):
+    tt = q.ticktock("propchains builder")
+    reldic = RelDicAcc()
+    import json
+    parsesdata = {}
+    for file in files:
+        tt.tick("doing {}".format(file))
+        filep = p + file
+        chains = {}
+        with open(filep) as f:
+            qf = json.load(f)
+            i = 0
+            for question in qf["Questions"]:
+                qid = question["QuestionId"]
+                questiontext = question["ProcessedQuestion"]
+                for parse in question["Parses"]:
+                    qpid = parse["ParseId"]
+                    topicent = parse["TopicEntityMid"]
+                    topicentname = parse["TopicEntityName"]
+                    topicentmention = parse["PotentialTopicEntityMention"]
+                    corechain = parse["InferentialChain"]
+                    if topicent is None or corechain is None:
+                        print("lacking something: {}".format(qpid))
+                        continue
+                    qpidchains = get_propchains_for_ent(topicent, upto=upto, reldic=reldic)
+                    corechain = tuple([reldic.get_id_for_rel(":"+corerel) for corerel in corechain])
+                    if corechain in qpidchains:
+                        negchains = qpidchains - {corechain}
+                    else:
+                        print("{} core chain not in qpidchains".format(qpid))
+                        negchains = qpidchains
+                    tx = qpid[:8] == u"WebQTest"
+                    parsesdata[qpid] = {"qid": qid,
+                                        "question": questiontext,
+                                        "topicmid": topicent,
+                                        "topicname": topicentname,
+                                        "topicmention": topicentmention,
+                                        "corechain": corechain,
+                                        "negchains": negchains,
+                                        "tx": tx}
+                    i += 1
+                    if i % 1 == 0:
+                        tt.msg("{} {}, len: {}".format(i, qpid, str(len(qpidchains))))
+                # break
+
+    outp = p + outfile
+    outdata = {"parses": parsesdata, "reldic": reldic}
+    pickle.dump(outdata, open(outp, "w"))
+    tt.tock("done {}".format(outfile))
+    reloaded = pickle.load(open(outp))
+    q.embed()
+
+
 def get_vnt_for_datasets(p="../../../../datasets/webqsp/webqsp.",
                          files=("test.time", "train.time")):
     tt = q.ticktock("vnt builder")
@@ -503,6 +611,7 @@ def get_vnt_for_datasets(p="../../../../datasets/webqsp/webqsp.",
 
 
 if __name__ == "__main__":
-    _, _, query = get_vnt_for_butd("WebQTest-305	where does <E0> live	<E0> :people.person.places_lived <BRANCH> :people.place_lived.start_date <TIME-NOW> <JOIN> <BRANCH> :people.place_lived.end_date <TIME-NOW> <JOIN> :people.place_lived.location <RETURN>	(<E0>|bradley walsh|m.05h48b)")
-    print(query())
-    q.argprun(get_vnt_for_datasets)
+    q.argprun(get_prop_chains_for_dataset)
+    # _, _, query = get_vnt_for_butd("WebQTest-305	where does <E0> live	<E0> :people.person.places_lived <BRANCH> :people.place_lived.start_date <TIME-NOW> <JOIN> <BRANCH> :people.place_lived.end_date <TIME-NOW> <JOIN> :people.place_lived.location <RETURN>	(<E0>|bradley walsh|m.05h48b)")
+    # print(query())
+    # q.argprun(get_vnt_for_datasets)
