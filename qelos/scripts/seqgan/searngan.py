@@ -257,13 +257,13 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
         samplenetG.load_state_dict(netG4D.state_dict())
         if noise is None:
-            noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
+            noise = q.var(torch.randn(1, noisedim), volatile=True).cuda(cuda).v
             noise.data.normal_(0, 1)
         if rawlen is not None and gen is None:  # start form startsyms
-            data = q.var(np.ones((1, 1), dtype="int64") * startsym).cuda(cuda).v
+            data = q.var(np.ones((1, 1), dtype="int64") * startsym, volatile=True).cuda(cuda).v
         else:  # start from data
             data = next(gen)[0:1]
-            data = q.var(data).cuda(cuda).v
+            data = q.var(data, volatile=True).cuda(cuda).v
         if rawlen is not None:
             raise q.SumTingWongException("rawlen not supported yet")
             if gen is None:  # completely unforce, generate rawlen
