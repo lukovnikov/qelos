@@ -251,8 +251,11 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     netG4G = Gen(gmode=True)
     netD = Discriminator()
 
+    samplenetG = copy.deepcopy(netG4D)
+    samplenetD = copy.deepcopy(netD)
+
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
-        samplenetG = copy.deepcopy(netG4D)
+        samplenetG.load_state_dict(netG4D.state_dict())
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
@@ -273,7 +276,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
         y = o
 
-        samplenetD = copy.deepcopy(netD)
+        samplenetD.load_state_dict(netD.state_dict())
         score = samplenetD(o)
         return y, o[0], score, None, None
 
