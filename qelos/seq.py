@@ -129,7 +129,7 @@ class Decoder(nn.Module):
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         self.reset_state()
         batsize = x[0].size(0)
-        if "maxtime" in kw:
+        if "maxtime" in kw and kw["maxtime"] is not None:
             maxtime = kw["maxtime"]
         elif not hasattr(self.block, "_max_time") or self.block._max_time is None:
             maxtime = x[0].size(1)

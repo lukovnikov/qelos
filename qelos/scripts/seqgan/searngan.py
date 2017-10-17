@@ -137,14 +137,16 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
             self.gmode = gmode
             self._saved_decselected = None
 
-        def forward(self, noise, sequences):
+        def forward(self, noise, sequences, maxtime=None):
             # generate teacher forcing mask,
             # generate override mask for literal copy
+            fseqlen = sequences.size(1)
+            # fseqlen = maxtime if maxtime is not None else fseqlen
 
-            teacherforce_mask_np = np.ones((sequences.size(0), sequences.size(1) - 1)).astype("uint8")
-            override_mask_np = np.ones((sequences.size(0), sequences.size(1) - 1)).astype("uint8")
+            teacherforce_mask_np = np.ones((sequences.size(0), fseqlen - 1)).astype("uint8")
+            override_mask_np = np.ones((sequences.size(0), fseqlen - 1)).astype("uint8")
             unforce_lens = np.random.randint(0, amortizer.v+1, (sequences.size(0)))
-            unforce_lens = np.minimum(unforce_lens, sequences.size(1) - 1)
+            unforce_lens = np.minimum(unforce_lens, fseqlen - 1)
             for i in range(sequences.size(0)):
                 if unforce_lens[i] > 0:
                     teacherforce_mask_np[i, -unforce_lens[i]:] = 0
@@ -179,7 +181,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             # decode with teacherforce mask
             inpseqs = seqs[:, :-1].contiguous()
-            dec = self.decoder(inpseqs, noise, teacherforce_mask=teacherforce_mask)
+            dec = self.decoder(inpseqs, noise, maxtime=maxtime, teacherforce_mask=teacherforce_mask)
             if debug:
                 dec = q.var(torch.randn(dec.size()), requires_grad=True).v
                 paramdec[0] = dec
@@ -202,7 +204,14 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             # sample and override
             _, decmax = torch.max(dec, 2)
-            # TODO: add sample option in addition to argmax
+
+            if not self.gmode:
+                deccshape = dec.size()
+                deccreshaped = dec.view(-1, dec.size(-1))
+                deccsam = torch.multinomial(deccreshaped, 1).squeeze(1)
+                deccsam = deccsam.view(deccshape[:-1])
+                decmax = deccsam
+
             overseqs = seqs[:, 1:].contiguous()
             ret = overseqs * override_mask.long() + (1 + (-1) * override_mask.long()) * decmax
 
@@ -242,26 +251,25 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     netD = Discriminator()
 
     def sample(noise=None, cuda=False, gen=None, rawlen=None):
-        gold = None
         if noise is None:
             noise = q.var(torch.randn(1, noisedim)).cuda(cuda).v
             noise.data.normal_(0, 1)
         if rawlen is not None and gen is None:  # start form startsyms
-            data = q.var(np.ones((1, seqlen), dtype="int64") * startsym).cuda(cuda).v
+            data = q.var(np.ones((1, 1), dtype="int64") * startsym).cuda(cuda).v
         else:  # start from data
             data = next(gen)[0:1]
-            gold = data
             data = q.var(data).cuda(cuda).v
         if rawlen is not None:
+            raise q.SumTingWongException("rawlen not supported yet")
             if gen is None:  # completely unforce, generate rawlen
-                netG.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]), data.data[0][0])
-                o = netG.decoder(noise, maxtime=rawlen)
+                netG4D.decoder.block.teacher_unforce(rawlen, q.Lambda(lambda x: torch.max(x[0], 1)[1]))
+                o = netG4D.decoder(noise, maxtime=rawlen)
             else:  # generate from data up to rawlen
-                o = netG(noise, data, maxtime=rawlen)
+                o = netG4D(noise, data, maxtime=rawlen)
         else:
-            o = netG(noise, data)
+            o = netG4D(noise, data)
 
-        _, y = torch.max(o, 2)
+        y = o
 
         score = netD(o)
         return y, o[0], score, None, None
@@ -367,9 +375,6 @@ def run(lrd=0.00005,
     for amortizer in amortizers:
         gantrainer.add_dyn_hyperparams(amortizer)
 
-    if debug:
-        amortizers[0]._value = 5
-
     def samplepp(noise=None, cuda=True, gen=testgen, ret_all=False, rawlen=None):
         y, o, score, ograds, gold = sampler(noise=noise, cuda=cuda, gen=gen, rawlen=rawlen)
         y = y.cpu().data.numpy()[:, 1:]
@@ -377,7 +382,7 @@ def run(lrd=0.00005,
             return pp(y), o, score, ograds, gold
         return pp(y)
 
-    # print(samplepp(cuda=False, rawlen=40))
+    print(samplepp(cuda=False))
 
     gantrainer.train((netD4D, netD4G), (netG4D, netG4G), niter=niter, niterD=niterD, niterG=niterG,
                      data_gen=traingen, cuda=cuda, sample_real_for_gen=True, netR=netR)
