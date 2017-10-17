@@ -372,7 +372,7 @@ def makeiter(dl):
 
 def run(lrd=0.00005,
         lrg=0.00005,
-        wreg=0.000001,
+        wreg=0.00000001,
         embdim=128,
         noisedim=128,
         gendim=512,
