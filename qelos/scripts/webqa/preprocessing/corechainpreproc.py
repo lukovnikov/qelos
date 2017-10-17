@@ -101,13 +101,17 @@ def run(p="../../../../datasets/webqsp/webqsp.webqsp.all.chains",
             uniquechains[correctchain] = len(uniquechains)
         correctchainid = uniquechains[correctchain]
         qpid2uchain[qpid] = correctchainid
+        if qpid not in qpid2badchains:
+            qpid2badchains[qpid] = set()
         for otherchain in otherchains:
             if otherchain not in uniquechains:
                 uniquechains[otherchain] = len(uniquechains)
             otherchainid = uniquechains[otherchain]
-            if qpid not in qpid2badchains:
-                qpid2badchains[qpid] = set()
             qpid2badchains[qpid].add(otherchainid)
+        if len(qpid2badchains) == 0:
+            print("{} has no bad chains".format(qpid))
+
+    print("{} unique chains".format(len(uniquechains)))
 
     uniquechainsmat = np.zeros((len(uniquechains), 2), dtype="int64")
     i = 0
