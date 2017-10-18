@@ -122,67 +122,94 @@ class make_decoder(object):
             self.branch_token, self.join_token = "<<BRANCH>>", "<<JOIN>>"
 
     def __call__(self, emb, lin, ctxdim=100, embdim=100, dim=100,
-                     attmode="bilin", decsplit=False, celltype="normal", **kw):
+                     attmode="bilin", decsplit=False, celltype="normal",
+                     ctx_to_decinp=True, ctx_to_smo=True, state_to_smo=True, **kw):
         """ makes decoder
         # attention cell decoder that accepts VNT !!!
         """
-        ctxdim = ctxdim if not decsplit else ctxdim // 2
-        coreindim = embdim + ctxdim     # if ctx_to_decinp is True else embdim
+        if attmode == "bilin" or attmode == "fwd" or attmode == "cos" or attmode=="dot":
+            ctxdim = ctxdim if not decsplit else ctxdim // 2
+            coreindim = embdim + ctxdim     # if ctx_to_decinp is True else embdim
 
-        coretocritdim = dim if not decsplit else dim // 2
-        critdim = coretocritdim + embdim          # if decinp_to_att is True else dim
+            coretocritdim = dim if not decsplit else dim // 2
+            critdim = coretocritdim + embdim          # if decinp_to_att is True else dim
 
-        if attmode == "bilin":
-            attention = q.Attention().bilinear_gen(ctxdim, critdim)
-        elif attmode == "fwd":
-            attention = q.Attention().forward_gen(ctxdim, critdim, dim)
+            if attmode == "bilin":
+                attention = q.Attention().bilinear_gen(ctxdim, critdim)
+            elif attmode == "fwd":
+                attention = q.Attention().forward_gen(ctxdim, critdim, dim)
+            else:
+                raise q.SumTingWongException()
+
+            attcellkw = q.kw2dict(
+                                 attention=attention,
+                                 embedder=emb,
+                                 core=q.RecStack(
+                                     q.persist_kwargs(),
+                                     q.GRUCell(coreindim, dim),
+                                     # q.GRUCell(dim, dim),
+                                 ),
+                                 smo=q.Stack(
+                                     q.persist_kwargs(),
+                                     # q.argsave.spec(mask={"mask"}),
+                                     lin,
+                                     # q.argmap.spec(0, mask=["mask"]),
+                                     # q.LogSoftmax(),
+                                     # q.argmap.spec(0),
+                                 ),
+                                 att_after_update=True,
+                                 ctx_to_decinp=ctx_to_decinp,
+                                 ctx_to_smo=ctx_to_smo,
+                                 state_to_smo=state_to_smo,
+                                 decinp_to_att=True,
+                                 state_split=decsplit,
+                                 return_att=True,
+                                 return_out=True,)
+            if celltype == "tree":
+                attcellkw(structure_tokens=(emb.D[self.branch_token], emb.D[self.join_token]))
+                attcell = q.HierarchicalAttentionDecoderCell(**attcellkw.v)
+            elif celltype == "normal":
+                attcell = q.AttentionDecoderCell(**attcellkw.v)
+            else:
+                raise q.SumTingWongException("unknown cell type: {}".format(celltype))
+            return attcell.to_decoder()
         else:
-            raise q.SumTingWongException()
-
-        attcellkw = q.kw2dict(
-                             attention=attention,
-                             embedder=emb,
-                             core=q.RecStack(
-                                 q.persist_kwargs(),
-                                 q.GRUCell(coreindim, dim),
-                                 # q.GRUCell(dim, dim),
-                             ),
-                             smo=q.Stack(
-                                 q.persist_kwargs(),
-                                 # q.argsave.spec(mask={"mask"}),
-                                 lin,
-                                 # q.argmap.spec(0, mask=["mask"]),
-                                 # q.LogSoftmax(),
-                                 # q.argmap.spec(0),
-                             ),
-                             att_after_update=True,
-                             ctx_to_decinp=True,
-                             ctx_to_smo=True,
-                             state_to_smo=True,
-                             decinp_to_att=True,
-                             state_split=decsplit,
-                             return_att=True,
-                             return_out=True,)
-        if celltype == "tree":
-            attcellkw(structure_tokens=(emb.D[self.branch_token], emb.D[self.join_token]))
-            attcell = q.HierarchicalAttentionDecoderCell(**attcellkw.v)
-        elif celltype == "normal":
-            attcell = q.AttentionDecoderCell(**attcellkw.v)
-        else:
-            raise q.SumTingWongException("unknown cell type: {}".format(celltype))
-        return attcell.to_decoder()
+            print("making decoder without attention, attention args ineffective")
+            coreindim = embdim + ctxdim if ctx_to_decinp else embdim
+            coreoutdim = dim
+            linoutdim = coreoutdim + ctxdim if ctx_to_smo else coreoutdim
+            # ! this is only expectation for dim for linout input
+            core = q.RecStack(
+                q.argsave.spec(inp=0, outmask_t={"outmask_t"}, t={"t"}),
+                q.argmap.spec(["inp"]),
+                q.Lambda(lambda x: (x[:, :embdim], x[:, -ctxdim:])),
+                q.argsave.spec(emb=0, ctx=1),
+                q.argmap.spec(["inp"], t=["t"]) if ctx_to_decinp else q.argmap.spec(["emb"], t=["t"]),
+                q.GRUCell(coreindim, coreoutdim),
+                q.argmap.spec(0, ["ctx"]),
+                q.Lambda(lambda x, y: torch.cat([x, y], 1)) if ctx_to_smo else q.Lambda(lambda x, y: x),
+                q.argmap.spec(0, mask=["outmask_t"]),
+                lin,
+            )
+            deccell = q.ContextDecoderCell(emb, core)
+            return deccell.to_decoder()
 
 
 class Model(nn.Module):
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, attmode=True):
         super(Model, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.attmode = attmode
 
     def forward(self, srcseq, tgtseq, outmask=None):
         ctx, ctxmask, finalstate = self.encoder(srcseq)
-        self.decoder.set_init_states(finalstate)
-        dec, att = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
+        if self.attmode is True or self.attmode in ("fwd", "bilin", "cos", "dot"):
+            self.decoder.set_init_states(finalstate)
+            dec, att = self.decoder(tgtseq, ctx, ctxmask=ctxmask, outmask=outmask)
+        else:
+            dec = self.decoder(tgtseq, finalstate, outmask=outmask)
+            att = None
         return dec, att, outmask
 
 
@@ -220,7 +247,8 @@ class ErrorAnalyzer(q.LossWithAgg):
         if mask is not None and mask.data[0, 0, 1] > 1:
             mask = q.batchablesparse2densemask(mask)
         for i in range(len(pred)):
-            exampleresult = self.processexample(pred[i], att[i], gold[i], mask[i],
+            atti = att[i] if att is not None else None
+            exampleresult = self.processexample(pred[i], atti, gold[i], mask[i],
                     inputs=([inputs_e[i] for inputs_e in inputs] if inputs is not None else None))
             self.acc.append(exampleresult)
         return 0
@@ -234,7 +262,7 @@ class ErrorAnalyzer(q.LossWithAgg):
 
         pred = pred.cpu().data.numpy()      # (seqlen, probs)
         gold = gold.cpu().data.numpy()
-        att = att.cpu().data.numpy()
+        att = att.cpu().data.numpy() if att is not None else None
         outmask = outmask.cpu().data.numpy()
         mask = (gold != 0)
         inp = inputs[0].cpu().data.numpy() if inputs is not None else None
@@ -328,6 +356,7 @@ class ErrorAnalyzer(q.LossWithAgg):
         return ret
 
     def inspect(self):
+        # TODO: size of vnt for each prediction step
         i = 0
         while i < len(self.acc):
             res = self.acc[i]
@@ -339,20 +368,22 @@ class ErrorAnalyzer(q.LossWithAgg):
             msg += "Top pred probs: {}\n".format(sparkline.sparkify(-res["toppredprobs"]).encode("utf-8"))
             msg += "Gold probs:     {}\n".format(sparkline.sparkify(-res["goldprobs"]).encode("utf-8"))
             # attention scores
-            goldwords = ["<E0>"] + res["gold_str"].split()
-            decwords = res["toppred_str"].split()
-            maxlen = 30
-            msg += "\t{} - {}\n".format(" "*maxlen, res["question_str"])
-            for j, (goldword, decword) in enumerate(zip(goldwords[:-1], decwords)):
-                if len(decword) > maxlen:
-                    decword = decword[-maxlen:]
-                if len(goldword) > maxlen:
-                    goldword = goldword[-maxlen:]
-                msg += "\t{:^{maxlenn}.{maxlenn}s}".format(goldword, maxlenn=maxlen) \
-                       + " -> {} -> ".format(sparkline.sparkify(res["attention_scores"][j]).encode("utf-8")) \
-                       + "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen)\
-                       + "\n"
-            msg += "\t{:^{maxlenn}.{maxlenn}s}\n".format(goldwords[-1], maxlenn=maxlen)
+            attention_scores = res["attention_scores"]
+            if attention_scores is not None:
+                goldwords = ["<E0>"] + res["gold_str"].split()
+                decwords = res["toppred_str"].split()
+                maxlen = 30
+                msg += "\t{} - {}\n".format(" "*maxlen, res["question_str"])
+                for j, (goldword, decword) in enumerate(zip(goldwords[:-1], decwords)):
+                    if len(decword) > maxlen:
+                        decword = decword[-maxlen:]
+                    if len(goldword) > maxlen:
+                        goldword = goldword[-maxlen:]
+                    msg += "\t{:^{maxlenn}.{maxlenn}s}".format(goldword, maxlenn=maxlen) \
+                           + " -> {} -> ".format(sparkline.sparkify(attention_scores[j]).encode("utf-8")) \
+                           + "\t{:^{maxlenn}.{maxlenn}s}".format(decword, maxlenn=maxlen)\
+                           + "\n"
+                msg += "\t{:^{maxlenn}.{maxlenn}s}\n".format(goldwords[-1], maxlenn=maxlen)
             print(msg)
             rawinp = raw_input("ENTER to continue, 'q'+ENTER to exit:> ")
             if rawinp == "q":
@@ -434,5 +465,6 @@ class get_corechain(object):
                     maxlen = max(maxlen, k + 1)
         querymat = querymat[:, :maxlen]
         vntmat = vntmat[:, :maxlen, :]
+        vntmat[:, :, branchid] = 0
         return querymat, vntmat
 

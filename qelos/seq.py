@@ -376,21 +376,43 @@ class DecoderCell(RecStatefulContainer):
 
 
 class ContextDecoderCell(DecoderCell):
+    """ static context decoding cell """
     def __init__(self, embedder=None, *layers):
         super(ContextDecoderCell, self).__init__(*layers)
         self.embedder = embedder
 
     def forward(self, x, ctx, **kw):
         if self.embedder is not None:
-            emb = self.embedder(x)
+            emb, mask = self.embedder(x)
         else:
             emb = x
         inp = torch.cat([emb, ctx], 1)
-        ret = self.core(inp)
+        ret = self.core(inp, **kw)
         return ret
 
     def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
-        return (x[0][:, t], x[1]), {}
+        outargs = (x[0][:, t], x[1])  # (prev_token, ctx)
+        outkwargs = {"t": t}
+        if "outmask" in xkw:  # slice out the time from outmask
+            outmask = xkw["outmask"]
+            if outmask.dim() == 1:  # get mask from data stored on this object
+                assert (self._sparse_outmask is not None)
+                outmaskaddrs = list(outmask.cpu().data.numpy())
+                sparse_outmask_t = [self._sparse_outmask[a][t] for a in outmaskaddrs]
+                sparse_outmask_t = [torch.from_numpy(a.todense()).t() for a in sparse_outmask_t]
+                sparse_outmask_t = torch.cat(sparse_outmask_t, 0)
+                outmask_t = var(sparse_outmask_t).cuda(outmask).v
+            elif outmask.data[0, 0, 1] > 1:  # batchable sparse
+                vocsize = outmask.data[0, 0, 1]
+                outmask_t = var(torch.ByteTensor(outmask.size(0), vocsize + 1)).cuda(outmask).v
+                outmask_t.data.fill_(0)
+                outmask_t.data.scatter_(1, outmask.data[:, t, 2:], 1)
+                outmask_t.data = outmask_t.data[:, 1:]
+                # outmask_t = var(outmask_t).cuda(outmask).v
+            else:
+                outmask_t = outmask[:, t]
+            outkwargs["outmask_t"] = outmask_t
+        return outargs, outkwargs
 
 
 class AttentionDecoderCell(DecoderCell):

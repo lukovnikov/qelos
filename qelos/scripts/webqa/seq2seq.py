@@ -21,7 +21,7 @@ def run(lr=0.1,
         encdim=100,
         decdim=100,
         decsplit=False,
-        attmode="bilin",        # "bilin" or "fwd"
+        attmode=None,        # "bilin" or "fwd" or None
         merge_mode="sum",        # "cat" or "sum"
         rel_which="urlwords",     # "urlwords ... ..."
         celltype="tree",          # "normal", "tree"
@@ -34,7 +34,13 @@ def run(lr=0.1,
         allgiven=False,          # assume all entities and relations needed are linked (and not more) --> filter vnt
         entityfilter=False,
         onlycorechain=False,
+        debug=False,
         ):
+    if debug:
+        onlycorechain = True
+        batsize = 4
+        epochs = 1
+        log = False
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
@@ -58,6 +64,10 @@ def run(lr=0.1,
                    rel_which=rel_which)
     vntvocsize = vnt_mat.shape[-1]
     # end
+
+    if debug:
+        trainids = trainids[:12]
+        testids = testids[:12]
 
     vnt_mat = vnt_mat[:, :query_sm.matrix.shape[1], :]
 
@@ -83,7 +93,7 @@ def run(lr=0.1,
     if entityfilter:
         pass        # TODO
 
-    if onlycorechain:
+    if onlycorechain:   # TODO: MISTAKE: <BRANCH> was in valid tokens
         train_queries, train_vnt = get_corechain(mode="webqsp")(train_queries, train_vnt, query_sm.D)
         test_queries, test_vnt = get_corechain(mode="webqsp")(test_queries, test_vnt, query_sm.D)
         pass        # TODO
@@ -133,8 +143,8 @@ def run(lr=0.1,
     decoder = make_decoder(mode="webqsp")(tgt_emb, tgt_lin, ctxdim=ctxdim,
                            embdim=tgt_emb_dim, dim=decdim,
                            attmode=attmode, decsplit=decsplit,
-                           celltype=celltype)
-    m = Model(encoder, decoder)
+                           celltype=celltype, ctx_to_decinp=False)
+    m = Model(encoder, decoder, attmode=attmode)
 
     # test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
