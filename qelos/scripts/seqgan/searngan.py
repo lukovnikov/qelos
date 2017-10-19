@@ -197,7 +197,10 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
 
             teacherforce_mask_np = np.ones((sequences.size(0), fseqlen - 1)).astype("uint8")
             override_mask_np = np.ones((sequences.size(0), fseqlen - 1)).astype("uint8")
-            unforce_lens = np.random.randint(0, amortizer.v+1, (sequences.size(0)))
+            if self.samplemode:
+                unforce_lens = np.ones((sequences.size(0),), dtype="int64") * amortizer.v
+            else:
+                unforce_lens = np.random.randint(0, amortizer.v+1, (sequences.size(0),))
             unforce_lens = np.minimum(unforce_lens, fseqlen - 1)
             for i in range(sequences.size(0)):
                 if unforce_lens[i] > 0:
