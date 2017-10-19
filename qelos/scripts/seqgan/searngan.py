@@ -140,7 +140,7 @@ def makenets(vocsize, embdim, gendim, discdim, startsym,
     def get_amortizer_update_rule(offset=0, headstart=clrate, interval=clrate):
         def amortizer_update_rule(current_value=0, iter=0, state=None):
             if debug:
-                return 0
+                return 5
             if iter < (offset + headstart):
                 return 0
             else:
