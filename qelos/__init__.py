@@ -26,7 +26,7 @@ from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, \
 from qelos.gan import GANTrainer
 
 from qelos.exceptions import SumTingWongException, HoLeePhukException, \
-    BaDumTssException
+    BaDumTssException, LonLeeException
 
 from IPython import embed
 

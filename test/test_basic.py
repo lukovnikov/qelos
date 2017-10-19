@@ -119,20 +119,21 @@ class TestLogsoftmax(TestCase):
 
     def test_logsoftmax_masked_same_as_softmax(self):
         lsm = LogSoftmax()
-        d = Variable(torch.FloatTensor(np.random.random((5, 3))))
+        d = Variable(torch.FloatTensor((np.random.random((5, 3))-0.5)*10000))
         m = np.ones_like(d.data.numpy())
         m[:, 2] = 0
         m = Variable(torch.FloatTensor(m))
         pred, _ = lsm(d, m)
         pred = pred.data.numpy()
+        predexp, _ = Softmax()(d, m)
+        predexp = predexp.data.numpy()
         print(pred)
+        print(predexp)
         self.assertTrue(np.allclose(np.zeros_like(pred[:, 2]), np.exp(pred)[:, 2]))
         self.assertEqual(d.size(), pred.shape)
         predsums = np.sum(np.exp(pred), axis=-1)
         print(predsums)
         self.assertTrue(np.allclose(predsums, np.ones_like(predsums)))
-        predexp, _ = Softmax()(d, m)
-        predexp = predexp.data.numpy()
         self.assertTrue(np.allclose(predexp, np.exp(pred)))
 
     def test_masked_logsoftmax_numerical_stability(self):
@@ -141,15 +142,49 @@ class TestLogsoftmax(TestCase):
         d2 = d[:, [0, 2]]
         o, _ = LogSoftmax()(d, m)
         pred = o.data.numpy()
-        pred2 = LogSoftmax()(d2).data.numpy().astype("float64")
-        pred3 = Softmax()(d2).data.numpy().astype("float64")
+        predwo = LogSoftmax()(d2).data.numpy().astype("float64")
+        pred2 = nn.LogSoftmax()(d2).data.numpy().astype("float64")
+        pred3 = nn.Softmax()(d2).data.numpy().astype("float64")
+        predx = nn.LogSoftmax()(d + torch.log(m)).data.numpy().astype("float64")
+        print(predx)
         print(pred)
+        print(predwo)
         print(pred2)
-        print(np.log(pred3))
+        # print(np.log(pred3))
         onetotwo = np.isclose(pred[:, [0, 2]], pred2)
         onetothree = np.isclose(pred[:, [0, 2]], np.log(pred3))
         self.assertTrue(np.all(onetothree | onetotwo))
+        self.assertTrue(np.allclose(np.exp(pred[:, [0, 2]]), pred3))
+        self.assertTrue(np.allclose(np.exp(pred2), pred3))
+        self.assertTrue(np.allclose(predwo, pred2))
+        self.assertTrue(np.allclose(pred[:, [0, 2]], pred2))
+        self.assertTrue(np.allclose(pred[:, [0, 2]], predwo))
         self.assertTrue(np.allclose(pred[:, 1], np.log(np.zeros_like(pred[:, 1]))))
+
+    def test_logsoftmax_masked_backprop(self):
+        d = nn.Parameter(torch.FloatTensor(np.asarray(
+            [[-1e9, 1e9, 1], [-1e6, 1e6, 1], [-1e3, 1e3, 1], [-1e2, 1e2, 1], [-1e1, 1e1, 1], [-1, 1e2, 1], [1, 1e2, 1],
+             [0.5, 1e2, 1]])))
+
+        m = Variable(torch.FloatTensor(
+            np.asarray([[1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1]])))
+        d2 = nn.Parameter(d.data.clone()[:, [0, 2]])
+        o, _ = LogSoftmax()(d, m)
+        o2 = nn.LogSoftmax()(d2)
+
+        oloss = -o[:, 0].sum()
+        o2loss = -o2[:, 0].sum()
+
+        print(oloss)
+        print(o2loss)
+
+        oloss.backward()
+        o2loss.backward()
+
+        print(d.grad.data.numpy())
+        print(d2.grad.data.numpy())
+        self.assertTrue(np.allclose(d.grad.data.numpy()[:, [0, 2]], d2.grad.data.numpy()))
+        # self.asserTrue(False)
 
 
 class TestDistance(TestCase):

@@ -19,3 +19,7 @@ class WeTuLoException(Exception):
 
 class WeTuHiException(Exception):
     pass
+
+
+class LonLeeException(Exception):
+    pass

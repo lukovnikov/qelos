@@ -16,6 +16,7 @@ def run(lr=0.1,
         gradnorm=2.,
         epochs=100,
         wreg=1e-6,
+        lossmode="nll",      # "nll" or "rank"
         dropout=0.1,
         glovedim=50,
         encdim=100,
@@ -41,6 +42,7 @@ def run(lr=0.1,
         batsize = 4
         epochs = 1
         log = False
+        lossmode = "rank"
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
@@ -143,20 +145,25 @@ def run(lr=0.1,
     decoder = make_decoder(mode="webqsp")(tgt_emb, tgt_lin, ctxdim=ctxdim,
                            embdim=tgt_emb_dim, dim=decdim,
                            attmode=attmode, decsplit=decsplit,
-                           celltype=celltype, ctx_to_decinp=False)
+                           celltype=celltype, ctx_to_decinp=False,
+                           lossmode=lossmode)
     m = Model(encoder, decoder, attmode=attmode)
 
     # test_model(encoder, decoder, m, test_questions, test_queries, test_vnt)
 
     # training settings
+    if lossmode == "nll":
+        mainloss = q.SeqCrossEntropyLoss(ignore_index=0)
+    elif lossmode == "rank":
+        mainloss = q.SeqRankingLoss(ignore_index=0, margin=0.1)
     lt = lambda a: (a[0], {"mask": a[2]})
-    losses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+    losses = q.lossarray((mainloss, lt),
                          (q.SeqAccuracy(ignore_index=0), lt),
                          (q.SeqElemAccuracy(ignore_index=0), lt))
-    validlosses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+    validlosses = q.lossarray((mainloss, lt),
                               (q.SeqAccuracy(ignore_index=0), lt),
                               (q.SeqElemAccuracy(ignore_index=0), lt))
-    testlosses = q.lossarray((q.SeqCrossEntropyLoss(ignore_index=0), lt),
+    testlosses = q.lossarray((mainloss, lt),
                              (q.SeqAccuracy(ignore_index=0), lt),
                              (q.SeqElemAccuracy(ignore_index=0), lt))
 

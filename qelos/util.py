@@ -1,3 +1,8 @@
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
+from __future__ import print_function
 import argparse
 import collections
 import inspect
@@ -27,7 +32,7 @@ class ticktock(object):
 
     def tick(self, state=None):
         if self.verbose and state is not None:
-            print "%s: %s" % (self.prefix, state)
+            print("%s: %s" % (self.prefix, state))
         self._tick()
 
     def _tick(self):
@@ -54,14 +59,14 @@ class ticktock(object):
         if self.verbose:
             prefix = prefix if prefix is not None else self.prefix
             action = action if action is not None else self.state
-            print "%s: %s in %s" % (prefix, action, self._getdurationstr(duration))
+            print("%s: %s in %s" % (prefix, action, self._getdurationstr(duration)))
         return self
 
     def msg(self, action=None, prefix=None):
         if self.verbose:
             prefix = prefix if prefix is not None else self.prefix
             action = action if action is not None else self.state
-            print "%s: %s" % (prefix, action)
+            print("%s: %s" % (prefix, action))
         return self
 
     def _getdurationstr(self, duration):
@@ -140,7 +145,7 @@ def argparsify(f, test=None):
 def argprun(f, sigint_shell=True, **kwargs):   # command line overrides kwargs
     def handler(sig, frame):
         # find the frame right under the argprun
-        print "custom handler called"
+        print("custom handler called")
         original_frame = frame
         current_frame = original_frame
         previous_frame = None
@@ -455,7 +460,7 @@ def wordmat2charmat(wordmat, worddic=None, rwd=None, maxlen=100, raretoken="<RAR
     if realmaxlen < maxlen:
         charmat = charmat[:, :realmaxlen]
     if toolong > 0:
-        print "{} too long".format(toolong)
+        print("{} too long".format(toolong))
     tt.tock("transformed")
     return charmat
 

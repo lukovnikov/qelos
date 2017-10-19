@@ -123,7 +123,8 @@ class make_decoder(object):
 
     def __call__(self, emb, lin, ctxdim=100, embdim=100, dim=100,
                      attmode="bilin", decsplit=False, celltype="normal",
-                     ctx_to_decinp=True, ctx_to_smo=True, state_to_smo=True, **kw):
+                     ctx_to_decinp=True, ctx_to_smo=True, state_to_smo=True,
+                     lossmode="nll", **kw):
         """ makes decoder
         # attention cell decoder that accepts VNT !!!
         """
@@ -152,6 +153,7 @@ class make_decoder(object):
                                  smo=q.Stack(
                                      q.persist_kwargs(),
                                      # q.argsave.spec(mask={"mask"}),
+                                     q.argmap.spec(0, _do_cosnorm={"value": lossmode == "rank"}),
                                      lin,
                                      # q.argmap.spec(0, mask=["mask"]),
                                      # q.LogSoftmax(),
@@ -188,7 +190,7 @@ class make_decoder(object):
                 q.GRUCell(coreindim, coreoutdim),
                 q.argmap.spec(0, ["ctx"]),
                 q.Lambda(lambda x, y: torch.cat([x, y], 1)) if ctx_to_smo else q.Lambda(lambda x, y: x),
-                q.argmap.spec(0, mask=["outmask_t"]),
+                q.argmap.spec(0, mask=["outmask_t"], _do_cosnorm={"value": lossmode == "rank"}),
                 lin,
             )
             deccell = q.ContextDecoderCell(emb, core)

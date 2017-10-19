@@ -494,7 +494,8 @@ class TestComputedWordLinout(TestCase):
         data = self.linout.data
         computer = self.linout.computer
         cout = torch.matmul(x, computer(data).t())
-        cout = cout * msk.float()
+        # cout = cout * msk.float()
+        cout = cout + torch.log(msk.float())
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
 
     def test_masked_with_rnn_computer(self):
@@ -519,7 +520,8 @@ class TestComputedWordLinout(TestCase):
         data = linout.data
         computer = linout.computer
         cout = torch.matmul(x, computer(data).t())
-        cout = cout * msk.float()
+        # cout = cout * msk.float()
+        cout = cout + torch.log(msk.float())
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
 
     def test_all_masked(self):
@@ -532,7 +534,7 @@ class TestComputedWordLinout(TestCase):
         data = self.linout.data
         computer = self.linout.computer
         cout = torch.matmul(x, computer(data).t())
-        cout = cout * msk.float()
+        cout = cout + torch.log(msk.float())
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
 
     def test_masked_3D_data(self):
@@ -551,7 +553,8 @@ class TestComputedWordLinout(TestCase):
         data = self.linout.data
         computer = self.linout.computer
         cout = torch.matmul(x, computer(data).t())
-        cout = cout * msk.float()
+        # cout = cout * msk.float()
+        cout = cout + torch.log(msk.float())
         self.assertTrue(np.allclose(cout.data.numpy(), out.data.numpy()))
 
     def test_basic_grad(self):

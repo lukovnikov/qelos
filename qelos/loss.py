@@ -97,7 +97,11 @@ class NLLLoss(DiscreteLoss):
         self.weight = weight
 
     def _forward(self, x, gold, mask=None):     # (batsize, vocsize)
+        # probs for masked elements must have been zero by softmax
         ignoremask = self._get_ignore_mask(gold)
+
+        if mask is not None:
+            x = x + torch.log(mask.float())
 
         logprobs = -torch.gather(x, 1, gold.unsqueeze(1)).squeeze()
 
@@ -123,6 +127,7 @@ class CrossEntropyLoss(NLLLoss):
         self.softmax = q.LogSoftmax(temperature=temperature)
 
     def _forward(self, scores, gold, mask=None):
+        # softmax zeroes/mininfinites the masked symbols
         probs = self.softmax(scores, mask=mask)
         if isinstance(probs, tuple):
             probs = probs[0]
@@ -139,36 +144,33 @@ class SeqCrossEntropyLoss(SeqLoss, CrossEntropyLoss):
 class RankingLoss(DiscreteLoss):
     def __init__(self, size_average=True, ignore_index=None,
                  negbest=False,
-                 ignore_minimum=False,
                  margin=None, ignore_below_margin=True, **kw):
         super(RankingLoss, self).__init__(size_average=size_average, ignore_index=ignore_index,
                                           **kw)
-        self.ignore_minimum = ignore_minimum
         self.margin = margin
         self.ignore_below_margin = ignore_below_margin
         self.negmode = "best" if negbest else "random"      # "random" or "best"
 
     def _forward(self, scores, gold, mask=None):    # (batsize, numvoc), idx^(batsize,)
-        scores = scores - scores.min()
+        # scores = scores - scores.min()
         goldscores = torch.gather(scores, 1, gold.unsqueeze(1)).squeeze()
 
-        if mask is not None and mask[0, 1] > 1:
+        if mask is not None and mask.data[0, 1] > 1:
             mask = q.batchablesparse2densemask(mask)
 
         if self.negmode == "random":
             sampledist = scores.data.new(scores.size())
             sampledist.fill_(1.)
             sampledist.scatter_(1, gold.data.unsqueeze(1), 0)
+            filtermask = scores > -np.infty
             if mask is not None:
-                sampledist = sampledist * mask.float()
+                filtermask.data = filtermask.data & mask.byte().data
+            sampledist = sampledist * filtermask.float().data
             sampledist_orig = sampledist
             if self.margin is not None and self.ignore_below_margin:
                 cutoffs = goldscores.data - self.margin
                 cutoffmask = scores.data > cutoffs.unsqueeze(1)
                 sampledist = sampledist * cutoffmask.float()
-            if self.ignore_minimum:
-                minmask = scores.data > scores.min().data
-                sampledist = sampledist * minmask.float()
             if (sampledist.sum(1) > 0).long().sum() < gold.size(0):
                 # force to sample gold
                 gold_onehot = sampledist.new(sampledist.size())
@@ -182,10 +184,11 @@ class RankingLoss(DiscreteLoss):
             sample = q.var(sample).cuda(scores).v
             negscores = torch.gather(scores, 1, sample).squeeze()
         elif self.negmode == "best":
-            scores = scores * mask.float() if mask else scores
+            # scores = scores * mask.float() if mask else scores
+            scores = scores + torch.log(mask.float()) if mask else scores
             bestscores, best = torch.max(scores, 1)
             secondscores = scores + 0
-            secondscores.scatter_(1, best.unsqueeze(1), 0)
+            secondscores.data.scatter_(1, best.unsqueeze(1), 0)
             secondbestscores, secondbest = torch.max(secondscores, 1)
             switchmask = best == gold
             sample = secondbest * switchmask.long() + best * (1 + (-1) * switchmask.long())
@@ -212,13 +215,11 @@ class SeqRankingLoss(SeqLoss, RankingLoss):
     def __init__(self, size_average=True, time_average=False,
                  ignore_index=None,
                  negbest=False,
-                 ignore_minimum=False,
                  margin=None, ignore_below_margin=True, **kw):
         super(SeqRankingLoss, self).__init__(size_average=size_average,
                                              time_agg="avg" if time_average else "sum",
                                              ignore_index=ignore_index,
                                              negbest=negbest,
-                                             ignore_minimum=ignore_minimum,
                                              margin=margin,
                                              ignore_below_margin=ignore_below_margin,
                                              **kw)
@@ -228,7 +229,8 @@ class Accuracy(DiscreteLoss):
     def _forward(self, x, gold, mask=None):
         if mask is not None and mask.data[0, 1] > 1:     # batchable sparse
             mask = q.batchablesparse2densemask(mask)
-        x = x * mask.float() if mask is not None else x
+        if mask is not None:
+            x = x + torch.log(mask.float())
         ignoremask = self._get_ignore_mask(gold)
         maxes, best = torch.max(x, 1)
         same = best == gold
@@ -245,9 +247,13 @@ class SeqAccuracy(SeqLoss, Accuracy):
 
 
 class SeqElemAccuracy(DiscreteLoss):
-    def forward(self, probs, gold, mask=None):
+    def forward(self, x, gold, mask=None):
+        if mask is not None and mask.data[0, 0, 1] > 1:     # batchable sparse
+            mask = q.batchablesparse2densemask(mask)
+        if mask is not None:
+            x = x + torch.log(mask.float())
         ignoremask = self._get_ignore_mask(gold)
-        maxes, argmaxes = torch.max(probs, dim=2)
+        maxes, argmaxes = torch.max(x, dim=2)
         diff = argmaxes == gold
         if ignoremask is not None:
             diff = diff * ignoremask

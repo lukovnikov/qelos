@@ -551,14 +551,18 @@ class WordLinout(WordLinoutBase):
         vec = self.lin.weight.index_select(0, wordid)
         return vec
 
-    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False):
+    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False, _no_mask_log=False):
         ret = self.lin(x)
         if (self.cosnorm or _do_cosnorm) and not _retcosnorm:      # normalize cosnorm
             normweight = torch.norm(self.lin.weight, 2, 1).unsqueeze(0)
             normx = torch.norm(x, 2, 1)
             ret = ret / torch.clamp(normweight, min=EPS)
             ret = ret / torch.clamp(normx.unsqueeze(1), min=EPS)
-        ret = ret.mul(mask.float() if mask is not None else 1)
+        if mask is not None:
+            if _no_mask_log is False:
+                ret = ret + torch.log(mask.float())
+            else:
+                ret = ret * mask.float()
         if _retcosnorm:
             cosnorm = torch.pow(self.lin.weight, 2).sum(1).unsqueeze(0)
             return ret, cosnorm
@@ -604,7 +608,7 @@ class ComputedWordLinout(WordLinoutBase):
             stdv = 1. / math.sqrt(self.bias.size(0))
             self.bias.data.uniform_(-stdv, stdv)
 
-    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False):        # (batsize, indim), (batsize, outdim)
+    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False, _no_mask_log=False):        # (batsize, indim), (batsize, outdim)
         if mask is not None:
             mask = mask.long()
             # select data, compute vectors, build switcher
@@ -642,7 +646,10 @@ class ComputedWordLinout(WordLinoutBase):
             bias = self.bias if mask is not None else self.bias * mask
             out += bias
         if mask is not None:
-            out = out * mask.float()
+            if _no_mask_log:
+                out = out * mask.float()
+            else:
+                out = out + torch.log(mask.float())
         if _retcosnorm:
             cosnorm = torch.sum(torch.pow(weight, 2), 1).unsqueeze(0)
             return out, cosnorm
@@ -721,10 +728,10 @@ class AdaptedWordLinout(WordLinoutBase):
         wordid = self.new_to_old[wordid]
         return self.inner.lin.weight[wordid]
 
-    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False):       # (batsize, indim), (batsize, outdim)
+    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False, _no_mask_log=False):       # (batsize, indim), (batsize, outdim)
         innermask = mask.index_select(1, self.old_to_new) if mask is not None else None
         # TODO: SOMETHING WRONG, innermask is all zero
-        baseout = self.inner(x, mask=innermask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm)     # (batsize, outdim) --> need to permute columns
+        baseout = self.inner(x, mask=innermask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm, _no_mask_log=_no_mask_log)     # (batsize, outdim) --> need to permute columns
         if _retcosnorm:
             baseout, cosnorm = baseout
         out = baseout.index_select(1, self.new_to_old)
@@ -735,16 +742,19 @@ class AdaptedWordLinout(WordLinoutBase):
 
 
 class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
-    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False):    # (batsize, indim), (batsize, outdim)
-        baseres = self.base(x, mask=mask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm)
-        overres = self.over(x, mask=mask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm)
+    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False, _no_mask_log=False):    # (batsize, indim), (batsize, outdim)
+        baseres = self.base(x, mask=mask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm, _no_mask_log=True)
+        overres = self.over(x, mask=mask, _do_cosnorm=_do_cosnorm, _retcosnorm=_retcosnorm, _no_mask_log=True)
         if _retcosnorm:
             baseres, basecosnorm = baseres
             overres, overcosnorm = overres
         res = self.overridemask.unsqueeze(0) * overres \
               + (1 - self.overridemask.unsqueeze(0)) * baseres
         if mask is not None:
-            res = res * mask.float()
+            if _no_mask_log:
+                res = res * mask.float()
+            else:
+                res = res + torch.log(mask.float())
         if _retcosnorm:
             cosnorm = self.overridemask.unsqueeze(0) * overcosnorm \
                 + (1 - self.overridemask.unsqueeze(0)) * basecosnorm
@@ -753,7 +763,7 @@ class OverriddenWordLinout(OverriddenWordVecBase, WordLinoutBase):
 
 
 class MergedWordLinout(MergedWordVecBase, WordLinoutBase):
-    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False):
+    def forward(self, x, mask=None, _do_cosnorm=False, _retcosnorm=False, _no_mask_log=False):
         if self.mode == "cat":      # need to split up input
             basex = x[:, :self.base.vecdim]
             mergx = x[:, self.base.vecdim:]
@@ -763,9 +773,11 @@ class MergedWordLinout(MergedWordVecBase, WordLinoutBase):
         else:
             raise q.SumTingWongException()
         baseres = self.base(basex, mask=mask, _do_cosnorm=False,
-                _retcosnorm=_retcosnorm or self.cosnorm or _do_cosnorm)
+                _retcosnorm=_retcosnorm or self.cosnorm or _do_cosnorm,
+                            _no_mask_log=_no_mask_log)
         mergres = self.merg(mergx, mask=mask, _do_cosnorm=False,
-                _retcosnorm=_retcosnorm or self.cosnorm or _do_cosnorm)
+                _retcosnorm=_retcosnorm or self.cosnorm or _do_cosnorm,
+                            _no_mask_log=_no_mask_log)
         if _retcosnorm or self.cosnorm or _do_cosnorm:
             baseres, basecosnorm = baseres
             mergres, mergcosnorm = mergres

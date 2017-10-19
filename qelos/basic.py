@@ -40,6 +40,10 @@ class StackSpecFunction(Lambda):
         elif isinstance(spece, list):
             assert (len(spece) == 1)
             return g[spece[0]]
+        elif isinstance(spece, dict):
+            assert(len(spece) == 1)
+            assert("value" in spece)
+            return spece["value"]
         else:
             return a[spece]
 
@@ -210,15 +214,17 @@ class Softmax(nn.Module):
 
     def logsumexp(self, x, mask=None):
         #x = torch.add(x, torch.log(mask))
-        x_max, _ = torch.max(torch.add(x, torch.log(mask)), 1, keepdim=True)
-        x = x.mul(mask)
-        x = x.sub(x_max)
-        x.exp_()
         if mask is not None:
-            x = torch.mul(x, mask)
+            x = x + torch.log(mask)
+        x_max, _ = torch.max(x, 1, keepdim=True)
+        # x = x * mask
+        x = x - x_max
+        x = torch.exp(x)
+        if mask is not None:
+            x = x * mask
         x_sum = torch.sum(x, 1, keepdim=True)
         x_sum = x_sum.log()
-        x_sum.add_(x_max)
+        x_sum = x_sum + x_max
         return x_sum
 
     def forward(self, x, mask=None, temperature=None):
@@ -248,30 +254,32 @@ class Softmax(nn.Module):
             if maskshape is not None:
                 maskshape = maskshape[:-1] + (mask.size(-1),)
         x = x / temperature
-        if mask is None:
-            if self._log:
-                o_exp = F.log_softmax(x)
-            else:
-                o_exp = F.softmax(x)
+        if mask is not None:
+            x = x + torch.log(mask)
+        # if mask is None:
+        if self._log:
+            o_exp = F.log_softmax(x)
         else:
-            if self._log:
-                o_exp_sum = self.logsumexp(x, mask)
-                masklog = mask.log()
-                o_exp = x.add(masklog)
-                o_exp.sub_(o_exp_sum)
-            else:
-                x_mins, _ = torch.min(x, 1, keepdim=True)
-                x.sub_(x_mins)
-                x = torch.mul(x, mask)
-                x.add_(x_mins)
-                o_exp, _ = torch.max(x, 1, keepdim=True)
-                o_exp = x - o_exp
-                o_exp.exp_()
-                o_exp = torch.mul(o_exp, mask)
-                o_exp_sum = torch.sum(o_exp, 1, keepdim=True)
-                o_exp = torch.div(o_exp, o_exp_sum)
-                if self._logafter:
-                    o_exp = torch.log(o_exp)
+            o_exp = F.softmax(x)
+        # else:    # this is old implementation, handled by -infty now
+        #     if self._log:
+        #         o_exp_sum = self.logsumexp(x, mask)
+        #         masklog = mask.log()
+        #         o_exp = x.add(masklog)
+        #         o_exp.sub_(o_exp_sum)
+        #     else:
+        #         x_mins, _ = torch.min(x, 1, keepdim=True)
+        #         x.sub_(x_mins)
+        #         x = torch.mul(x, mask)
+        #         x.add_(x_mins)
+        #         o_exp, _ = torch.max(x, 1, keepdim=True)
+        #         o_exp = x - o_exp
+        #         o_exp.exp_()
+        #         o_exp = torch.mul(o_exp, mask)
+        #         o_exp_sum = torch.sum(o_exp, 1, keepdim=True)
+        #         o_exp = torch.div(o_exp, o_exp_sum)
+        #         if self._logafter:
+        #             o_exp = torch.log(o_exp)
         retmask = None
         if xndim > 2:
             o_exp = o_exp.view(s)
@@ -286,13 +294,14 @@ class Softmax(nn.Module):
             return o_exp
 
 
-class LogSoftmax(Softmax):      # TODO: some instability
+class LogSoftmax(Softmax):
     def __init__(self, temperature=1.):
         super(LogSoftmax, self).__init__(temperature=temperature)
         self._log = True
 
 
 class SoftmaxLog(Softmax):      # TODO: might need something extra for use in training
+    """ DON'T USE THIS !!!!!!!!!! """
     def __init__(self, temperature=1.):
         super(SoftmaxLog, self).__init__(temperature=temperature)
         self._logafter = True
