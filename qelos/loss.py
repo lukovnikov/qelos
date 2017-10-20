@@ -143,13 +143,14 @@ class SeqCrossEntropyLoss(SeqLoss, CrossEntropyLoss):
 
 class RankingLoss(DiscreteLoss):
     def __init__(self, size_average=True, ignore_index=None,
-                 negbest=False,
+                 negmode="random",
                  margin=None, ignore_below_margin=True, **kw):
         super(RankingLoss, self).__init__(size_average=size_average, ignore_index=ignore_index,
                                           **kw)
         self.margin = margin
         self.ignore_below_margin = ignore_below_margin
-        self.negmode = "best" if negbest else "random"      # "random" or "best"
+        self.negmode = negmode      # "random" or "best" or "negall"
+        self._average_negall = True
 
     def _forward(self, scores, gold, mask=None):    # (batsize, numvoc), idx^(batsize,)
         # scores = scores - scores.min()
@@ -158,51 +159,68 @@ class RankingLoss(DiscreteLoss):
         if mask is not None and mask.data[0, 1] > 1:
             mask = q.batchablesparse2densemask(mask)
 
-        if self.negmode == "random":
-            sampledist = scores.data.new(scores.size())
-            sampledist.fill_(1.)
-            sampledist.scatter_(1, gold.data.unsqueeze(1), 0)
+        goldexamplemask = None
+
+        if self.negmode == "random" or self.negmode == "negall":
+            sampledist = q.var(scores.data.new(scores.size())).cuda(scores).v
+            sampledist.data.fill_(1.)
+            sampledist.data.scatter_(1, gold.data.unsqueeze(1), 0)
             filtermask = scores > -np.infty
             if mask is not None:
                 filtermask.data = filtermask.data & mask.byte().data
-            sampledist = sampledist * filtermask.float().data
+            sampledist = sampledist * filtermask.float()
             sampledist_orig = sampledist
             if self.margin is not None and self.ignore_below_margin:
-                cutoffs = goldscores.data - self.margin
-                cutoffmask = scores.data > cutoffs.unsqueeze(1)
+                cutoffs = goldscores - self.margin
+                cutoffmask = scores > cutoffs.unsqueeze(1)
                 sampledist = sampledist * cutoffmask.float()
-            if (sampledist.sum(1) > 0).long().sum() < gold.size(0):
+            if (sampledist.data.sum(1) > 0).long().sum() < gold.size(0):
                 # force to sample gold
-                gold_onehot = sampledist.new(sampledist.size())
-                gold_onehot.fill_(0.)
-                gold_onehot.scatter_(1, gold.data.unsqueeze(1), 1.)
-                examplemask = (sampledist.sum(1) == 0)
+                gold_onehot = q.var(torch.ByteTensor(sampledist.size())).cuda(sampledist).v
+                gold_onehot.data.fill_(0)
+                gold_onehot.data.scatter_(1, gold.data.unsqueeze(1), 1)
+                goldexamplemask = (sampledist.sum(1) != 0)
                 # addtosampledist = sampledist_orig * examplemask.float().unsqueeze(1)
-                addtosampledist = gold_onehot * examplemask.float().unsqueeze(1)
-                sampledist = sampledist + addtosampledist
-            sample = torch.multinomial(sampledist, 1)
-            sample = q.var(sample).cuda(scores).v
-            negscores = torch.gather(scores, 1, sample).squeeze()
+                addtosampledist = gold_onehot.data * (~goldexamplemask.data).unsqueeze(1)
+                sampledist.data.masked_fill_(addtosampledist, 1)
+            if self.negmode == "random":
+                sample = torch.multinomial(sampledist, 1)
+                negscores = torch.gather(scores, 1, sample).squeeze()
+            elif self.negmode == "negall":
+                negscores = scores * sampledist
+                numnegs = sampledist.sum(1)
         elif self.negmode == "best":
             # scores = scores * mask.float() if mask else scores
             scores = scores + torch.log(mask.float()) if mask else scores
             bestscores, best = torch.max(scores, 1)
             secondscores = scores + 0
-            secondscores.data.scatter_(1, best.unsqueeze(1), 0)
+            secondscores.data.scatter_(1, best.data.unsqueeze(1), 0)
             secondbestscores, secondbest = torch.max(secondscores, 1)
             switchmask = best == gold
             sample = secondbest * switchmask.long() + best * (1 + (-1) * switchmask.long())
             negscores = secondbestscores * switchmask.float() + bestscores * (1 - switchmask.float())
+            goldexamplemask = sample.squeeze() != gold
             # raise NotImplemented("some issues regarding implementation not resolved")
         else:
             raise q.SumTingWongException("unknown mode: {}".format(self.negmode))
 
-        loss = negscores - goldscores
-        if self.margin is not None:
-            loss = torch.clamp(self.margin + loss, min=0)
-
-        examplemask = sample.squeeze() != gold
-        loss = examplemask.float() * loss
+        if self.negmode == "best" or self.negmode == "random":
+            loss = negscores - goldscores
+            if self.margin is not None:
+                loss = torch.clamp(self.margin + loss, min=0)
+            if goldexamplemask is not None:
+                loss = goldexamplemask.float() * loss
+        elif self.negmode == "negall":
+            # negscores are 2D
+            loss = negscores - goldscores.unsqueeze(1)
+            if self.margin is not None:
+                loss = torch.clamp(self.margin + loss, min=0)
+            loss = loss * sampledist
+            loss = loss.sum(1)
+            if self._average_negall:
+                loss = loss / numnegs
+            if goldexamplemask is not None:
+                loss = loss * goldexamplemask.float()
 
         ignoremask = self._get_ignore_mask(gold)
         if ignoremask is not None:
@@ -213,13 +231,12 @@ class RankingLoss(DiscreteLoss):
 
 class SeqRankingLoss(SeqLoss, RankingLoss):
     def __init__(self, size_average=True, time_average=False,
-                 ignore_index=None,
-                 negbest=False,
+                 ignore_index=None, negmode="random",
                  margin=None, ignore_below_margin=True, **kw):
         super(SeqRankingLoss, self).__init__(size_average=size_average,
                                              time_agg="avg" if time_average else "sum",
                                              ignore_index=ignore_index,
-                                             negbest=negbest,
+                                             negmode=negmode,
                                              margin=margin,
                                              ignore_below_margin=ignore_below_margin,
                                              **kw)

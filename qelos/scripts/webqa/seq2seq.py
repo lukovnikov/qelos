@@ -40,7 +40,7 @@ def run(lr=0.1,
     if debug:
         onlycorechain = True
         batsize = 4
-        epochs = 1
+        epochs = 10
         log = False
         lossmode = "rank"
     localvars = locals()
@@ -68,8 +68,8 @@ def run(lr=0.1,
     # end
 
     if debug:
-        trainids = trainids[:12]
-        testids = testids[:12]
+        trainids = trainids[:200]
+        testids = testids[:50]
 
     vnt_mat = vnt_mat[:, :query_sm.matrix.shape[1], :]
 
@@ -155,7 +155,7 @@ def run(lr=0.1,
     if lossmode == "nll":
         mainloss = q.SeqCrossEntropyLoss(ignore_index=0)
     elif lossmode == "rank":
-        mainloss = q.SeqRankingLoss(ignore_index=0, margin=0.1)
+        mainloss = q.SeqRankingLoss(ignore_index=0, margin=0.1, negmode="negall")
     lt = lambda a: (a[0], {"mask": a[2]})
     losses = q.lossarray((mainloss, lt),
                          (q.SeqAccuracy(ignore_index=0), lt),

@@ -179,7 +179,7 @@ class TestSeqElemAccuracy(TestCase):
 
 class TestRankingLoss(TestCase):
     def test_margin_random(self):
-        loss = q.RankingLoss(margin=.1, ignore_below_margin=True, ignore_minimum=True)
+        loss = q.RankingLoss(margin=.1, ignore_below_margin=True)
         score = q.val(torch.randn(5, 10)).v
         score.requires_grad = True
         scores = score + 1
@@ -193,7 +193,7 @@ class TestRankingLoss(TestCase):
         self.assertTrue(np.allclose(score.grad.sum(1).data.numpy(), np.zeros((5,))))
 
     def test_margin_best(self):
-        loss = q.RankingLoss(margin=.3, negbest=True)
+        loss = q.RankingLoss(margin=.3, negmode="best")
         score = q.val(torch.randn(5, 10)).v
         score.requires_grad = True
         scores = score + 1
@@ -204,6 +204,20 @@ class TestRankingLoss(TestCase):
         tl.backward()
         print(score.grad)
         self.assertTrue(np.allclose(score.grad.sum(1).data.numpy(), np.zeros((5,))))
+
+    def test_margin_negall(self):
+        loss = q.RankingLoss(margin=.1, negmode="negall")
+        score = q.val(torch.randn(5, 10)).v
+        score.requires_grad = True
+        scores = score + 1
+        gold = q.var(np.random.randint(0, 10, (5,))).v
+        gold.data[0] = torch.max(score, 1)[1].data[0]
+        l, _ = loss(scores, gold, _noagg=True)
+        self.assertEqual(l.size(), (5,))
+        tl = l.sum()
+        tl.backward()
+        print(score.grad)
+        # self.assertTrue(np.allclose(score.grad.sum(1).data.numpy(), np.zeros((5,))))
 
 
 class TestSeqLoss(TestCase):
