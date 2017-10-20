@@ -23,3 +23,7 @@ class WeTuHiException(Exception):
 
 class LonLeeException(Exception):
     pass
+
+
+class WiNoDoException(Exception):
+    pass

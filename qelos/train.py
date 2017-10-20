@@ -142,7 +142,11 @@ class lossarray(object):
             kw = {}
             pred = prediction
             if loss_transf is not None:
-                pred, kw = loss_transf(prediction)
+                loss_transf_out = loss_transf(prediction)
+                if len(loss_transf_out) == 2:
+                    pred, kw = loss_transf_out
+                elif len(loss_transf_out) == 3:
+                    pred, gold, kw = loss_transf_out
             if loss.callwithinputs:
                 kw["inputs"] = inputs
             l = loss(pred, gold, **kw)
