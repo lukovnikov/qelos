@@ -37,6 +37,7 @@ def run(lr=0.1,
         entityfilter=False,
         onlycorechain=False,
         debug=False,
+        validontest=False,
         ):
     if debug:
         onlycorechain = True
@@ -107,8 +108,13 @@ def run(lr=0.1,
         test_vnt = allgiven_adjust_vnt(mode="webqsp")(test_queries, test_vnt, query_sm.D)
 
     # train/valid split
-    (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
-        = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
+    if not validontest:
+        (train_questions, train_queries, train_vnt), (valid_questions, valid_queries, valid_vnt) \
+            = q.split([train_questions, train_queries, train_vnt], splits=(80, 20), random=True)
+    else:
+        valid_questions, test_questions = test_questions, test_questions
+        valid_queries, test_queries = test_queries, test_queries
+        valid_vnt, test_vnt = test_vnt, test_vnt
 
 
     for k, v in query_sm.D.items():
