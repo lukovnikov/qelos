@@ -883,9 +883,11 @@ class _BidirRNNLayer(nn.Module, Recurrent):
         
     # Setting initial states must be done in layers separately TODO: make proxy here
 
+
 class BidirGRULayer(_BidirRNNLayer):
     def __init__(self, indim, outdim, use_bias=True):
         super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias)
+
 
 class BidirLSTMLayer(_BidirRNNLayer):
     def __init__(self, indim, outdim, use_bias=True):

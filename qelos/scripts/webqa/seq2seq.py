@@ -17,6 +17,7 @@ def run(lr=0.1,
         epochs=100,
         wreg=1e-6,
         lossmode="nll",      # "nll" or "rank"
+        lossmargin=0.1,
         dropout=0.1,
         glovedim=50,
         encdim=100,
@@ -155,7 +156,7 @@ def run(lr=0.1,
     if lossmode == "nll":
         mainloss = q.SeqCrossEntropyLoss(ignore_index=0)
     elif lossmode == "rank":
-        mainloss = q.SeqRankingLoss(ignore_index=0, margin=0.1, negmode="negall")
+        mainloss = q.SeqRankingLoss(ignore_index=0, margin=lossmargin, negmode="negall")
     lt = lambda a: (a[0], {"mask": a[2]})
     losses = q.lossarray((mainloss, lt),
                          (q.SeqAccuracy(ignore_index=0), lt),
