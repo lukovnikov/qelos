@@ -220,10 +220,10 @@ class RNUBase(RecStateful):
                 self._init_states.append(None)
             i += 1
 
-    def forward(self, x_t, t=None, mask_t=None):
+    def forward(self, x_t, t=None, mask_t=None, **kw):
         batsize = x_t.size(0)
         states = self.get_states(batsize)
-        ret = self._forward(x_t, *states, t=t)
+        ret = self._forward(x_t, *states, t=t, **kw)
         y_t = ret[0]
         newstates = ret[1:]
         st = []
@@ -391,7 +391,7 @@ class GRUCell(RNUBase):
     def state_spec(self):
         return self.outdim,
 
-    def _forward(self, x_t, h_tm1, t=None):      # (batsize, indim), (batsize, outdim)
+    def _forward(self, x_t, h_tm1, t=None, **kw):      # (batsize, indim), (batsize, outdim)
         if self.dropout_in:
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
@@ -500,6 +500,18 @@ class LSTMCell(GRUCell):
             c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
             y_t = torch.mul(1 - self.shared_zoneouter[1], y_tm1) + torch.mul(self.shared_zoneouter[1], y_t)
         return y_t, c_t, y_t
+
+
+class CatLSTMCell(LSTMCell):
+    @property
+    def state_spec(self):
+        return self.outdim * 2,
+
+    def _forward(self, x_t, h_tm1, t=None, **kw):
+        c_tm1, y_tm1 = torch.chunk(h_tm1, 2, 1)
+        _, c_t, y_t = super(CatLSTMCell, self)._forward(x_t, c_tm1, y_tm1, t=t, **kw)
+        h_t = torch.cat([c_t, y_t], 1)
+        return y_t, h_t
 
 
 class _SRUCell(nn.Module):

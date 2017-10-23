@@ -1,6 +1,8 @@
 from unittest import TestCase
 import qelos as q
 import numpy as np
+from qelos.furnn import TwoStackCell
+import torch
 
 
 class TestMemGRUCell(TestCase):
@@ -10,3 +12,41 @@ class TestMemGRUCell(TestCase):
 
         y = m(x)
         self.assertEqual(y.size(), (2, 5, 4))
+
+
+class TestTwoStackCell(TestCase):
+    def test_it_gru(self):
+        batsize = 5
+        indim = 10
+        outdim = 16
+        x = q.var(torch.randn((batsize, indim))).v
+        ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
+        innercell = q.GRUCell(indim, outdim)
+        cell = TwoStackCell(innercell)
+
+        y = cell(x, ctrl_tm1=ctrl)
+        pass
+
+    def test_it_catlstm(self):
+        batsize = 5
+        indim = 10
+        outdim = 16
+        x = q.var(torch.randn((batsize, indim))).v
+        ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
+        innercell = q.CatLSTMCell(indim, outdim)
+        cell = TwoStackCell(innercell)
+
+        y = cell(x, ctrl_tm1=ctrl)
+        pass
+
+    def test_it_dual_catlstm(self):
+        batsize = 5
+        indim = 10
+        outdim = 8
+        x = q.var(torch.randn((batsize, indim))).v
+        ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
+        innercell = (q.CatLSTMCell(indim, outdim), q.CatLSTMCell(indim, outdim))
+        cell = TwoStackCell(innercell)
+
+        y = cell(x, ctrl_tm1=ctrl)
+        pass

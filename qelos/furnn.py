@@ -115,7 +115,6 @@ class SimpleDGTN(nn.Module):
         # return outptr
 
 
-
 class SimpleDGTNDenseStart(nn.Module):
     """ Single-hop hop-only DGTN """
 
@@ -242,3 +241,126 @@ class SimpleDGTNSparse(nn.Module):
         z = torch.cat(tocat, 1)
 
         return z
+
+
+class TwoStackCell(RNUBase):
+    """ works with two or one single-state cells (GRU or CatLSTM) """
+    def __init__(self, cell, init_fraternal_to_ancestor=True, **kw):
+        super(TwoStackCell, self).__init__(**kw)
+        self.ance_stacks = None
+        self.frat_stacks = None   # per-example stacks?
+
+        self.init_fraternal_to_ancestor = init_fraternal_to_ancestor
+
+        if isinstance(cell, tuple):     # dual cell
+            assert(len(cell) == 2)
+            cells = cell
+        else:
+            cells = (cell,)
+        self.cells = q.ModuleList(list(cells))
+
+    @property
+    def state_spec(self):
+        if len(self.cells) == 1:
+            return self.cells[0].outdim // 2, self.cells[0].outdim // 2
+        else:
+            return self.cells[0].outdim, self.cells[1].outdim
+
+    def reset_state(self):
+        super(TwoStackCell, self).reset_state()
+        for cell in self.cells:
+            cell.reset_state()
+        self.ance_stacks = None
+        self.frat_stacks = None
+
+    def set_stack_states(self, anc_state, frat_state):    # push states
+        l = torch.split(anc_state, 1, 0)
+        if self.ance_stacks is None:
+            self.ance_stacks = tuple([[le] for le in l])
+        else:
+            pass        # running state mgmt already done in forward
+            raise q.SumTingWongException("states already set")
+            # for le, ance_stack in zip(l, self.ance_stacks):
+            #     ance_stack.append(le)
+        l = torch.split(frat_state, 1, 0)
+        if self.frat_stacks is None:
+            self.frat_stacks = tuple([[le] for le in l])
+        else:
+            pass        # running state mgmt already done in forward
+            # for le, frat_stack in zip(l, self.frat_stacks):
+            #     frat_stack.append(le)
+
+    def init_stacks_from_cells(self, batsize):
+        if len(self.cells) == 2:
+            ance_state = self.cells[0].get_states(batsize)[0]
+            frat_state = self.cells[1].get_states(batsize)[0]
+        else:
+            all_state = self.cells[0].get_states(batsize)[0]
+            ac, fc, ay, fy = torch.chunk(all_state, 4, 1)
+            ance_state, frat_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
+        if self.init_fraternal_to_ancestor:
+            frat_state = ance_state
+        self.set_stack_states(ance_state, frat_state)
+
+    def get_stack_states(self):
+        l = [ance_stack[-1] for ance_stack in self.ance_stacks]
+        ance_state = torch.cat(l, 0)
+        l = [frat_stack[-1] for frat_stack in self.frat_stacks]
+        frat_state = torch.cat(l, 0)
+        return ance_state, frat_state
+
+    def _forward(self, x_t, ha_tm1, hf_tm1, t=None, ctrl_tm1=None, **kw):
+        batsize = x_t.size(0)
+        if self.ance_stacks is None:
+            self.init_stacks_from_cells(batsize)
+            ha_tm1, hf_tm1 = self.get_stack_states()
+            # if TwoStackCell wasn't initialized, use (auto-)init from cell(s)
+
+        ance_stacks_top = torch.split(ha_tm1, 1, 0)
+        frat_stacks_top = torch.split(hf_tm1, 1, 0)
+
+        # depending on ctrl action decided in previous time step, manage stacks
+        for i in range(ctrl_tm1.size(0)):       # ctrl_tm1 must be (batsize,) int
+            ctrl = ctrl_tm1.data[i]
+            if ctrl == 0 or ctrl == 4:               # INIT / TERM
+                pass
+            elif ctrl == 1:               # GO DOWN
+                # update frat
+                self.frat_stacks[i][-1] = frat_stacks_top[i]
+                # push zero frat
+                if not self.init_fraternal_to_ancestor:
+                    zerofrat = q.var(torch.zeros(frat_stacks_top[i].size())).cuda(x_t).v
+                else:
+                    zerofrat = ance_stacks_top[i]
+                self.frat_stacks[i].append(zerofrat)
+                # push anc
+                self.ance_stacks[i].append(ance_stacks_top[i])
+            elif ctrl == 2:               # GO RIGHT
+                # update frat
+                self.frat_stacks[i][-1] = frat_stacks_top[i]
+                # keep anc
+                pass
+            elif ctrl == 3:               # GO UP
+                # pop frat and anc
+                self.ance_stacks[i].pop()
+                self.frat_stacks[i].pop()
+
+        # make an update
+        stack_states = self.get_stack_states()
+        if len(self.cells) == 2:
+            ance_cell_out, ance_cell_state = self.cells[0]._forward(x_t, stack_states[0], t=t, **kw)
+            frat_cell_out, frat_cell_state = self.cells[1]._forward(x_t, stack_states[1], t=t, **kw)
+            cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
+        else:
+            ac, ay, fc, fy = torch.chunk(stack_states[0], 2, 1) + torch.chunk(stack_states[1], 2, 1)
+            inp_states = torch.cat([ac, fc, ay, fy], 1)
+            cell_out, cell_state = self.cells[0]._forward(x_t, inp_states, t=t, **kw)
+            ac, fc, ay, fy = torch.chunk(cell_state, 4, 1)
+            ance_cell_state, frat_cell_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
+        return cell_out, ance_cell_state, frat_cell_state
+
+
+
+
+
+
