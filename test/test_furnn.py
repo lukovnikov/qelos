@@ -21,7 +21,7 @@ class TestTwoStackCell(TestCase):
         outdim = 16
         x = q.var(torch.randn((batsize, indim))).v
         ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
-        innercell = q.GRUCell(indim, outdim)
+        innercell = q.RecStack(q.GRUCell(indim, outdim))
         cell = TwoStackCell(innercell)
 
         y = cell(x, ctrl_tm1=ctrl)
@@ -33,7 +33,7 @@ class TestTwoStackCell(TestCase):
         outdim = 16
         x = q.var(torch.randn((batsize, indim))).v
         ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
-        innercell = q.CatLSTMCell(indim, outdim)
+        innercell = q.RecStack(q.CatLSTMCell(indim, outdim))
         cell = TwoStackCell(innercell)
 
         y = cell(x, ctrl_tm1=ctrl)
@@ -45,7 +45,8 @@ class TestTwoStackCell(TestCase):
         outdim = 8
         x = q.var(torch.randn((batsize, indim))).v
         ctrl = q.var(np.random.randint(0, 3, (batsize,))).v
-        innercell = (q.CatLSTMCell(indim, outdim), q.CatLSTMCell(indim, outdim))
+        innercell = (q.RecStack(q.CatLSTMCell(indim, outdim)),
+                     q.RecStack(q.CatLSTMCell(indim, outdim)))
         cell = TwoStackCell(innercell)
 
         y = cell(x, ctrl_tm1=ctrl)

@@ -38,6 +38,7 @@ def run(lr=0.1,
         onlycorechain=False,
         debug=False,
         validontest=False,
+        trainvntmode="default",     # "default", "allrels"
         ):
     if debug:
         onlycorechain = True
@@ -45,6 +46,7 @@ def run(lr=0.1,
         epochs = 10
         log = False
         lossmode = "rank"
+        trainvntmode = "allrels"
     localvars = locals()
     savesettings = "celltype allgiven entityfilter onlycorechain glovedim encdim decdim attmode gradnorm dropout merge_mode batsize epochs rel_which decsplit".split()
     savesettings = OrderedDict({k: localvars[k] for k in savesettings})
@@ -115,6 +117,12 @@ def run(lr=0.1,
         valid_questions, test_questions = test_questions, test_questions
         valid_queries, test_queries = test_queries, test_queries
         valid_vnt, test_vnt = test_vnt, test_vnt
+
+    if trainvntmode == "allrels":       # change training vnt to accept all relations
+        if train_vnt[0, 0, 1] > 1:
+            raise q.SumTingWongException("trainvntmode {} not supported for batched sparse vnts".format(trainvntmode))
+        else:
+            allrelids = [tgt_emb.D[k] for k in tgt_emb.D if k[0] == ":"]
 
 
     for k, v in query_sm.D.items():

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from qelos.rnn import GRUCell, Recurrent, Reccable, RNUBase
+from qelos.rnn import GRUCell, Recurrent, Reccable, RNUBase, RecStateful, RecStatefulContainer
 from qelos.qutils import name2fn
 from qelos.basic import Forward
 import qelos as q
@@ -243,21 +243,38 @@ class SimpleDGTNSparse(nn.Module):
         return z
 
 
-class TwoStackCell(RNUBase):
+class TwoStackCell(RecStatefulContainer):
     """ works with two or one single-state cells (GRU or CatLSTM) """
-    def __init__(self, cell, init_fraternal_to_ancestor=True, **kw):
+    def __init__(self, emb, cell, init_fraternal_to_ancestor=True, **kw):
         super(TwoStackCell, self).__init__(**kw)
+        # stacks are lists (per example) of tuples (per state) of vars (states)
         self.ance_stacks = None
         self.frat_stacks = None   # per-example stacks?
+        self.ance_sym_stacks = None
+        self.frat_sym_stacks = None
+        self.frat_ctrl_stack = None        # per-example ctrl stacks
 
         self.init_fraternal_to_ancestor = init_fraternal_to_ancestor
 
-        if isinstance(cell, tuple):     # dual cell
+        if isinstance(cell, tuple):     # dual cell, cell contains recstacks
             assert(len(cell) == 2)
             cells = cell
         else:
             cells = (cell,)
+
         self.cells = q.ModuleList(list(cells))
+
+        if isinstance(emb, tuple):
+            assert(len(emb) == 2)
+            self.ancemb = emb[0]
+            self.fratemb = emb[1]
+        else:
+            self.ancemb = emb
+            self.fratemb = emb
+
+        fratstartsym = self.fratemb.D["<START>"]
+        self.y_f_0 = q.val(torch.LongTensor(1,)).v
+        self.y_f_0.data.fill_(fratstartsym)
 
     @property
     def state_spec(self):
@@ -267,97 +284,158 @@ class TwoStackCell(RNUBase):
             return self.cells[0].outdim, self.cells[1].outdim
 
     def reset_state(self):
-        super(TwoStackCell, self).reset_state()
         for cell in self.cells:
             cell.reset_state()
         self.ance_stacks = None
         self.frat_stacks = None
+        self.ctrl_stack = None
 
-    def set_stack_states(self, anc_state, frat_state):    # push states
-        l = torch.split(anc_state, 1, 0)
-        if self.ance_stacks is None:
-            self.ance_stacks = tuple([[le] for le in l])
+    def get_states_from_cells(self, batsize):
+        if len(self.cells) == 2:
+            ance_states = self.cells[0].get_states(batsize)
+            frat_states = self.cells[1].get_states(batsize)
         else:
-            pass        # running state mgmt already done in forward
-            raise q.SumTingWongException("states already set")
-            # for le, ance_stack in zip(l, self.ance_stacks):
-            #     ance_stack.append(le)
-        l = torch.split(frat_state, 1, 0)
-        if self.frat_stacks is None:
-            self.frat_stacks = tuple([[le] for le in l])
+            ance_states, frat_states = [], []
+            all_states = self.cells[0].get_states(batsize)
+            for all_state in all_states:
+                ac, fc, ay, fy = torch.chunk(all_state, 4, 1)
+                ance_state, frat_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
+                ance_states.append(ance_state)
+                frat_states.append(frat_state)
+            ance_states, frat_states = tuple(ance_states), tuple(frat_states)
+        return ance_states, frat_states
+
+    def set_states_of_cells(self, ance_states, frat_states):
+        if len(self.cells) == 2:
+            self.cells[0].set_states(*ance_states)
+            self.cells[1].set_states(*frat_states)
         else:
-            pass        # running state mgmt already done in forward
-            # for le, frat_stack in zip(l, self.frat_stacks):
-            #     frat_stack.append(le)
+            inp_states = []
+            for ance_state, frat_state in zip(ance_states, frat_states):
+                ac, ay, fc, fy = torch.chunk(ance_state, 2, 1) + torch.chunk(frat_state, 2, 1)
+                inp_state = torch.cat([ac, fc, ay, fy], 1)
+                inp_states.append(inp_state)
+            self.cells[0].set_states(*inp_states)
 
     def init_stacks_from_cells(self, batsize):
-        if len(self.cells) == 2:
-            ance_state = self.cells[0].get_states(batsize)[0]
-            frat_state = self.cells[1].get_states(batsize)[0]
-        else:
-            all_state = self.cells[0].get_states(batsize)[0]
-            ac, fc, ay, fy = torch.chunk(all_state, 4, 1)
-            ance_state, frat_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
+        ance_states, frat_states = self.get_states_from_cells(batsize)
         if self.init_fraternal_to_ancestor:
-            frat_state = ance_state
-        self.set_stack_states(ance_state, frat_state)
+            frat_states = ance_states
+        self.set_stack_states(ance_states, frat_states)
+
+    @property
+    def initialized(self):
+        return self.ance_stacks is not None
+
+    def init_all(self, batsize):
+        self.ance_stacks = tuple([[] for _ in range(batsize)])
+        self.frat_stacks = tuple([[] for _ in range(batsize)])
+        self.ance_sym_stacks = tuple([[] for _ in range(batsize)])
+        self.frat_sym_stacks = tuple([[] for _ in range(batsize)])
+        self.frat_ctrl_stack = tuple([[] for _ in range(batsize)])
 
     def get_stack_states(self):
-        l = [ance_stack[-1] for ance_stack in self.ance_stacks]
-        ance_state = torch.cat(l, 0)
-        l = [frat_stack[-1] for frat_stack in self.frat_stacks]
-        frat_state = torch.cat(l, 0)
-        return ance_state, frat_state
+        ance_states = [ance_stack[-1] for ance_stack in self.ance_stacks]
+        ance_states = zip(*ance_states)
+        ance_states = [torch.cat(l, 0) for l in ance_states]
+        frat_states = [frat_stack[-1] for frat_stack in self.frat_stacks]
+        frat_states = zip(*frat_states)
+        frat_states = [torch.cat(l, 0) for l in frat_states]
+        return ance_states, frat_states
 
-    def _forward(self, x_t, ha_tm1, hf_tm1, t=None, ctrl_tm1=None, **kw):
-        batsize = x_t.size(0)
+    def get_stack_syms(self):
+        y_a_tm1 = [ance_sym_stack[-1] for ance_sym_stack in self.ance_sym_stacks]
+        y_a_tm1 = torch.cat(y_a_tm1, 0)
+        y_f_tm1 = [frat_sym_stack[-1] for frat_sym_stack in self.frat_sym_stacks]
+        y_f_tm1 = torch.cat(y_f_tm1, 0)
+        return y_a_tm1, y_f_tm1
+
+    def set_stack_states(self, anc_states, frat_states):  # tuples of states
+        anc_split_states = [torch.split(anc_state, 1, 0) for anc_state in anc_states]
+        anc_split_states = zip(*anc_split_states)
         if self.ance_stacks is None:
-            self.init_stacks_from_cells(batsize)
-            ha_tm1, hf_tm1 = self.get_stack_states()
-            # if TwoStackCell wasn't initialized, use (auto-)init from cell(s)
+            self.ance_stacks = tuple([[le] for le in anc_split_states])
+        else:
+            pass
+            raise q.SumTingWongException("states already set")
+        frat_split_states = [torch.split(frat_state, 1, 0) for frat_state in frat_states]
+        frat_split_states = zip(*frat_split_states)
+        if self.frat_stacks is None:
+            self.frat_stacks = tuple([[le] for le in frat_split_states])
+        else:
+            pass
 
-        ance_stacks_top = torch.split(ha_tm1, 1, 0)
-        frat_stacks_top = torch.split(hf_tm1, 1, 0)
+    def forward(self, y_tm1, ctrl_tm1, extravec_t=None, t=None, **kw):
+        batsize = y_tm1.size(0)
 
-        # depending on ctrl action decided in previous time step, manage stacks
-        for i in range(ctrl_tm1.size(0)):       # ctrl_tm1 must be (batsize,) int
+        ha_tm1, hf_tm1 = self.get_states_from_cells(batsize)
+
+        if self.not_initialized is None:
+            self.init_all(batsize)
+            # self.set_stack_states(ha_tm1, hf_tm1)
+
+        ha_tm1 = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
+        hf_tm1 = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
+
+        # region 1. get inputs for update
+        for i in range(ctrl_tm1.size(0)):
             ctrl = ctrl_tm1.data[i]
-            if ctrl == 0 or ctrl == 4:               # INIT / TERM
-                pass
-            elif ctrl == 1:               # GO DOWN
-                # update frat
-                self.frat_stacks[i][-1] = frat_stacks_top[i]
-                # push zero frat
+            if ctrl == 1 or ctrl == 3:       # has children, has siblings
+                # push ancestral stacks
+                self.ance_sym_stacks[i].append(y_tm1[i])
+                self.ance_stacks[i].append(ha_tm1[i])
+                # update frat and control
+                if len(self.frat_stacks[i]) > 0:
+                    self.frat_sym_stacks[i][-1] = y_tm1[i]
+                    self.frat_stacks[i][-1] = hf_tm1[i]
+                    self.frat_ctrl_stack[i][-1] = ctrl
+                # push frat control
+                self.frat_ctrl_stack[i].append(None)
+                # push init frat
+                self.frat_sym_stacks[i].append(self.y_f_0)
                 if not self.init_fraternal_to_ancestor:
-                    zerofrat = q.var(torch.zeros(frat_stacks_top[i].size())).cuda(x_t).v
+                    zerofrat = [q.var(torch.zeros(frat_stacks_top_i_e.size())).cuda(frat_stacks_top_i_e).v
+                                for frat_stacks_top_i_e in hf_tm1[i]]
                 else:
-                    zerofrat = ance_stacks_top[i]
+                    zerofrat = ha_tm1[i]
                 self.frat_stacks[i].append(zerofrat)
-                # push anc
-                self.ance_stacks[i].append(ance_stacks_top[i])
-            elif ctrl == 2:               # GO RIGHT
-                # update frat
-                self.frat_stacks[i][-1] = frat_stacks_top[i]
-                # keep anc
+            elif ctrl == 2:     # no children, has siblings
+                # keep ancestral stacks
                 pass
-            elif ctrl == 3:               # GO UP
-                # pop frat and anc
-                self.ance_stacks[i].pop()
-                self.frat_stacks[i].pop()
+                # update fraternal stacks
+                self.frat_stacks[i][-1] = hf_tm1[i]
+                self.frat_sym_stacks[i][-1] = y_tm1[i]
+                # update ctrl stack
+                self.frat_ctrl_stack[i][-1] = ctrl
+            elif ctrl == 4:     # no children, no siblings
+                # pop all stacks until something with siblings or empty
+                while True:
+                    self.ance_stacks[i].pop()
+                    self.frat_stacks[i].pop()
+                    self.ance_sym_stacks[i].pop()
+                    self.frat_sym_stacks[i].pop()
+                    self.frat_ctrl_stack[i].pop()
+                    if self.frat_ctrl_stack[i][-1] in (1, 2) or len(self.frat_ctrl_stack[i]) == 0:
+                        break
+
 
         # make an update
-        stack_states = self.get_stack_states()
+        ance_states, frat_states = self.get_stack_states()
+        self.set_states_of_cells(ance_states, frat_states)
+
+        y_a_tm1, y_f_tm1 = self.get_stack_syms()
+        y_a_tm1_emb, y_f_tm1_emb = self.ancemb(y_a_tm1), self.fratemb(y_f_tm1)
+        tocat = [y_a_tm1_emb, y_f_tm1_emb]
+        tocat = tocat + [extravec_t] if extravec_t is not None else tocat
+        x_t = torch.cat(tocat, 1)
+
         if len(self.cells) == 2:
-            ance_cell_out, ance_cell_state = self.cells[0]._forward(x_t, stack_states[0], t=t, **kw)
-            frat_cell_out, frat_cell_state = self.cells[1]._forward(x_t, stack_states[1], t=t, **kw)
+            ance_cell_out = self.cells[0].forward(x_t, t=t, **kw)
+            frat_cell_out = self.cells[1].forward(x_t, t=t, **kw)
             cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
         else:
-            ac, ay, fc, fy = torch.chunk(stack_states[0], 2, 1) + torch.chunk(stack_states[1], 2, 1)
-            inp_states = torch.cat([ac, fc, ay, fy], 1)
-            cell_out, cell_state = self.cells[0]._forward(x_t, inp_states, t=t, **kw)
-            ac, fc, ay, fy = torch.chunk(cell_state, 4, 1)
-            ance_cell_state, frat_cell_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
-        return cell_out, ance_cell_state, frat_cell_state
+            cell_out = self.cells[0].forward(x_t, t=t, **kw)
+        return cell_out
 
 
 
