@@ -9,7 +9,7 @@ from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, RankingLoss, Se
 
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
     AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder, \
-    HierarchicalAttentionDecoderCell
+    HierarchicalAttentionDecoderCell, ModularDecoderCell
 
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     CosineDistance, DotDistance, Forward, ForwardDistance, \
@@ -45,4 +45,4 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     save_sparse_tensor, load_sparse_tensor, makeiter
 
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
-    params_of, batchablesparse2densemask
+    params_of, batchablesparse2densemask, rec_clone

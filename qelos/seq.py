@@ -128,6 +128,7 @@ class Decoder(nn.Module):
         self.reset_state()
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
+        self.block.initialize(*x, **kw)
         new_init_states = self._compute_init_states(*x, **kw)
         if new_init_states is not None:
             if not issequence(new_init_states):
@@ -374,6 +375,9 @@ class DecoderCell(RecStatefulContainer):
         """ Makes a decoder from this decoder cell """
         return Decoder(self)
 
+    def initialize(self, *x, **kw):
+        pass
+
 
 class ContextDecoderCell(DecoderCell):
     """ static context decoding cell """
@@ -419,6 +423,7 @@ class AttentionDecoderCell(DecoderCell):
     """
     Recurrence of decoder with attention    # TODO
     """
+
     def __init__(self, attention=None,
                  embedder=None,
                  core=None,
@@ -715,5 +720,107 @@ class HierarchicalAttentionDecoderCell(AttentionDecoderCell):
         return outstates
 
 
+class ModularDecoderCell(DecoderCell):
+    """
+    ModularDecoderCell contains core module and top module.
+    Core module takes input as given to ModularDecoderCell and saved top2core_t.
+    Top module takes the output from core module and returns output for a timestep and optional new values for top2core_t.
+    """
+    def __init__(self, core, top, **kw):
+        """
+        :param core: core recurrent module, gets a number of inputs at each timestep, updates its states, outputs one vector at each timestep
+        :param top: top module implementing at least smo, optionally attention
+        :param kw:
+        """
+        super(ModularDecoderCell, self).__init__(core, **kw)
+        self.decoder_top = top
+        self.top2core_t = None
+
+    def initialize(self, *x, **kw):
+        """ called at every call to Decoder's forward() """
+        # initialize stored top2core
+        self.top2core_t = None
+        if "top2core_0" in kw:
+            self.top2core_t = kw["top2core_0"]
+
+        # initialize decoder top
+        topkw = {}
+        toparg = []
+        if "ctx" in kw:
+            toparg += [kw["ctx"]]
+            if "ctxmask" in kw:
+                topkw["ctxmask"] = kw["ctxmask"]
+        if hasattr(self.decoder_top, "set_ctx"):
+            self.decoder_top.set_ctx(*toparg, **topkw)
+        else:
+            assert(len(topkw) == 0 and len(toparg) == 0)
+
+        # initialize core states
+        new_init_states = self._compute_init_states(*x, **kw)
+        if new_init_states is not None:
+            if not issequence(new_init_states):
+                new_init_states = (new_init_states,)
+            self.set_init_states(*new_init_states)
+
+    def forward(self, *x, **kw):
+        # get args and kwargs for core
+        if self.top2core_t is not None:
+            if isinstance(self.top2core_t, tuple):
+                assert(len(self.top2core_t) == 2)
+                x = x + (self.top2core_t[0],)
+                kwupd = self.top2core_t[1]
+            elif isinstance(self.top2core_t, dict):
+                kwupd = self.top2core_t
+            else:
+                kwupd = {"ctx_t": self.top2core_t}
+            _kw = {}
+            _kw.update(kw)
+            _kw.update(kwupd)
+            kw = _kw
+        # perform core forward
+        coreout = self.core(*x, **kw)
+        # routing core forward outputs
+        if isinstance(coreout, tuple):
+            assert(len(coreout) == 2)
+            coreout_arg = coreout[0]
+            coreout_kw = coreout[1]
+        else:
+            coreout_arg = [coreout]
+            coreout_kw = {}
+        # perform top forward
+        topout = self.decoder_top(*coreout_arg, **coreout_kw)
+        if isinstance(topout, tuple):
+            assert(len(topout) == 2)
+            y_t, top2core_tp1 = topout[0], topout[1]
+        else:
+            y_t, top2core_tp1 = topout, None
+        # save top forward
+        self.top2core_t = top2core_tp1
+        # return top output
+        return y_t
+
+    def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
+        outargs = tuple([xi[:, t] for xi in x])
+        outkwargs = {"t": t}
+        if "outmask" in xkw:  # slice out the time from outmask
+            outmask = xkw["outmask"]
+            if outmask.dim() == 1:  # get mask from data stored on this object
+                assert (self._sparse_outmask is not None)
+                outmaskaddrs = list(outmask.cpu().data.numpy())
+                sparse_outmask_t = [self._sparse_outmask[a][t] for a in outmaskaddrs]
+                sparse_outmask_t = [torch.from_numpy(a.todense()).t() for a in sparse_outmask_t]
+                sparse_outmask_t = torch.cat(sparse_outmask_t, 0)
+                outmask_t = var(sparse_outmask_t).cuda(outmask).v
+            elif outmask.data[0, 0, 1] > 1:  # batchable sparse
+                vocsize = outmask.data[0, 0, 1]
+                outmask_t = var(torch.ByteTensor(outmask.size(0), vocsize + 1)).cuda(outmask).v
+                outmask_t.data.fill_(0)
+                outmask_t.data.scatter_(1, outmask.data[:, t, 2:], 1)
+                outmask_t.data = outmask_t.data[:, 1:]
+                # outmask_t = var(outmask_t).cuda(outmask).v
+            else:
+                outmask_t = outmask[:, t]
+            outkwargs["outmask_t"] = outmask_t
+        return outargs, outkwargs
 
 

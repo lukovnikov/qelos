@@ -100,3 +100,36 @@ def test_batchablesparse2densemask(bs, outmask):
                 npoutmask[i, k-1] = 1
     assert(np.all(npoutmask == outmask))
 
+
+import copy
+
+
+def rec_clone(x):
+    if isinstance(x, list):
+        ret = copy.copy(x)
+        for i in range(len(ret)):
+            ret[i] = rec_clone(ret[i])
+    elif isinstance(x, dict):
+        ret = copy.copy(x)
+        for k, v in ret.items():
+            ret[k] = rec_clone(v)
+    elif isinstance(x, set):
+        ret = copy.copy(x)
+        retelems = copy.copy(ret)
+        ret.clear()
+        for retelem in retelems:
+            ret.add(rec_clone(retelem))
+    elif isinstance(x, tuple):
+        ret = tuple()
+        for retelem in x:
+            ret += (rec_clone(retelem),)
+    elif isinstance(x, torch.autograd.Variable):
+        ret = q.var(rec_clone(x.data)).v
+    elif isinstance(x, torch.Tensor):
+        ret = x.clone()
+    elif isinstance(x, np.ndarray):
+        ret = x.copy()
+    else:
+        raise q.SumTingWongException("not supported type: {}".format(type(x)))
+    return ret
+
