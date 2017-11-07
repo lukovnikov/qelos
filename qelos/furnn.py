@@ -246,7 +246,7 @@ class SimpleDGTNSparse(nn.Module):
 class TwoStackCell(RecStatefulContainer):
     """ works with two or one single-state cells (GRU or CatLSTM) """
     def __init__(self, emb, cell, frat_init="zero",
-                 cell_inp_router=lambda *x: torch.cat([xe for xe in x if xe is not None], 1),
+                 cell_inp_router_mode="default",
                  **kw):
         super(TwoStackCell, self).__init__(**kw)
         # stacks are lists (per example) of tuples (per state) of vars (states)
@@ -271,8 +271,10 @@ class TwoStackCell(RecStatefulContainer):
         if isinstance(cell, tuple):     # dual cell, cell contains recstacks
             assert(len(cell) == 2)
             cells = cell
+            cell_inp_router_mode = "separated" if cell_inp_router_mode == "default" else cell_inp_router_mode
         else:
             cells = (cell,)
+            cell_inp_router_mode = "joined" if cell_inp_router_mode == "default" else cell_inp_router_mode
 
         self.cells = q.ModuleList(list(cells))
 
@@ -287,6 +289,25 @@ class TwoStackCell(RecStatefulContainer):
         fratstartsym = self.fratemb.D["<START>"]
         self.y_f_0 = q.val(torch.LongTensor(1,)).v
         self.y_f_0.data.fill_(fratstartsym)
+
+        def cell_inp_router(a, b, ctx):
+            if cell_inp_router_mode == "joined":
+                tocat = [a, b]
+                if q.issequence(ctx):
+                    tocat += list(ctx)
+                else:
+                    tocat += [ctx]
+                return torch.cat([xe for xe in tocat if xe is not None], 1)
+            elif cell_inp_router_mode == "separated":
+                tocat_anc, tocat_frat = [a], [b]
+                if q.issequence(ctx):
+                    tocat_anc += [ctx[0]]
+                    tocat_frat += [ctx[1]]
+                else:
+                    tocat_anc += [ctx]
+                    tocat_frat += [ctx]
+                return torch.cat([xe for xe in tocat_anc if xe is not None], 1), \
+                       torch.cat([xe for xe in tocat_frat if xe is not None], 1)
 
         self.cell_inp_router = cell_inp_router
 
@@ -307,6 +328,15 @@ class TwoStackCell(RecStatefulContainer):
         self.frat_zero_stack_elem = None
         self.ance_sym_stacks = None
         self.frat_sym_stacks = None
+
+    def set_init_states(self, *states):
+        if len(self.cells) == 1:
+            self.cells[0].set_init_states(*states)
+        else:   # ancestral first
+            anc_states = states[:self.cells[0].numstates]
+            frat_states = states[self.cells[0].numstates:]
+            self.cells[0].set_init_states(*anc_states)
+            self.cells[1].set_init_states(*frat_states)
 
     def get_states_from_cells(self, batsize):
         if len(self.cells) == 2:
@@ -397,7 +427,7 @@ class TwoStackCell(RecStatefulContainer):
         else:
             pass
 
-    def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, **kw):
+    def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
         batsize = y_tm1.size(0)
 
         ha_tm1, hf_tm1 = self.get_states_from_cells(batsize)
@@ -463,14 +493,19 @@ class TwoStackCell(RecStatefulContainer):
         y_f_tm1_emb, _ = self.fratemb(y_f_tm1)
 
         if len(self.cells) == 2:
-            x_a_t, x_f_t = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            cellinprouterout = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            if len(cellinprouterout) == 2:
+                x_a_t, x_f_t = cellinprouterout
+            else:
+                x_a_t, x_f_t = cellinprouterout, cellinprouterout
             ance_cell_out = self.cells[0].forward(x_a_t, t=t, **kw)
             frat_cell_out = self.cells[1].forward(x_f_t, t=t, **kw)
-            cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
+            # cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
+            cell_out = q.intercat([ance_cell_out, frat_cell_out])   # in case split attention is used later
         else:
             x_t = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
             cell_out = self.cells[0].forward(x_t, t=t, **kw)
-        return cell_out
+        return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
 

@@ -1,9 +1,9 @@
 import torch
 from torch import nn
-from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda
+from qelos.basic import DotDistance, CosineDistance, ForwardDistance, BilinearDistance, TrilinearDistance, Softmax, Lambda, Stack
 from qelos.rnn import RecStack, Reccable, RecStatefulContainer, RecStateful, RecurrentStack, RecurrentWrapper
-from qelos.util import issequence
-from qelos.qutils import var
+from qelos.util import issequence, getkw
+from qelos.qutils import var, intercat
 
 
 # region attention
@@ -129,11 +129,12 @@ class Decoder(nn.Module):
         batsize = x[0].size(0)
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
         self.block.initialize(*x, **kw)
-        new_init_states = self._compute_init_states(*x, **kw)
-        if new_init_states is not None:
-            if not issequence(new_init_states):
-                new_init_states = (new_init_states,)
-            self.set_init_states(*new_init_states)
+        if not isinstance(self.block, ModularDecoderCell):  # ModularDecoderCell must initialize by itself
+            new_init_states = self._compute_init_states(*x, **kw)
+            if new_init_states is not None:
+                if not issequence(new_init_states):
+                    new_init_states = (new_init_states,)
+                self.set_init_states(*new_init_states)
         y_list = []
         y_t = None
         for t in range(maxtime):
@@ -738,22 +739,25 @@ class ModularDecoderCell(DecoderCell):
 
     def initialize(self, *x, **kw):
         """ called at every call to Decoder's forward() """
+        # initialize decoder top
+        if hasattr(self.decoder_top, "init_ctx_from_decoder_args"):
+            self.decoder_top.init_ctx_from_decoder_args(*x, **kw)
+        elif hasattr(self.decoder_top, "set_ctx"):
+            topkw = {}
+            toparg = []
+            if "ctx" in kw:
+                toparg += [kw["ctx"]]
+                if "ctxmask" in kw:
+                    topkw["ctxmask"] = kw["ctxmask"]
+            self.decoder_top.set_ctx(*toparg, **topkw)
+
         # initialize stored top2core
-        self.top2core_t = None
+        top2core_0 = None
+        if hasattr(self.decoder_top, "get_top2core_0"):
+            top2core_0 = self.decoder_top.get_top2core_0()
+        self.top2core_t = top2core_0
         if "top2core_0" in kw:
             self.top2core_t = kw["top2core_0"]
-
-        # initialize decoder top
-        topkw = {}
-        toparg = []
-        if "ctx" in kw:
-            toparg += [kw["ctx"]]
-            if "ctxmask" in kw:
-                topkw["ctxmask"] = kw["ctxmask"]
-        if hasattr(self.decoder_top, "set_ctx"):
-            self.decoder_top.set_ctx(*toparg, **topkw)
-        else:
-            assert(len(topkw) == 0 and len(toparg) == 0)
 
         # initialize core states
         new_init_states = self._compute_init_states(*x, **kw)
@@ -765,10 +769,13 @@ class ModularDecoderCell(DecoderCell):
     def forward(self, *x, **kw):
         # get args and kwargs for core
         if self.top2core_t is not None:
-            if isinstance(self.top2core_t, tuple):
-                assert(len(self.top2core_t) == 2)
-                x = x + (self.top2core_t[0],)
+            if isinstance(self.top2core_t, tuple) \
+                    and len(self.top2core_t) == 2 \
+                    and isinstance(self.top2core_t[1], dict):
+                x = x + tuple(self.top2core_t[0])
                 kwupd = self.top2core_t[1]
+            elif isinstance(self.top2core_t, (tuple, list)):
+                x = x + tuple(self.top2core_t)
             elif isinstance(self.top2core_t, dict):
                 kwupd = self.top2core_t
             else:
@@ -785,8 +792,11 @@ class ModularDecoderCell(DecoderCell):
             coreout_arg = coreout[0]
             coreout_kw = coreout[1]
         else:
-            coreout_arg = [coreout]
+            coreout_arg = coreout
             coreout_kw = {}
+        assert(isinstance(coreout_kw, dict))
+        if not issequence(coreout_arg):
+            coreout_arg = [coreout_arg]
         # perform top forward
         topout = self.decoder_top(*coreout_arg, **coreout_kw)
         if isinstance(topout, tuple):
@@ -822,5 +832,160 @@ class ModularDecoderCell(DecoderCell):
                 outmask_t = outmask[:, t]
             outkwargs["outmask_t"] = outmask_t
         return outargs, outkwargs
+
+
+# DECODER MODULES #################
+
+class DecoderCore(nn.Module):
+    def __init__(self, emb, *layers, **kw):
+        super(DecoderCore, self).__init__(**kw)
+        self.block = RecStack(*layers)
+        self.emb = emb
+
+    def forward(self, x_t, ctx_t=None, t=None, outmask_t=None, **kw):
+        if self.emb is not None:
+            emb, _ = self.emb(x_t)
+        else:
+            emb = x_t
+        i_t = emb if ctx_t is None else torch.cat([emb, ctx_t], 1)
+        o_t = self.block(i_t)
+        return o_t, {"mask": outmask_t, "t":t, "x_t_emb": emb, "ctx_t": ctx_t}
+
+
+class DecoderTop(nn.Module):
+    """ Decoder Top - default - applies given layers as a stack """
+    def __init__(self, *layers, **kw):
+        super(DecoderTop, self).__init__(**kw)
+        self.layers = Stack(*layers)
+
+    def forward(self, x, **kw):   # x = vector from decoder core
+        out = self.layers(x)
+        return out
+
+
+class ContextDecoderTop(DecoderTop):
+    """ Decoder Top with context """
+    def __init__(self, *layers, **kw):
+        super(ContextDecoderTop, self).__init__(**kw)
+        self.layers = Stack(*layers)
+        self.stored_ctx = None
+
+    def set_ctx(self, *ctx_arg, **ctx_kw):
+        ctx = (ctx_arg, ctx_kw)
+        self.stored_ctx = ctx
+
+    def reset(self):
+        self.stored_ctx = None
+
+    def forward(self, x, **kw):
+        out = self.layers(x)
+        return out, self.stored_ctx
+
+    def get_top2core_0(self):
+        raise NotImplemented()
+
+
+class StaticContextDecoderTop(ContextDecoderTop):
+    """ Decoder Top with static context """
+    def __init__(self, *layers, **kw):
+        self.ctx2inp = getkw(kw, "ctx2inp", False)
+        self.ctx2out = getkw(kw, "ctx2out", True)
+        super(StaticContextDecoderTop, self).__init__(*layers, **kw)
+
+    def set_ctx(self, ctx):     # ctx must be concatenatable to x in forward (along axis 1)
+        self.stored_ctx = ctx
+
+    def forward(self, x, mask=None, **kw):
+        inp = x
+        if self.ctx2inp is True:
+            inp = torch.cat([inp, self.stored_ctx], 1)
+        out = self.layers(inp, mask=mask)
+        if self.ctx2out:
+            return out, self.stored_ctx
+        else:
+            return out
+
+    def get_top2core_0(self):
+        return self.stored_ctx
+
+
+class AttentionContextDecoderTop(ContextDecoderTop):
+    """ Decoder Top with dynamic attention-based context """
+    def __init__(self, attention, *layers, **kw):
+        self.ctx2inp = getkw(kw, "ctx2inp", True)
+        self.ctx2out = getkw(kw, "ctx2out", False)
+        self.inp2inp = getkw(kw, "inp2inp", True)
+        self.att_after_update = getkw(kw, "att_after_update", True)     # false not supported
+        self.split = getkw(kw, "split", False)
+        self.return_out = getkw(kw, "return_out", True)
+        self.return_att = getkw(kw, "return_att", False)
+        self.inpemb2att = getkw(kw, "inpemb2att", False)
+        self.inpemb2inp = getkw(kw, "inpemb2inp", False)
+        self.attention_transform = getkw(kw, "attention_transform", None)
+
+        if self.att_after_update is False:
+            raise NotImplemented("attention before update is not supported yet")
+
+        super(AttentionContextDecoderTop, self).__init__(*layers, **kw)
+
+        self.attention = attention
+
+        if self.split:      # !!! if split, use q.intercat in ctx encoder and core output if they are from separate chunks of networks
+            self.attention.split_data()
+
+    def set_ctx(self, ctx, ctx_0, ctxmask=None):
+        self.stored_ctx = ([ctx, ctx_0], {"ctxmask": ctxmask})
+
+    def init_ctx_from_decoder_args(self, *x, **kw):
+        ctx = kw["ctx"]
+        ctx_0 = kw["ctx_0"]
+        ctxmask = kw["ctxmask"] if "ctxmask" in kw else None
+        self.set_ctx(ctx, ctx_0, ctxmask)
+
+    def get_top2core_0(self):
+        ctx_0 = self.stored_ctx[0][1]
+        if self.split:
+            ctx_0 = ctx_0[:, ctx_0.size(1) // 2:]
+        return ctx_0    # ctx_0 provided in set_ctx()
+
+    def forward(self, core_out, x_t_emb=None, ctx_t=None, mask=None, t=None, **kw):
+        ctx, ctxmask = self.stored_ctx[0][0], self.stored_ctx[1]["ctxmask"]
+
+        # compute new attention
+        gen_vec = core_out
+        if self.split:
+            gen_vec = core_out[:, :core_out.size(1) // 2]
+        if self.inpemb2att:
+            assert(x_t_emb is not None)
+            gen_vec = torch.cat([gen_vec, x_t_emb], 1)
+        if self.attention_transform is not None:
+            gen_vec = self.attention_transform(gen_vec)
+        att_weights_t = self.attention.attgen(ctx, gen_vec, mask=ctxmask)
+        ctx_t = self.attention.attcon(ctx, att_weights_t)
+
+        # execute block
+        cat_to_smo = []
+        o_to_smo = core_out[:, core_out.size(1)//2:] if self.split else core_out
+        if self.inp2inp:    cat_to_smo.append(o_to_smo)
+        if self.ctx2inp:    cat_to_smo.append(ctx_t)
+        if self.inpemb2inp: cat_to_smo.append(x_t_emb)
+        inp_t = torch.cat(cat_to_smo, 1) if len(cat_to_smo) > 1 else cat_to_smo[0]
+        inp_t_kw = {}
+        inp_t_kw.update(kw)
+        if mask is not None:
+            inp_t_kw["mask"] = mask
+
+        y_t = self.layers(inp_t, **inp_t_kw)
+
+        # returns
+        ret = tuple()
+        if self.return_out:
+            ret += (y_t,)
+        if self.return_att:
+            ret += (att_weights_t,)
+
+        return ret, ctx_t
+
+
 
 

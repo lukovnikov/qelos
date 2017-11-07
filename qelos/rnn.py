@@ -214,7 +214,7 @@ class RNUBase(RecStateful):
         i = 0
         for statespec in self.state_spec:
             if i < len(states):
-                assert(statespec == states[i].size(-1))
+                assert(states[i] is None or statespec == states[i].size(-1))
                 self._init_states.append(states[i])
             else:
                 self._init_states.append(None)

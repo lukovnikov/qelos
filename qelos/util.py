@@ -632,3 +632,15 @@ def makeiter(dl, unwrap=True):
             dli = inner()
 
 
+def getkw(kw, name, default=None, nodefault=False, remove=True):
+    if name in kw:
+        ret = kw[name]
+        if remove:
+            del kw[name]
+    else:
+        if nodefault:
+            raise Exception("kwarg {} must be specified (no default)".format(name))
+        ret = default
+    return ret
+
+

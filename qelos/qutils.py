@@ -133,3 +133,14 @@ def rec_clone(x):
         raise q.SumTingWongException("not supported type: {}".format(type(x)))
     return ret
 
+
+def intercat(tensors, axis=-1):
+    if axis != -1 and axis != tensors[0].dim()-1:
+        tensors = [tensor.transpose(axis, -1) for tensor in tensors]
+    t = torch.stack(tensors, -1)
+    t = t.view(t.size()[:-2] + (-1,))
+    if axis != -1 and axis != tensors[0].dim()-1:
+        t = t.transpose(axis, -1)
+    return t
+
+
