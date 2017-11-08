@@ -525,7 +525,7 @@ class DynamicOracleRunner(q.DecoderRunner):
         self.explore = explore
 
     def get_sequence(self):
-        """ get the followed sequence """
+        """ get the chosen sequence """
         ret = torch.stack(self.seqacc, 1)
         return ret
 
@@ -549,18 +549,6 @@ class DynamicOracleRunner(q.DecoderRunner):
                 ymask_np[i, list(validnext)] = 1.
             ymask = q.var(ymask_np).cuda(y_t).v
 
-            # get probs
-            _y_t = y_t + torch.log(ymask)
-            probs = self.scores2probs(_y_t, mask=ymask)
-
-            # sample gold from probs
-            if self.mode == "sample":
-                gold_t = torch.multinomial(probs, 1).squeeze(-1)
-            elif self.mode == "argmax":
-                _, gold_t = torch.max(probs, 1)
-            else:
-                raise q.SumTingWongException()
-
             if self.explore > 0:
                 unmaskedprobs = self.scores2probs(y_t)
                 if self.mode == "sample":
@@ -569,13 +557,31 @@ class DynamicOracleRunner(q.DecoderRunner):
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
                     raise q.SumTingWongException()
-                if self.explore < 1:        # merge
-                    mergemask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
-                    mergeidx = mergemask.long()
-                    a = torch.stack([x_t, gold_t], 1)
-                    x_t = torch.gather(a, 1, mergeidx.unsqueeze(1)).squeeze(-1)
+
+            # get probs
+            _y_t = y_t + torch.log(ymask)
+            goldprobs = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
+
+            # sample gold from probs
+            if self.mode == "sample":
+                gold_t = torch.multinomial(goldprobs, 1).squeeze(-1)
+            elif self.mode == "argmax":
+                _, gold_t = torch.max(goldprobs, 1)
             else:
+                raise q.SumTingWongException()
+
+            if self.explore == 0:
                 x_t = gold_t
+            else:
+                if self.explore < 1:  # mixture
+                    mixmask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
+                    mixidx = mixmask.long()
+                    tomix = torch.stack([x_t, gold_t], 1)
+                    x_t = torch.gather(tomix, 1, mixidx.unsqueeze(1)).squeeze(-1)
+                # if sampled choice is in gold probs, set gold to sampled
+                x_t_in_goldprobs = (torch.gather(ymask, 1, x_t.unsqueeze(1)) > 0).long()
+                tomix = torch.stack([gold_t, x_t], 1)
+                gold_t = torch.gather(tomix, 1, x_t_in_goldprobs).squeeze(-1)
 
             # store sampled
             self.seqacc.append(x_t)

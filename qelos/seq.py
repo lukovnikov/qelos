@@ -814,6 +814,8 @@ class ModularDecoderCell(DecoderCell):
         return y_t
 
 
+### RUNNERS #######################
+
 class DecoderRunner(nn.Module):
     def __init__(self, **kw):
         super(DecoderRunner, self).__init__(**kw)
@@ -853,13 +855,20 @@ class TeacherForcer(DecoderRunner):
 
 class FreeRunner(DecoderRunner):
     """ Basic free runner with argmax """
+    def __init__(self, scores2probs=lambda x: x, **kw):
+        super(FreeRunner, self).__init__(**kw)
+        self.scores2probs = scores2probs
+
     def forward(self, t=None, x=None, xkw=None, y_t=None):
         outkwargs = {"t": t}
         if y_t is None:     # first time step
             assert(t == 0)
             x_t = x
         else:
-            _, x_t = torch.max(y_t, 1)
+            if "outmask" in xkw:
+                raise NotImplemented("outmask not supported in free running mode yet")
+            _y_t = self.scores2probs(y_t)
+            _, x_t = torch.max(_y_t, 1)
         outargs = (x_t,)
         return outargs, outkwargs
 
