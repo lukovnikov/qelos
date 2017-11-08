@@ -126,7 +126,7 @@ class Decoder(nn.Module):
 
     def forward(self, *x, **kw):  # first input must be (batsize, seqlen,...)
         self.reset_state()
-        batsize = x[0].size(0)
+        batsize = x[0].size(0) if "batsize" not in kw else kw["batsize"]
         maxtime = x[0].size(1) if "maxtime" not in kw else kw["maxtime"]
         self.block.initialize(*x, **kw)
         if not isinstance(self.block, ModularDecoderCell):  # ModularDecoderCell must initialize by itself
@@ -354,6 +354,9 @@ class DecoderCell(RecStatefulContainer):
 
     def set_inputs_t_getter(self, callabla):
         self._inputs_t_getter = callabla
+
+    def set_runner(self, runner):
+        self.set_inputs_t_getter(runner)
 
     def _compute_init_states(self, *x, **kw):
         if self._init_state_computer is None:
@@ -736,6 +739,7 @@ class ModularDecoderCell(DecoderCell):
         super(ModularDecoderCell, self).__init__(core, **kw)
         self.decoder_top = top
         self.top2core_t = None
+        self.set_runner(TeacherForcer())        # teacher forcer by default
 
     def initialize(self, *x, **kw):
         """ called at every call to Decoder's forward() """
@@ -809,7 +813,20 @@ class ModularDecoderCell(DecoderCell):
         # return top output
         return y_t
 
-    def get_inputs_t(self, t=None, x=None, xkw=None, y_t=None):
+
+class DecoderRunner(nn.Module):
+    def __init__(self, **kw):
+        super(DecoderRunner, self).__init__(**kw)
+
+    # def __call__(self, t=None, x=None, xkw=None, y_t=None):
+    #     self.forward(t=t, x=x, xkw=xkw, y_t=y_t)
+
+    def forward(self, t=None, x=None, xkw=None, y_t=None):
+        raise NotImplemented("use subclass")
+
+
+class TeacherForcer(DecoderRunner):
+    def forward(self, t=None, x=None, xkw=None, y_t=None):
         outargs = tuple([xi[:, t] for xi in x])
         outkwargs = {"t": t}
         if "outmask" in xkw:  # slice out the time from outmask
@@ -831,6 +848,19 @@ class ModularDecoderCell(DecoderCell):
             else:
                 outmask_t = outmask[:, t]
             outkwargs["outmask_t"] = outmask_t
+        return outargs, outkwargs
+
+
+class FreeRunner(DecoderRunner):
+    """ Basic free runner with argmax """
+    def forward(self, t=None, x=None, xkw=None, y_t=None):
+        outkwargs = {"t": t}
+        if y_t is None:     # first time step
+            assert(t == 0)
+            x_t = x
+        else:
+            _, x_t = torch.max(y_t, 1)
+        outargs = (x_t,)
         return outargs, outkwargs
 
 

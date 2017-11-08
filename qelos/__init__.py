@@ -11,7 +11,7 @@ from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
     AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder, \
     HierarchicalAttentionDecoderCell, ModularDecoderCell, \
     DecoderTop, ContextDecoderTop, StaticContextDecoderTop, AttentionContextDecoderTop, \
-    DecoderCore
+    DecoderCore, FreeRunner, TeacherForcer, DecoderRunner
 
 from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     CosineDistance, DotDistance, Forward, ForwardDistance, \

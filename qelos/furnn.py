@@ -508,6 +508,96 @@ class TwoStackCell(RecStatefulContainer):
         return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
+class DynamicOracleRunner(q.DecoderRunner):
+    def __init__(self, tracker=None,
+                 inparggetter=lambda x: (x,),
+                 scores2probs=q.Softmax(),
+                 mode="sample",  # "sample" or "argmax"
+                 explore=0.,
+                 **kw):
+        super(DynamicOracleRunner, self).__init__(**kw)
+        self.tracker = tracker
+        self.inparggetter = inparggetter
+        self.scores2probs = scores2probs
+        self.seqacc = []
+        self.goldacc = []
+        self.mode = mode
+        self.explore = explore
+
+    def get_sequence(self):
+        """ get the followed sequence """
+        ret = torch.stack(self.seqacc, 1)
+        return ret
+
+    def get_gold_sequence(self):
+        ret = torch.stack(self.goldacc, 1)
+        return ret
+
+    def forward(self, t=None, x=None, xkw=None, y_t=None):
+        outkwargs = {"t": t}
+        eids = xkw["eids"]        # must be given ids of examples
+        eids_np = eids.cpu().data.numpy()
+
+        if y_t is None:
+            assert(t == 0)
+            x_t = x
+        else:
+            # compute prob mask
+            ymask_np = np.zeros(y_t.size())
+            for i, eid in enumerate(eids_np):
+                validnext = self.tracker.get_valid_next(eid)   # set of ids
+                ymask_np[i, list(validnext)] = 1.
+            ymask = q.var(ymask_np).cuda(y_t).v
+
+            # get probs
+            _y_t = y_t + torch.log(ymask)
+            probs = self.scores2probs(_y_t, mask=ymask)
+
+            # sample gold from probs
+            if self.mode == "sample":
+                gold_t = torch.multinomial(probs, 1).squeeze(-1)
+            elif self.mode == "argmax":
+                _, gold_t = torch.max(probs, 1)
+            else:
+                raise q.SumTingWongException()
+
+            if self.explore > 0:
+                unmaskedprobs = self.scores2probs(y_t)
+                if self.mode == "sample":
+                    x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1)
+                elif self.mode == "argmax":
+                    _, x_t = torch.max(unmaskedprobs, 1)
+                else:
+                    raise q.SumTingWongException()
+                if self.explore < 1:        # merge
+                    mergemask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
+                    mergeidx = mergemask.long()
+                    a = torch.stack([x_t, gold_t], 1)
+                    x_t = torch.gather(a, 1, mergeidx.unsqueeze(1)).squeeze(-1)
+            else:
+                x_t = gold_t
+
+            # store sampled
+            self.seqacc.append(x_t)
+            self.goldacc.append(gold_t)
+
+        # update tracker
+        for x_t_e, eid in zip(x_t.cpu().data.numpy(), eids_np):
+            self.tracker.update(eid, x_t_e)
+
+        # return
+        r = self.inparggetter(x_t)
+        if isinstance(r, tuple):
+            inpargs, kwupd = r
+            outkwargs.update(kwupd)
+        else:
+            inpargs = r
+        return inpargs, outkwargs
+
+
+
+
+
 
 
 
