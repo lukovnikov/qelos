@@ -317,7 +317,7 @@ class _GRUCell(nn.Module):      # TODO: test rbn
         canh = torch.mul(h_tm1, reset_gate)
         canh = self.main_gate(x_t, canh, t=t)
         canh = self.activation_fn(canh)
-        h_t = (1 - update_gate) * h_tm1 + update_gate * canh
+        h_t = update_gate * h_tm1 + (1 - update_gate) * canh
         return h_t
 
 

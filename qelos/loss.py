@@ -40,7 +40,7 @@ class PairRankingLoss(Loss):
         """ x is the difference in scores. optionally, gold is margin """
         if self.margin is None:     # use gold as margins
             margin = gold
-        elif self.marginmode == "margin":
+        else:
             margin = self.margin
 
         zeros = q.var(torch.zeros(x.size())).cuda(x).v
