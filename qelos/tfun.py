@@ -22,12 +22,6 @@ class TFfunction(torch.autograd.Function):
             return tuple([torch.from_numpy(_tf_out_e) for _tf_out_e in _tf_out])
         else:
             return torch.from_numpy(_tf_out)
-        # if not q.issequence(_tf_out):
-        #     _tf_out = (_tf_out,)
-        # _tf_out = tuple([torch.from_numpy(_tf_out_e) for _tf_out_e in _tf_out])
-        # if len(_tf_out) == 1:
-        #     _tf_out = _tf_out[0]
-        # return _tf_out
 
     def backward(self, *y_grad):
         saved_inputs = self.saved_tensors
@@ -42,12 +36,12 @@ class TFfunction(torch.autograd.Function):
                                  feed_dict={self.__inputs: saved_inputs,
                                             self.__output_grads: y_grad})
 
-        all_grads = tuple([copy_from_numpy(x_grad_e) for x_grad_e in all_grads])
+        all_grads = tuple([torch_from_numpy(x_grad_e) for x_grad_e in all_grads])
         x_grad = all_grads
         return x_grad
 
 
-def copy_from_numpy(x):
+def torch_from_numpy(x):     # TODO: segmentation fault when torch.from_numpy(...) in backward() of autograd.Function
     ret = torch.zeros(x.shape)
     retsize = ret.size()
     flatret = ret.view(-1)
@@ -61,34 +55,38 @@ def copy_from_numpy(x):
 class TFModule(torch.nn.Module):
     def __init__(self, **kw):
         super(TFModule, self).__init__(**kw)
-        self.__dummyparam = torch.nn.Parameter(torch.zeros(1))
-        self.__forward_graph = None
-        self.__backward_graph = None
+        self._dummyparam = torch.nn.Parameter(torch.zeros(1))
+        self._forward_graph = None
+        self._backward_graph = None
         self._params = torch.nn.ParameterList()
-        self.__tfparam2param = {}
-        self.__param2tfparam = {}
-        self.__tfsess = tf.Session()
+        self._tfparam2param = {}
+        self._param2tfparam = {}
+        self._tfsess = tf.Session()
+
+    def flush_params_to_tensorflow(self):
+        for param, tfparam in self._param2tfparam.items():
+            self._tfsess.run(tfparam.assign(param.data.numpy()))
 
     def _build_forward_graph(self, *x):
         tfinps = create_placeholders_from_variables(*x)
         tfouts = self.apply(*tfinps)
-        self.__tfsess.run(tf.global_variables_initializer())
+        self._tfsess.run(tf.global_variables_initializer())
         tfparams = tf.trainable_variables()
         _tfparams = []
         for tfparam in tfparams:
-            paramval = self.__tfsess.run(tfparam)
-            param = q.var(paramval).cuda(self.__dummyparam).v
+            paramval = self._tfsess.run(tfparam)
+            param = q.var(paramval).cuda(self._dummyparam).v
             param = torch.nn.Parameter(param.data)
             self._params.append(param)
-            self.__tfparam2param[tfparam.name] = param
-            self.__param2tfparam[param] = tfparam
+            self._tfparam2param[tfparam.name] = param
+            self._param2tfparam[param] = tfparam
             _tfparams.append(tfparam)
-        self.__forward_graph = (tfinps + tuple(_tfparams), tfouts)
+        self._forward_graph = (tfinps + tuple(_tfparams), tfouts)
 
     def _build_backward_graph(self):
-        if self.__forward_graph is None:
+        if self._forward_graph is None:
             self._build_forward_graph()
-        forward_inps, forward_outs = self.__forward_graph
+        forward_inps, forward_outs = self._forward_graph
         # make a grad placeholder for each forward out
         if q.issequence(forward_outs):
             forward_outs = forward_outs
@@ -97,16 +95,16 @@ class TFModule(torch.nn.Module):
             forward_outs_grads = tf.placeholder(forward_outs.dtype, shape=forward_outs.shape)
         # make grads
         backward_outs = tf.gradients(forward_outs, forward_inps, grad_ys=forward_outs_grads)
-        self.__backward_graph = (forward_outs_grads, backward_outs)
+        self._backward_graph = (forward_outs_grads, backward_outs)
 
     def forward(self, *x):
-        if self.__forward_graph is None:
+        if self._forward_graph is None:
             self._build_forward_graph(*x)
-        if self.__backward_graph is None:
+        if self._backward_graph is None:
             self._build_backward_graph()
-        fun = TFfunction(self.__forward_graph,
-                         self.__backward_graph,
-                         self.__tfsess)
+        fun = TFfunction(self._forward_graph,
+                         self._backward_graph,
+                         self._tfsess)
         params = self._params
         params = [param for param in params]
         out = fun(*(x + tuple(params)))
@@ -178,13 +176,39 @@ if __name__ == "__main__":
     a = q.var(torch.ones(4, 3), requires_grad=False).v
 
     tfm = DummyTFModule2()
+
+    # TODO: at this point, tfm has no params (params only appear after calling underlying tensorflow domain apply)
+
     y, _ = tfm(x, a)
+    optim = torch.optim.SGD(q.params_of(tfm), lr=1)
     print(y)
     l = y.sum()
     print("doing backward")
     l.backward()
+
+    print("torch-stored parameter value before update and flush:")
+    print(tfm._params[0])
+    print("tensorflow-stored parameter value before update and flush:")
+    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+
+    optim.step()
+
+    print("torch-stored parameter value after update and before flush:")
+    print(tfm._params[0])
+    print("tensorflow-stored parameter value after update and before flush:")
+    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+
+    tfm.flush_params_to_tensorflow()
+
+    print("torch-stored parameter value after update and flush:")
+    print(tfm._params[0])
+    print("tensorflow-stored parameter value after update and flush:")
+    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+
     print("x grad")
     print(x.grad)
+    print("a grad")
+    print(a.grad)
     print("done")
     print(tfm._params[0])
     print(tfm._params[0].grad)
