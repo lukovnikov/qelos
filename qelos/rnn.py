@@ -447,8 +447,8 @@ class _LSTMCell(nn.Module):
         y_tm1, c_tm1 = states
         forget_gate, input_gate, output_gate, main_gate = self.gates(x_t, y_tm1)
         c_t = torch.mul(c_tm1, forget_gate) + torch.mul(main_gate, input_gate)
-        c_t = self.activation_fn(c_t)
-        y_t = torch.mul(c_t, output_gate)
+        _c_t = self.activation_fn(c_t)
+        y_t = torch.mul(_c_t, output_gate)
         return y_t, c_t
 
 

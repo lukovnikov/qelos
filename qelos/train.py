@@ -637,6 +637,16 @@ class train(object):
         self.trainloop()
 
 
+class train_rank(train):
+    """ pairwise ranking trainer
+         - given model generates a score from left and right inputs
+    """
+
+
+
+
+
+
 
 
 # class ovar(object):

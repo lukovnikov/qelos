@@ -30,6 +30,24 @@ class Loss(nn.Module):
         return loss
 
 
+class PairRankingLoss(Loss):
+    def __init__(self, size_average=True, margin=None, scale=1, **kw):
+        super(PairRankingLoss, self).__init__(size_average=size_average, **kw)
+        self.margin = margin
+        self.scale = scale
+
+    def _forward(self, x, gold):
+        """ x is the difference in scores. optionally, gold is margin """
+        if self.margin is None:     # use gold as margins
+            margin = gold
+        elif self.marginmode == "margin":
+            margin = self.margin
+
+        zeros = q.var(torch.zeros(x.size())).cuda(x).v
+        loss = torch.max(zeros, margin * self.scale - x)
+        return loss, None
+
+
 class DiscreteLoss(Loss):
     def __init__(self, size_average=True, ignore_index=None, **kw):
         super(DiscreteLoss, self).__init__(size_average=size_average, **kw)

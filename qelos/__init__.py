@@ -5,7 +5,9 @@ from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BidirLSTMLayer, Recurrent, Reccable, PositionwiseForward, \
     TimesharedDropout, CatLSTMCell
 
-from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, RankingLoss, SeqRankingLoss, CrossEntropyLoss, SeqCrossEntropyLoss
+from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, \
+    RankingLoss, SeqRankingLoss, CrossEntropyLoss, \
+    SeqCrossEntropyLoss, PairRankingLoss
 
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
     AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder, \
