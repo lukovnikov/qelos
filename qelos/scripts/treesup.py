@@ -150,10 +150,13 @@ class Tracker(object):
         self.current = self.root
         self.stack = [[self.root]]
         self.possible_paths = []    # list of stacks
+        self._nvt = None
 
     def start(self):
         self.possible_paths.append([[self.root]])
-        return {self.root.label}
+        allnvts = {self.root.label}
+        self._nvt = allnvts
+        return allnvts
 
     def nxt(self, x):       # x is a string or nothing
         if len(self.possible_paths) == 0:   # starting (or ended so restarting)
@@ -200,7 +203,39 @@ class Tracker(object):
         for possible_path in self.possible_paths:
             for topnode in possible_path[-1]:
                 allnvts.add(topnode.label)
+        self._nvt = allnvts
         return allnvts
+
+
+class GroupTracker(object):
+
+    def __init__(self, trees, dic):
+        super(GroupTracker, self).__init__()
+        self.trees = trees
+        self.dic = dic
+        self.rdic = {v: k for k, v in self.dic.items()}
+        self.trackers = []
+        for tree in self.trees:
+            tracker = tree.track()
+            tracker.start()
+            self.trackers.append(tracker)
+
+    def get_valid_next(self, eid):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt
+        if len(nvt) == 0:   # done
+            nvt = {"<MASK>"}
+        nvt = map(lambda x: self.dic[x], nvt)
+        return nvt
+
+    def update(self, eid, x):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt
+        if len(nvt) == 0:   # done
+            pass            # don't update tracker
+        else:
+            x = self.rdic[x]
+            tracker.nxt(x)
 
 
 def generate_random_trees(n=1000, maxleaves=6, maxunaries=2,
@@ -302,7 +337,7 @@ def test_tracker():
 
 def run(lr=0.1):
     test_tracker()
-    trees = get_trees()
+    # trees = get_trees()
 
 
 if __name__ == "__main__":

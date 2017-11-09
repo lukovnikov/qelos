@@ -327,7 +327,7 @@ class Distance(nn.Module):
     pass
 
 
-class DotDistance(Distance):
+class DotDistance(Distance):        # actually a similarity
     def forward(self, data, crit):        # (batsize, seqlen, dim), (batsize, dim)
         datadim, critdim = data.dim(), crit.dim()
         if data.dim() == 2:               # if datasets is (batsize, dim),
@@ -342,7 +342,7 @@ class DotDistance(Distance):
         return ret
 
 
-class CosineDistance(DotDistance):
+class CosineDistance(DotDistance):  # actually a similarity
     def forward(self, data, crit):        # (batsize, [lseqlen,] dim), (batsize, [rseqlen,] dim) 
         dots = super(CosineDistance, self).forward(data, crit)
         lnorms = data.norm(2, -1)         # (batsize, [lseqlen])
@@ -355,7 +355,7 @@ class CosineDistance(DotDistance):
         return dots
 
 
-class LNormDistance(Distance):
+class LNormDistance(Distance):      # actually a distance
     def __init__(self, L=2, **kw):
         super(LNormDistance, self).__init__(**kw)
         self.L = L
@@ -375,7 +375,7 @@ class LNormDistance(Distance):
         return ret
 
 
-class ForwardDistance(Distance):
+class ForwardDistance(Distance):        # parameterized distance/similarity
     memsave = False
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=True):
         super(ForwardDistance, self).__init__()
@@ -411,7 +411,7 @@ class ForwardDistance(Distance):
         return dists
 
 
-class BilinearDistance(Distance):
+class BilinearDistance(Distance):           # parameterized distance/similarity
     memsave = False
     def __init__(self, ldim, rdim):
         super(BilinearDistance, self).__init__()
@@ -442,7 +442,7 @@ class BilinearDistance(Distance):
         return dists
 
 
-class TrilinearDistance(Distance):
+class TrilinearDistance(Distance):      # parameterized distance/similarity
     memsave = False
     def __init__(self, ldim, rdim, aggdim, activation="tanh", use_bias=False):
         super(TrilinearDistance, self).__init__()

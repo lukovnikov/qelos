@@ -510,7 +510,7 @@ class TwoStackCell(RecStatefulContainer):
 
 class DynamicOracleRunner(q.DecoderRunner):
     def __init__(self, tracker=None,
-                 inparggetter=lambda x: (x,),
+                 inparggetter=lambda x: (x, {}),
                  scores2probs=q.Softmax(),
                  mode="sample",  # "sample" or "argmax"
                  explore=0.,
@@ -523,6 +523,10 @@ class DynamicOracleRunner(q.DecoderRunner):
         self.goldacc = []
         self.mode = mode
         self.explore = explore
+
+    def reset(self):
+        self.seqacc = []
+        self.goldacc = []
 
     def get_sequence(self):
         """ get the chosen sequence """
@@ -543,7 +547,7 @@ class DynamicOracleRunner(q.DecoderRunner):
             x_t = x
         else:
             # compute prob mask
-            ymask_np = np.zeros(y_t.size())
+            ymask_np = np.zeros(y_t.size(), dtype="float32")
             for i, eid in enumerate(eids_np):
                 validnext = self.tracker.get_valid_next(eid)   # set of ids
                 ymask_np[i, list(validnext)] = 1.
@@ -560,7 +564,7 @@ class DynamicOracleRunner(q.DecoderRunner):
 
             # get probs
             _y_t = y_t + torch.log(ymask)
-            goldprobs = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
+            goldprobs, _ = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
 
             # sample gold from probs
             if self.mode == "sample":

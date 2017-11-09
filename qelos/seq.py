@@ -302,6 +302,8 @@ class DecoderCell(RecStatefulContainer):
     # region RecStatefulContainer signature
     def reset_state(self):
         self.core.reset_state()
+        if self._inputs_t_getter is not None and hasattr(self._inputs_t_getter, "reset"):
+            self._inputs_t_getter.reset()
 
     def set_init_states(self, *states):
         self.core.set_init_states(*states)
@@ -819,6 +821,9 @@ class ModularDecoderCell(DecoderCell):
 class DecoderRunner(nn.Module):
     def __init__(self, **kw):
         super(DecoderRunner, self).__init__(**kw)
+
+    def reset(self):
+        pass
 
     # def __call__(self, t=None, x=None, xkw=None, y_t=None):
     #     self.forward(t=t, x=x, xkw=xkw, y_t=y_t)

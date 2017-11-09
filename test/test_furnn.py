@@ -1,7 +1,8 @@
 from unittest import TestCase
 import qelos as q
 import numpy as np
-from qelos.furnn import TwoStackCell
+import random
+from qelos.furnn import TwoStackCell, DynamicOracleRunner
 import torch
 
 
@@ -292,3 +293,74 @@ class TestTwoStackAttentionContextDecoder(TestCase):
         innercell = lambda a, b, c: (q.RecStack(q.CatLSTMCell(a//2 + b, c // 2)),
                                      q.RecStack(q.CatLSTMCell(a//2 + b, c // 2)))
         self.do_tst_it(innercell)
+
+
+from qelos.scripts.treesup import generate_random_trees, GroupTracker, Tree
+
+
+class TestDynamicOracleRunner(TestCase):
+    # def test_it_explore(self):
+    #     self.test_it(explore=0.5)
+
+    def test_it(self, explore=0):
+        trees = generate_random_trees(100)
+        print(trees)
+        dic = {"<MASK>": 0}
+        for tree in trees:
+            treestring = tree.pp(with_parentheses=False)
+            treetokens = set(treestring.split())
+            for treetoken in treetokens:
+                if not treetoken in dic:
+                    dic[treetoken] = len(dic)
+        tracker = GroupTracker(trees, dic)
+        oracle = DynamicOracleRunner(tracker=tracker, mode="sample", explore=explore)
+
+        class Dummy(torch.nn.Module):
+            def __init__(self, size):
+                super(Dummy, self).__init__()
+                self.size = size
+
+            def forward(self, eids):
+                return q.var(torch.rand(eids.size(0), self.size)).v
+
+        dummy = Dummy(len(dic))
+
+        eids = random.sample(range(100), 10)
+        eids = q.var(np.asarray(eids)).v
+
+        t = 0
+        while True:
+            xkw = {"eids": eids}
+            y_tm1 = dummy(eids)
+            curnvt = {}
+            for eid in eids.data.numpy():
+                curnvt[eid] = tracker.get_valid_next(eid)
+            y_t, _ = oracle(t=t, x=None, xkw=xkw, y_t=y_tm1)
+            for y_t_e, eid in zip(y_t.data.numpy(), eids.data.numpy()):
+                if explore == 0:
+                    assert(y_t_e in curnvt[eid])
+            if np.all(y_t.data.numpy() == 0):
+                break
+            t += 1
+
+        seqacc = oracle.get_sequence().data.numpy()
+        goldacc = oracle.get_gold_sequence().data.numpy()
+
+        if explore == 0:
+            assert(np.allclose(seqacc, goldacc))
+
+        for seqacce, goldacce, eid in zip(seqacc, goldacc, eids.data.numpy()):
+            tree = trees[eid]
+            # seqacce to tree
+            seqaccstr = [tracker.rdic[x] for x in seqacce if x != 0]
+            seqaccstr = " ".join(seqaccstr)
+            builttree = Tree.parse(seqaccstr)
+            # goldacce to tree
+            goldaccstr = [tracker.rdic[x] for x in goldacce if x != 0]
+            goldaccstr = " ".join(goldaccstr)
+            builttreegold = Tree.parse(seqaccstr)
+            assert(builttreegold == tree)
+            if explore == 0:
+                assert(builttree == tree)
+
+        print(seqacc)
