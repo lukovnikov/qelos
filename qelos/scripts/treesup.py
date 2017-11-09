@@ -158,10 +158,15 @@ class Tracker(object):
         self._nvt = allnvts
         return allnvts
 
-    def nxt(self, x):       # x is a string or nothing
+    def nxt(self, x, alt_x=None):       # x is a string or nothing
         if len(self.possible_paths) == 0:   # starting (or ended so restarting)
             return None
         else:
+            if x not in self._nvt and alt_x is not None:
+                x = alt_x
+            if x not in self._nvt:
+                assert(self._nvt is not None and len(self._nvt) > 0)
+                x = random.sample(self._nvt, 1)[0]
             j = 0
             allnewpossiblepaths = []
             while j < len(self.possible_paths):     # for every possible path
@@ -228,14 +233,14 @@ class GroupTracker(object):
         nvt = map(lambda x: self.dic[x], nvt)
         return nvt
 
-    def update(self, eid, x):
+    def update(self, eid, x, alt_x=None):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:   # done
             pass            # don't update tracker
         else:
             x = self.rdic[x]
-            tracker.nxt(x)
+            tracker.nxt(x, alt_x=self.rdic[alt_x] if alt_x is not None else None)
 
 
 def generate_random_trees(n=1000, maxleaves=6, maxunaries=2,

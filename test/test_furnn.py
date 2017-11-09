@@ -299,12 +299,12 @@ from qelos.scripts.treesup import generate_random_trees, GroupTracker, Tree
 
 
 class TestDynamicOracleRunner(TestCase):
-    # def test_it_explore(self):
-    #     self.test_it(explore=0.5)
+    def test_it_explore(self):
+        self.test_it(explore=0.5)
 
     def test_it(self, explore=0):
         trees = generate_random_trees(100)
-        print(trees)
+        # print(trees)
         dic = {"<MASK>": 0}
         for tree in trees:
             treestring = tree.pp(with_parentheses=False)
@@ -352,15 +352,18 @@ class TestDynamicOracleRunner(TestCase):
         for seqacce, goldacce, eid in zip(seqacc, goldacc, eids.data.numpy()):
             tree = trees[eid]
             # seqacce to tree
-            seqaccstr = [tracker.rdic[x] for x in seqacce if x != 0]
-            seqaccstr = " ".join(seqaccstr)
-            builttree = Tree.parse(seqaccstr)
+            if explore == 0:
+                pass
+                seqaccstr = [tracker.rdic[x] for x in seqacce if x != 0]
+                seqaccstr = " ".join(seqaccstr)
+                builttree = Tree.parse(seqaccstr)
             # goldacce to tree
             goldaccstr = [tracker.rdic[x] for x in goldacce if x != 0]
             goldaccstr = " ".join(goldaccstr)
-            builttreegold = Tree.parse(seqaccstr)
+            builttreegold = Tree.parse(goldaccstr)
             assert(builttreegold == tree)
             if explore == 0:
+                pass
                 assert(builttree == tree)
 
         print(seqacc)

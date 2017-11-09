@@ -592,8 +592,8 @@ class DynamicOracleRunner(q.DecoderRunner):
             self.goldacc.append(gold_t)
 
         # update tracker
-        for x_t_e, eid in zip(x_t.cpu().data.numpy(), eids_np):
-            self.tracker.update(eid, x_t_e)
+        for x_t_e, eid, gold_t_e in zip(x_t.cpu().data.numpy(), eids_np, gold_t.cpu().data.numpy()):
+            self.tracker.update(eid, x_t_e, alt_x=gold_t_e)
 
         # return
         r = self.inparggetter(x_t)
