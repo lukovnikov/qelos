@@ -2,9 +2,12 @@ import qelos as q
 import torch
 import numpy as np
 import tensorflow as tf
+from threading import current_thread
+import traceback
 
 
 class TFfunction(torch.autograd.Function):
+
     def __init__(self, forward_graph, backward_graph, session,
                  *x, **kw):
         super(TFfunction, self).__init__(*x, **kw)
@@ -13,6 +16,8 @@ class TFfunction(torch.autograd.Function):
         self.tfsess = session      # TODO: closing session
 
     def forward(self, *x):
+        print("function forward current thread: {}".format(current_thread()))
+        print(traceback.print_stack())
         self.save_for_backward(*x)
         _tf_out = self.tfsess.run(self.__outputs,
                                   feed_dict={
@@ -24,36 +29,35 @@ class TFfunction(torch.autograd.Function):
             return torch.from_numpy(_tf_out)
 
     def backward(self, *y_grad):
+        print("function backward current thread: {}".format(current_thread()))
+        print(traceback.print_stack())
         saved_inputs = self.saved_tensors
         # saved_inputs = map(lambda x: x.numpy(), saved_inputs)
         saved_inputs = [saved_input.numpy() for saved_input in saved_inputs]
         if q.issequence(y_grad):
+            y_grad_c = y_grad[0]
             y_grad = tuple(map(lambda y_grad_e: y_grad_e.clone().cpu().numpy(), y_grad))
         else:
+            y_grad_c = y_grad
             y_grad = y_grad.clone().cpu().numpy()
-        print(type(y_grad))
+        # print(type(y_grad))
         all_grads = self.tfsess.run(self.__input_grads,
                                  feed_dict={self.__inputs: saved_inputs,
                                             self.__output_grads: y_grad})
 
-        all_grads = tuple([torch_from_numpy(x_grad_e) for x_grad_e in all_grads])
+        all_grads = tuple([torch_from_numpy(x_grad_e, cuda=y_grad_c) for x_grad_e in all_grads])
         x_grad = all_grads
         return x_grad
 
 
-def torch_from_numpy(x):     # TODO: segmentation fault when torch.from_numpy(...) in backward() of autograd.Function
-    ret = torch.zeros(x.shape)
-    retsize = ret.size()
-    flatret = ret.view(-1)
-    flatx = x.flatten()
-    for i in range(len(flatx)):
-        flatret[i] = float(flatx[i])
-    ret = flatret.view(retsize)
-    return ret
-
-
 class TFModule(torch.nn.Module):
-    def __init__(self, **kw):
+    _default_session = None
+
+    @classmethod
+    def set_default_session(cls, sess):
+        cls._default_session = sess
+
+    def __init__(self, session=None, **kw):
         super(TFModule, self).__init__(**kw)
         self._dummyparam = torch.nn.Parameter(torch.zeros(1))
         self._forward_graph = None
@@ -61,7 +65,14 @@ class TFModule(torch.nn.Module):
         self._params = torch.nn.ParameterList()
         self._tfparam2param = {}
         self._param2tfparam = {}
-        self._tfsess = tf.Session()
+        if session is None:
+            session = self._default_session
+        if session is not None:
+            self._tfsess = session
+        else:
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
+            self._tfsess = tf.Session(config=config)
 
     def flush_params_to_tensorflow(self):
         for param, tfparam in self._param2tfparam.items():
@@ -105,6 +116,7 @@ class TFModule(torch.nn.Module):
         fun = TFfunction(self._forward_graph,
                          self._backward_graph,
                          self._tfsess)
+        print("module forward current thread: {}".format(current_thread()))
         params = self._params
         params = [param for param in params]
         out = fun(*(x + tuple(params)))
@@ -112,6 +124,22 @@ class TFModule(torch.nn.Module):
 
     def apply(self, *x):         # x is a tensorflow placeholder
         raise NotImplemented()
+
+
+def torch_from_numpy(x, cuda=False):     # TODO: segmentation fault when torch.from_numpy(...) in backward() of autograd.Function
+    ret = q.var(torch.zeros(x.shape)).cuda(cuda).v
+    # print(ret)
+    # print(x)
+    retdata = ret.data.numpy()
+    retdata += x
+    return ret.data
+
+
+def create_placeholders_from_variables(*x):
+    typemap = {torch.FloatTensor: tf.float32}
+    tfxs = [tf.placeholder(typemap[type(xe.data)], shape=xe.size()) for xe in x]
+    return tuple(tfxs)
+
 
 
 class DummyTFModule(TFModule):
@@ -126,12 +154,6 @@ class DummyTFModule2(TFModule):
         param = tf.get_variable("tf_param", [4, 3])
         z = y * param
         return z, y
-
-
-def create_placeholders_from_variables(*x):
-    typemap = {torch.FloatTensor: tf.float32}
-    tfxs = [tf.placeholder(typemap[type(xe.data)], shape=xe.size()) for xe in x]
-    return tuple(tfxs)
 
 
 def test():
@@ -181,34 +203,34 @@ if __name__ == "__main__":
 
     y, _ = tfm(x, a)
     optim = torch.optim.SGD(q.params_of(tfm), lr=1)
-    print(y)
+    # print(y)
     l = y.sum()
     print("doing backward")
     l.backward()
 
     print("torch-stored parameter value before update and flush:")
-    print(tfm._params[0])
+    # print(tfm._params[0])
     print("tensorflow-stored parameter value before update and flush:")
-    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+    # print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
 
     optim.step()
 
     print("torch-stored parameter value after update and before flush:")
-    print(tfm._params[0])
+    # print(tfm._params[0])
     print("tensorflow-stored parameter value after update and before flush:")
-    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+    # print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
 
     tfm.flush_params_to_tensorflow()
 
     print("torch-stored parameter value after update and flush:")
-    print(tfm._params[0])
+    # print(tfm._params[0])
     print("tensorflow-stored parameter value after update and flush:")
-    print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
+    # print(tfm._tfsess.run(tfm._param2tfparam[tfm._params[0]]))
 
     print("x grad")
-    print(x.grad)
+    # print(x.grad)
     print("a grad")
-    print(a.grad)
+    # print(a.grad)
     print("done")
-    print(tfm._params[0])
-    print(tfm._params[0].grad)
+    # print(tfm._params[0])
+    # print(tfm._params[0].grad)

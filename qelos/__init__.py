@@ -50,3 +50,5 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
 
 from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
     params_of, batchablesparse2densemask, rec_clone, intercat
+
+from tfun import TFModule
