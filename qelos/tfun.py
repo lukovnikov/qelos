@@ -167,7 +167,7 @@ class DummyTFModule2(TFModule):
         return z, y
 
 
-def test():
+def tst():
     from scipy.signal import convolve2d, correlate2d
     from torch.nn.modules.module import Module
     from torch.nn.parameter import Parameter
@@ -231,7 +231,7 @@ class TFModel(TFModule):
         return y
 
 
-def test_stupid_training(cuda=False):
+def tst_stupid_training(cuda=False):
     x = q.var(np.random.random((60, 1000)).astype("float32")).cuda(cuda).v
     y = q.var(np.random.randint(0, 20, (60,))).cuda(cuda).v
 
@@ -247,9 +247,9 @@ def test_stupid_training(cuda=False):
 
 if __name__ == "__main__":
     import sys
-    q.argprun(test_stupid_training)
+    q.argprun(tst_stupid_training)
     sys.exit()
-    # test()
+    # tst()
     # print("test done")
 
     x = q.var(torch.ones(4, 3), requires_grad=True).v
