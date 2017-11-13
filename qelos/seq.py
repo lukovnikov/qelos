@@ -393,7 +393,10 @@ class ContextDecoderCell(DecoderCell):
 
     def forward(self, x, ctx, **kw):
         if self.embedder is not None:
-            emb, mask = self.embedder(x)
+            if isinstance(self.embedder, nn.Embedding):
+                emb = self.embedder(x)
+            else:
+                emb, mask = self.embedder(x)
         else:
             emb = x
         inp = torch.cat([emb, ctx], 1)

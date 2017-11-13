@@ -222,7 +222,7 @@ class TestRankingLoss(TestCase):
 
 class TestSeqLoss(TestCase):
     def test_it(self):
-        loss = q.SeqRankingLoss(margin=0.3, negbest=True)
+        loss = q.SeqRankingLoss(margin=0.3, negmode="best")
         score = q.val(torch.randn(5, 3, 10)).v
         score.requires_grad = True
         scores = score + 1

@@ -47,7 +47,7 @@ class TestTwoStackDecoder(TestCase):
         inneremb = q.WordEmb(indim//2, worddic=dic)
         innercell = innercell(indim, outdim)
         decoder_core = TwoStackCell(inneremb, innercell)
-        decoder_top = q.Stack(
+        decoder_top = q.DecoderTop(
             torch.nn.Linear(outdim, vocsize),
             # torch.nn.Softmax(),
         )
@@ -69,8 +69,8 @@ class TestTwoStackDecoder(TestCase):
         self.do_tst_it(innercell)
 
     def test_it_dual_catlstm(self):
-        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a, b//2)),
-                                  q.RecStack(q.CatLSTMCell(a, b//2)))
+        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a // 2, b//2)),
+                                  q.RecStack(q.CatLSTMCell(a // 2, b//2)))
         self.do_tst_it(innercell)
 
 
@@ -106,7 +106,7 @@ class TestTwoStackContextDecoder(TestCase):
         vocsize = max(dic.values()) + 1
 
         inneremb = q.WordEmb(indim // 2, worddic=dic)
-        innercell = innercell(indim + ctxdim, outdim)
+        innercell = innercell(indim, ctxdim, outdim)
         decoder_core = TwoStackCell(inneremb, innercell)
         decoder_top = q.StaticContextDecoderTop(
             q.argmap.spec(0),
@@ -124,16 +124,16 @@ class TestTwoStackContextDecoder(TestCase):
         pass
 
     def test_it_gru(self):
-        innercell = lambda a, b: q.RecStack(q.GRUCell(a, b))
+        innercell = lambda a, c, b: q.RecStack(q.GRUCell(a + c, b))
         self.do_tst_it(innercell)
 
     def test_it_catlstm(self):
-        innercell = lambda a, b: q.RecStack(q.CatLSTMCell(a, b))
+        innercell = lambda a, c, b: q.RecStack(q.CatLSTMCell(a + c, b))
         self.do_tst_it(innercell)
 
     def test_it_dual_catlstm(self):
-        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a, b // 2)),
-                                  q.RecStack(q.CatLSTMCell(a, b // 2)))
+        innercell = lambda a, c, b: (q.RecStack(q.CatLSTMCell(a // 2 + c, b // 2)),
+                                  q.RecStack(q.CatLSTMCell(a // 2 + c, b // 2)))
         self.do_tst_it(innercell)
 
 
@@ -200,8 +200,8 @@ class TestTwoStackStateInitDecoder(TestCase):
         self.do_tst_it(innercell, statesetter)
 
     def test_it_dual_catlstm(self):
-        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a, b // 2)),
-                                  q.RecStack(q.CatLSTMCell(a, b // 2)))
+        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a//2, b // 2)),
+                                  q.RecStack(q.CatLSTMCell(a//2, b // 2)))
 
         def statesetter(*x, **kw):
             ctx = kw["ctx"]
@@ -213,10 +213,10 @@ class TestTwoStackStateInitDecoder(TestCase):
 
     def test_it_dual_twolayer_catlstm(self):
         innercell = lambda a, b: (q.RecStack(
-                                    q.CatLSTMCell(a, b),
+                                    q.CatLSTMCell(a//2, b),
                                     q.CatLSTMCell(b, b//2)),
                                   q.RecStack(
-                                    q.CatLSTMCell(a, b),
+                                    q.CatLSTMCell(a//2, b),
                                     q.CatLSTMCell(b, b // 2)))
 
         def statesetter(*x, **kw):
@@ -303,8 +303,9 @@ class TestDynamicOracleRunner(TestCase):
         self.test_it(explore=0.5)
 
     def test_it(self, explore=0):
+        print("testing")
         trees = generate_random_trees(100)
-        # print(trees)
+        print(trees)
         dic = {"<MASK>": 0}
         for tree in trees:
             treestring = tree.pp(with_parentheses=False)
