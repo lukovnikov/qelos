@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 from threading import current_thread
 import traceback
+import os
 
 
 class TFfunction(torch.autograd.Function):
@@ -16,8 +17,9 @@ class TFfunction(torch.autograd.Function):
         self.tfsess = session      # TODO: closing session
 
     def forward(self, *x):
-        print("function forward current thread: {}".format(current_thread()))
-        print(traceback.print_stack())
+        # print("function forward current thread: {}".format(current_thread()))
+        # print(os.getpid())
+        # print(traceback.print_stack())
         self.save_for_backward(*x)
         _tf_out = self.tfsess.run(self.__outputs,
                                   feed_dict={
@@ -29,24 +31,32 @@ class TFfunction(torch.autograd.Function):
             return torch.from_numpy(_tf_out)
 
     def backward(self, *y_grad):
-        print("function backward current thread: {}".format(current_thread()))
-        print(traceback.print_stack())
+        # print("function backward current thread: {}".format(current_thread()))
+        # print(os.getpid())
+        # print(traceback.print_stack())
+        # print(y_grad)
         saved_inputs = self.saved_tensors
+        # print(len(saved_inputs))
+        # print(len(self.__inputs))
         # saved_inputs = map(lambda x: x.numpy(), saved_inputs)
         saved_inputs = [saved_input.numpy() for saved_input in saved_inputs]
         if q.issequence(y_grad):
             y_grad_c = y_grad[0]
-            y_grad = tuple(map(lambda y_grad_e: y_grad_e.clone().cpu().numpy(), y_grad))
+            y_grad = map(lambda y_grad_e: y_grad_e.clone().cpu().numpy(), y_grad)
         else:
             y_grad_c = y_grad
             y_grad = y_grad.clone().cpu().numpy()
         # print(type(y_grad))
+        # print(y_grad)
+        # print(len(self.__output_grads))
+        feed_dict = dict(zip(self.__inputs, saved_inputs))
+        feed_dict.update(dict(zip(self.__output_grads, y_grad)))
         all_grads = self.tfsess.run(self.__input_grads,
-                                 feed_dict={self.__inputs: saved_inputs,
-                                            self.__output_grads: y_grad})
+                                 feed_dict=feed_dict)
 
         all_grads = tuple([torch_from_numpy(x_grad_e, cuda=y_grad_c) for x_grad_e in all_grads])
         x_grad = all_grads
+        # print(x_grad)
         return x_grad
 
 
@@ -100,12 +110,13 @@ class TFModule(torch.nn.Module):
         forward_inps, forward_outs = self._forward_graph
         # make a grad placeholder for each forward out
         if q.issequence(forward_outs):
-            forward_outs = forward_outs
-            forward_outs_grads = tuple([tf.placeholder(forward_out.dtype, shape=forward_out.shape) for forward_out in forward_outs])
+            forward_outs = list(forward_outs)
+            forward_outs_grads = [tf.placeholder(forward_out.dtype, shape=forward_out.shape) for forward_out in forward_outs]
         else:
-            forward_outs_grads = tf.placeholder(forward_outs.dtype, shape=forward_outs.shape)
+            forward_outs_grads = [tf.placeholder(forward_outs.dtype, shape=forward_outs.shape)]
+            forward_outs = [forward_outs]
         # make grads
-        backward_outs = tf.gradients(forward_outs, forward_inps, grad_ys=forward_outs_grads)
+        backward_outs = tf.gradients(forward_outs, list(forward_inps), grad_ys=forward_outs_grads)
         self._backward_graph = (forward_outs_grads, backward_outs)
 
     def forward(self, *x):
@@ -116,7 +127,7 @@ class TFModule(torch.nn.Module):
         fun = TFfunction(self._forward_graph,
                          self._backward_graph,
                          self._tfsess)
-        print("module forward current thread: {}".format(current_thread()))
+        # print("module forward current thread: {}".format(current_thread()))
         params = self._params
         params = [param for param in params]
         out = fun(*(x + tuple(params)))
@@ -190,7 +201,54 @@ def test():
     print(input.grad)
 
 
+class PTModel(torch.nn.Module):
+    def __init__(self, indim, outdim, numlayers):
+        super(PTModel, self).__init__()
+        self.layers = torch.nn.ModuleList()
+        for i in range(numlayers):
+            self.layers.append(torch.nn.Linear(indim, outdim))
+
+    def forward(self, x):
+        y = self.layers[0](x)
+        for i in range(1, len(self.layers)):
+            layer = self.layers[i]
+            y = y + layer(x)
+        y = q.LogSoftmax()(y)
+        return y
+
+
+class TFModel(TFModule):
+    def __init__(self, indim, outdim, numlayers):
+        super(TFModel, self).__init__()
+        self.layers = [tf.contrib.keras.layers.Dense(outdim, input_shape=(indim,)) for _ in range(numlayers)]
+
+    def apply(self, x):
+        y = self.layers[0](x)
+        for i in range(1, len(self.layers)):
+            layer = self.layers[i]
+            y = y + layer(x)
+        y = tf.nn.log_softmax(y)
+        return y
+
+
+def test_stupid_training(cuda=False):
+    x = q.var(np.random.random((60, 1000)).astype("float32")).cuda(cuda).v
+    y = q.var(np.random.randint(0, 20, (60,))).cuda(cuda).v
+
+    ptm = TFModel(1000, 20, 50)
+    ptm(x[:2])
+    losses = q.lossarray(torch.nn.NLLLoss())
+    data = q.dataload(x.data.numpy(), y.data.numpy(), shuffle=True, batch_size=2)
+    optim = torch.optim.Adadelta(q.params_of(ptm), lr=1)
+    q.train(ptm).train_on(data, losses).optimizer(optim).train(10)
+
+    print(ptm(x[:2]))
+
+
 if __name__ == "__main__":
+    import sys
+    q.argprun(test_stupid_training)
+    sys.exit()
     # test()
     # print("test done")
 
