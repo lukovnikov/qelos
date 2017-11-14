@@ -244,10 +244,39 @@ class SimpleDGTNSparse(nn.Module):
 
 
 class TwoStackCell(RecStatefulContainer):
-    """ works with two or one single-state cells (GRU or CatLSTM) """
+    """ Works with two or one single-state cells (GRU or CatLSTM).
+        Can be used as a core in ModularDecoderCell
+        ===
+        The TwoStackCell maintains separate ancestral and fraternal stacks
+        for ancestral resp. fraternal states and previous states and previous symbols,
+        as well as a stack of fraternal control symbols that specify if that element
+        has a next sibling under the same parent.
+    """
     def __init__(self, emb, cell, frat_init="zero",
                  cell_inp_router_mode="default",
                  **kw):
+        """
+        :param emb: can be a pair of embedders or a single embedder.
+            If a pair of embedders is given, irst one is used for ancestral, second for fraternal.
+            Embedders used must return a pair of values, conforming to q.WordEmb's signature.
+            Fraternal embedder must have "<START>" symbol in the dictionary.
+        :param cell: can contain a tuple of two reccables or a single reccable.
+        If cell argument is a pair of reccables, first one is ancestral, second one is fraternal,
+            and cell_inp_router_mode is set to "separated" by default.
+        If cell argument is a single reccable, its states will be split between
+            ancestral and fraternal routing (first half resp. second half).
+            The cell_inp_router_mode is set to "joined" by default.
+        :param cell_inp_router_mode: tells how to route the inputs to the given cells.
+            Default is "default" and chosen as described above. Other options are "joined" and "separated".
+            If "joined", the ancestral and fraternal embeddings and the context are concatenated
+            and fed to the cell/both cells (works with single and dual cell).
+            If "separated", the ancestral and fraternal embeddings are *each* concatenated
+            with the context and fed to the ancestral resp. fraternal cells (only works with dual cell).
+        :param frat_init: tells how to initialize fraternal states of cells.
+            Default is "zero", meaning the initial fraternal states are zeros.
+            If "ancestor", the initial fraternal states are initialized to the states of the parent.
+            If tensor value(s) is given, this value(s) is used as initial fraternal states.
+        """
         super(TwoStackCell, self).__init__(**kw)
         # stacks are lists (per example) of tuples (per state) of vars (states)
         self.ance_stacks = None
@@ -323,7 +352,7 @@ class TwoStackCell(RecStatefulContainer):
             cell.reset_state()
         self.ance_stacks = None
         self.frat_stacks = None
-        self.ctrl_stack = None
+        self.frat_ctrl_stack = None
         self.ance_zero_stack_elem = None
         self.frat_zero_stack_elem = None
         self.ance_sym_stacks = None
@@ -510,14 +539,14 @@ class TwoStackCell(RecStatefulContainer):
 
 class DynamicOracleRunner(q.DecoderRunner):
     def __init__(self, tracker=None,
-                 inparggetter=lambda x: (x, {}),
+                 inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),
                  mode="sample",  # "sample" or "argmax"
                  explore=0.,
                  **kw):
         super(DynamicOracleRunner, self).__init__(**kw)
         self.tracker = tracker
-        self.inparggetter = inparggetter
+        self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs
         self.seqacc = []
         self.goldacc = []
