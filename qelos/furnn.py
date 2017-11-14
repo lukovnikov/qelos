@@ -468,7 +468,9 @@ class TwoStackCell(RecStatefulContainer):
         ha_tm1 = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
         hf_tm1 = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
 
-        # region 1. get inputs for update
+        # maplist = zip(self.ance_sym_stacks, self.frat_sym_stacks,                      self.ance_stacks,                      self.frat_stacks,                      self.frat_ctrl_stack,                      [a[0] for a in ctrl_tm1.data.split(1, 0)],                      ha_tm1,                      hf_tm1)
+
+        # region 1. update stacks
         for i in range(ctrl_tm1.size(0)):
             ctrl = ctrl_tm1.data[i]
             if ctrl == 1 or ctrl == 3:       # has children, has siblings
@@ -512,8 +514,9 @@ class TwoStackCell(RecStatefulContainer):
                     self.frat_ctrl_stack[i].pop()
                     if len(self.frat_ctrl_stack[i]) == 0 or self.frat_ctrl_stack[i][-1] in (1, 2):
                         break
+        # endregion
 
-        # make an update
+        # region 2. make an update
         ance_states, frat_states = self.get_stack_states()
         self.set_states_of_cells(ance_states, frat_states)
 
@@ -534,10 +537,27 @@ class TwoStackCell(RecStatefulContainer):
         else:
             x_t = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
             cell_out = self.cells[0].forward(x_t, t=t, **kw)
+        # endregion
         return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
 class DynamicOracleRunner(q.DecoderRunner):
+    """
+    Runs a decoder using the provided dynamic tracker.
+    Should be set as the input getter in decoder cells.
+    Called at every time step.
+    Given full arguments for a timestep, chooses the output token and stores it,
+    chooses a gold token and stores it, and return input arguments for next time step
+    from the chosen output token.
+    ===
+    With PAS tracker and exploration, this runner will be feeding decoder
+     with randomly sampled (possibly wrong) next symbols, the stored seq
+     of this runner will store what was chosen and the stored gold seq
+     will contain symbols sampled from acceptable choices (or set
+     to the chosen choices if they are in acceptable choices). These gold
+     choices will be used by the tracker to track decoding over an acceptable track.
+     Thus, exploration with PAS tracker will only go 1 error deep.
+    """
     def __init__(self, tracker=None,
                  inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),

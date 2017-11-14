@@ -247,9 +247,10 @@ def tst_stupid_training(cuda=False):
 
 if __name__ == "__main__":
     import sys
-    q.argprun(tst_stupid_training)
+    # q.argprun(tst_stupid_training)
+    # sys.exit()
+    tst()
     sys.exit()
-    # tst()
     # print("test done")
 
     x = q.var(torch.ones(4, 3), requires_grad=True).v

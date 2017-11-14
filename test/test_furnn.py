@@ -1,9 +1,9 @@
+import torch
 from unittest import TestCase
 import qelos as q
 import numpy as np
 import random
 from qelos.furnn import TwoStackCell, DynamicOracleRunner
-import torch
 
 
 class TestMemGRUCell(TestCase):
@@ -295,7 +295,7 @@ class TestTwoStackAttentionContextDecoder(TestCase):
         self.do_tst_it(innercell)
 
 
-from qelos.scripts.treesup import generate_random_trees, GroupTracker, Tree
+from qelos.scripts.treesup.pastrees import generate_random_trees, GroupTracker, Tree
 
 
 class TestDynamicOracleRunner(TestCase):
@@ -368,3 +368,8 @@ class TestDynamicOracleRunner(TestCase):
                 assert(builttree == tree)
 
         print(seqacc)
+
+
+if __name__ == "__main__":
+    t = TestDynamicOracleRunner()
+    t.test_it()
