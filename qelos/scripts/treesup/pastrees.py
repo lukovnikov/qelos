@@ -156,7 +156,8 @@ class Tracker(object):
     valid next tokens determined by this tracker, the tracker looks at the alternative
     token and if that is not provided (None), randomly chooses one of the valid tokens.
     """
-    def __init__(self, root, last_sibling_suffix="*LS"):    # !!! node name suffixes starting with * are ignored by Tree
+    def __init__(self, root, last_sibling_suffix="LS"):
+        # !!! node name suffixes starting with * are ignored by Tree.parse()
         super(Tracker, self).__init__()
         self.root = root
         self.current = self.root
@@ -167,7 +168,7 @@ class Tracker(object):
 
     def start(self):
         self.possible_paths.append([[self.root]])
-        allnvts = {self.root.label + self.last_sibling_suffix}
+        allnvts = {self.root.label + "*" + self.last_sibling_suffix}
         self._nvt = allnvts
         return allnvts
 
@@ -181,9 +182,10 @@ class Tracker(object):
                 assert(self._nvt is not None and len(self._nvt) > 0)
                 x = random.sample(self._nvt, 1)[0]
             j = 0
-            x_islastsibling = len(x) > len(self.last_sibling_suffix) and x[len(x)-len(self.last_sibling_suffix):] == self.last_sibling_suffix
+            xsplits = x.split("*")
+            x_islastsibling = len(xsplits) > 1 and self.last_sibling_suffix in xsplits[1:]
             if x_islastsibling:
-                x = x[:len(x)-len(self.last_sibling_suffix)]
+                x = xsplits[0]
             allnewpossiblepaths = []
             while j < len(self.possible_paths):     # for every possible path
                 possible_path = self.possible_paths[j]
@@ -226,7 +228,7 @@ class Tracker(object):
         for possible_path in self.possible_paths:
             if len(possible_path[-1]) == 1:
                 topnode = possible_path[-1][0]
-                allnvts.add(topnode.label+self.last_sibling_suffix)
+                allnvts.add(topnode.label + "*" + self.last_sibling_suffix)
             else:
                 for topnode in possible_path[-1]:
                     allnvts.add(topnode.label)

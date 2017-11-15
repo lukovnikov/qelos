@@ -35,7 +35,7 @@ def run(lr=OPT_LR,
     newidx += 1
     for k, v in osm.D.items():
         if not re.match("<[^>]+>", k):
-            oodic[v + "-LS"] = newidx
+            oodic[v + "*LS"] = newidx
             newidx += 1
 
 

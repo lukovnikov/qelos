@@ -30,6 +30,29 @@ class Querier(object):
                     raise e
                 time.sleep(1)
 
+    def get_triples_of(self, entity, language=None):
+        query = """SELECT DISTINCT ?p ?o WHERE {{
+            {} ?p ?o .
+            {}
+        }}""".format(entity, "FILTER (!isLiteral(?o) || lang(?o) = \"\" || langMatches(lang(?o), '{}'))".format(language) if language is not None else "")
+        res = self._exec_query(query)
+        results = res["results"]["bindings"]
+        alltriples = []
+        literaltriples = []
+        uritriples = []
+        for result in results:
+            p = result["p"]["value"]
+            o = result["o"]["value"]
+            o_type = result["o"]["type"]
+            if o_type == "literal":
+                literaltriples.append((entity, p, o))
+            elif o_type == "uri":
+                uritriples.append((entity, p, o))
+            else:
+                raise q.SumTingWongException("o type: {}".format(o_type))
+            alltriples.append((entity, p, o))
+        return alltriples, uritriples, literaltriples
+
     def get_entity_property(self, entities, property, language=None):
         if not q.issequence(entities):
             entities = [entities]
@@ -167,5 +190,12 @@ def run(basep="../../../../datasets/webqsp/webqsp.",
 
 if __name__ == "__main__":
     que = Querier()
-    print(que.get_entity_property("government.government_position_held.office_holder", "type.property.expected_type type.object.name", language="en"))
-    q.argprun(run)
+    alltriples, uritriples, literaltriples = que.get_triples_of("<http://rdf.freebase.com/ns/m.0g6z1>", language="en")
+    print("URI TRIPLES OF {}".format("given entity"))
+    for triple in uritriples:
+        print(triple)
+    print("LITERAL TRIPLES OF {}".format("given entity"))
+    for triple in literaltriples:
+        print(triple)
+    # print(que.get_entity_property("government.government_position_held.office_holder", "type.property.expected_type type.object.name", language="en"))
+    # q.argprun(run)
