@@ -46,6 +46,8 @@ class Querier(object):
             o_type = result["o"]["type"]
             if o_type == "literal":
                 literaltriples.append((entity, p, o))
+            elif o_type == "typed-literal":
+                literaltriples.append((entity, p, o, result["o"]["datatype"]))
             elif o_type == "uri":
                 uritriples.append((entity, p, o))
             else:
@@ -190,7 +192,7 @@ def run(basep="../../../../datasets/webqsp/webqsp.",
 
 if __name__ == "__main__":
     que = Querier()
-    alltriples, uritriples, literaltriples = que.get_triples_of("<http://rdf.freebase.com/ns/m.0g6z1>", language="en")
+    alltriples, uritriples, literaltriples = que.get_triples_of("<http://rdf.freebase.com/ns/m.06w2sn5>", language="en")
     print("URI TRIPLES OF {}".format("given entity"))
     for triple in uritriples:
         print(triple)
