@@ -599,6 +599,8 @@ class DynamicOracleRunner(q.DecoderRunner):
             ymask_np = np.zeros(y_t.size(), dtype="float32")
             for i, eid in enumerate(eids_np):
                 validnext = self.tracker.get_valid_next(eid)   # set of ids
+                if validnext == 3:
+                    pass
                 ymask_np[i, list(validnext)] = 1.
             ymask = q.var(ymask_np).cuda(y_t).v
 

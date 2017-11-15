@@ -192,7 +192,7 @@ def run(basep="../../../../datasets/webqsp/webqsp.",
 
 if __name__ == "__main__":
     que = Querier()
-    alltriples, uritriples, literaltriples = que.get_triples_of("<http://rdf.freebase.com/ns/m.06w2sn5>", language="en")
+    alltriples, uritriples, literaltriples = que.get_triples_of("<http://rdf.freebase.com/ns/m.08966>", language="en")
     print("URI TRIPLES OF {}".format("given entity"))
     for triple in uritriples:
         print(triple)

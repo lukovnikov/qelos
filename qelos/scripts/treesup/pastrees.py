@@ -4,6 +4,8 @@ import torch
 import numpy as np
 import random
 import re
+import tqdm
+from collections import OrderedDict
 
 """
 PAS trees.
@@ -43,6 +45,8 @@ class Tree(object):
         :param x: printed tree
         :return: tree structure
         """
+        x = x.replace("<STOP>", "")
+        x = x.replace("<MASK>", "")
         while len(x) > 0:
             if x[0] in [")", ",", " ", "("]:
                 x = x[1:]
@@ -165,6 +169,7 @@ class Tracker(object):
         self.possible_paths = []    # list of stacks
         self._nvt = None
         self.last_sibling_suffix = last_sibling_suffix
+        self.terminated = False
 
     def start(self):
         self.possible_paths.append([[self.root]])
@@ -236,15 +241,38 @@ class Tracker(object):
         return allnvts
 
 
+def build_dic_from_trees(trees, suffixes=["*LS"]):
+    alltokens = set()
+    for tree in trees:
+        treestr = tree.pp(with_parentheses=False)       # take one linearization
+        treetokens = set(treestr.split())
+        alltokens.update(treetokens)
+    indic = OrderedDict([("<MASK>", 0), ("<RARE>", 1), ("<START>", 2), ("<STOP>", 3)])
+    outdic = OrderedDict()
+    outdic.update(indic)
+    offset = len(indic)
+    numtokens = len(alltokens)
+    newidx = 0
+    for token in alltokens:
+        indic[token] = newidx + offset
+        outdic[token] = newidx + offset
+        for i, suffix in enumerate(suffixes):
+            outdic[token + suffix] = newidx + offset + (i + 1) * numtokens
+        newidx += 1
+    return indic, outdic
+
+
 class GroupTracker(object):
 
-    def __init__(self, trees, dic):
+    def __init__(self, trees):
         super(GroupTracker, self).__init__()
         self.trees = trees
-        self.dic = dic
+        indic, outdic = build_dic_from_trees(trees)
+        self.dic = outdic
         self.rdic = {v: k for k, v in self.dic.items()}
         self.trackers = []
-        self.D = {}             # TODO
+        self.D = outdic
+        self.D_in = indic
         for tree in self.trees:
             tracker = tree.track()
             tracker.start()
@@ -254,7 +282,10 @@ class GroupTracker(object):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:   # done
-            nvt = {"<MASK>"}
+            if not tracker.terminated:
+                nvt = {"<STOP>"}
+            else:
+                nvt = {"<MASK>"}
         nvt = map(lambda x: self.dic[x], nvt)
         return nvt
 
@@ -262,7 +293,9 @@ class GroupTracker(object):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:   # done
-            pass            # don't update tracker
+            if not tracker.terminated:
+                tracker.terminated = True
+            # don't update tracker
         else:
             x = self.rdic[x]
             tracker.nxt(x, alt_x=self.rdic[alt_x] if alt_x is not None else None)
@@ -334,6 +367,7 @@ def get_trees():
             acc.append(nvt)
         print(acc)
         print(chosen)
+    return trees
 
 
 def test_tracker():
@@ -364,10 +398,21 @@ def test_tracker():
         print(uniqueone)
 
 
+def test_dic_builder():
+    trees = get_trees()
+    indic, outdic = build_dic_from_trees(trees, ["*LS"])
+    for k, v in indic.items():
+        assert(outdic[k] == v)
+        if v > 3:
+            assert(outdic[k+"*LS"] - len(indic) + 4 == v)
+    print("DIC BUILDER TESTED")
+
 
 def run(lr=0.1):
+    test_dic_builder()
     test_tracker()
-    # trees = get_trees()
+    trees = get_trees()
+    build_dic_from_trees(trees)
 
 
 if __name__ == "__main__":
