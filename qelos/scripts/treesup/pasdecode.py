@@ -173,8 +173,7 @@ def run(lr=OPT_LR,
         assert(expected_ctrl_ids, testctrlids)
         tt.tock("tested")
 
-    # TODO: from her
-    # TODO: dynamic oracle broke with new dics in pastrees.py GroupTracker
+    # TODO: from here (seems to be working but what happens with tracker and twostackcell when the masks come?)
     if _opt_test:       # TEST with dummy core decoder
 
         class DummyCore(q.DecoderCore):

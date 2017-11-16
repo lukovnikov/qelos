@@ -593,13 +593,15 @@ class DynamicOracleRunner(q.DecoderRunner):
 
         if y_t is None:
             assert(t == 0)
-            assert(not q.issequence(x) or len(x) == 1)
-            x = x[0]
+            if q.issequence(x):
+                assert(len(x) == 1)
+                x = x[0]
             x_t = x
             gold_t = x_t
         else:
-            assert(not q.issequence(y_t) or len(y_t) == 1)
-            y_t = y_t[0]
+            if q.issequence(y_t):
+                assert(len(y_t) == 1)
+                y_t = y_t[0]
             # compute prob mask
             ymask_np = np.zeros(y_t.size(), dtype="float32")
             for i, eid in enumerate(eids_np):
