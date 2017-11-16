@@ -2,6 +2,7 @@ import torch
 import qelos as q
 from qelos.scripts.treesup.pastrees import GroupTracker, generate_random_trees, Tree, BinaryTree, UnaryTree, LeafTree
 import numpy as np
+from collections import OrderedDict
 import re
 
 
@@ -10,6 +11,7 @@ OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
 OPT_JOINT_LINOUT_MODE = "sum"
+OPT_EXPLORE = 0.
 _opt_test = True
 
 
@@ -18,6 +20,8 @@ def run(lr=OPT_LR,
         outembdim=OPT_OUTEMBDIM,
         linoutdim=OPT_LINOUTDIM,
         linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+        explore=OPT_EXPLORE,
+        cuda=False,
         ):
     tt = q.ticktock("script")
     # region load data
@@ -43,32 +47,27 @@ def run(lr=OPT_LR,
 
     # computed wordlinout for output symbols with topology annotations
     # dictionaries
-    specialsymbols = []
     symbols = []
     symbols_core = []        # unique cores of output symbols for linout
+    symbols_core_set = set()
     symbols_ls = []          # set of output linout symbols that are annotated as last sibling
     for k, v in tracker.D.items():
-        if re.match("<[^>]+>", k):
-            specialsymbols.append(k)
-        else:
-            symbols.append(k)
-            ksplits = k.split("*")
+        symbols.append(k)
+        ksplits = k.split("*")
+        if not ksplits[0] in symbols_core_set:
             symbols_core.append(ksplits[0])
-            symbols_ls.append("LS" in ksplits[1:])
-    specialsymbols_dic = dict(zip(specialsymbols, range(len(specialsymbols))))
-    symbols_dic = dict(zip(symbols, range(len(symbols))))
-    symbols_core_dic = dict(zip(list(set(symbols_core)), range(len(set(symbols_core)))))
+            symbols_core_set.add(ksplits[0])
+        symbols_ls.append("LS" in ksplits[1:] or k in "<MASK> <START> <STOP>".split())
+    symbols_dic = OrderedDict(zip(symbols, range(len(symbols))))
+    symbols_core_dic = OrderedDict(zip(symbols_core, range(len(symbols_core))))
     symbols2cores = [0] * len(symbols_dic)
-    for symbol, symbol_core in zip(symbols, symbols_core):
-        symbols2cores[symbols_dic[symbol]] = symbols_core_dic[symbol_core]
+    for symbol in symbols:
+        symbols2cores[symbols_dic[symbol]] = symbols_core_dic[symbol.split("*")[0]]
 
     symbols2cores = np.asarray(symbols2cores, dtype="int64")
     symbols_ls = np.asarray(symbols_ls, dtype="int64")
 
     # linouts
-    baselinout = q.ZeroWordLinout(linoutdim, worddic=tracker.D)
-    specialsymbols_linout = q.WordLinout(linoutdim, worddic=specialsymbols_dic)
-
     linoutdim_core, linoutdim_ls = linoutdim, linoutdim
 
     if linoutjoinmode == "cat":
@@ -120,19 +119,89 @@ def run(lr=OPT_LR,
                                           computer=symbols_linout_computer,
                                           worddic=symbols_dic)
 
-    linout = baselinout.override(specialsymbols_linout).override(symbols_linout)
+    linout = symbols_linout
 
     if _opt_test:       # TEST
         tt.tick("testing linouts")
         symbols_linout_computer.lsemb.embedding.weight.data.fill_(0)
         testvecs = torch.autograd.Variable(torch.randn(3, linoutdim))
         test_linout_output = linout(testvecs).data.numpy()
-        assert(np.allclose(test_linout_output[:, 4:44], test_linout_output[:, 44:]))
+        assert(np.allclose(test_linout_output[:, 3::2], test_linout_output[:, 4::2]))
         symbols_linout_computer.mode = "mul"
         test_linout_output = linout(testvecs).data.numpy()
-        assert(np.allclose(test_linout_output[:, 4:], np.zeros_like(test_linout_output[:, 4:])))
-        tt.tock("[success]")
+        assert(np.allclose(test_linout_output, np.zeros_like(test_linout_output)))
+        tt.tock("tested")
+        symbols_linout_computer.mode = "sum"
     # endregion
+
+    # region create oracle
+    symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
+    symbols2ctrl = np.zeros_like(symbols2cores)
+    for i, symbol in enumerate(symbols):
+        nochildren = symbol[:4] == "LEAF" or symbol in "<STOP> <MASK>".split() \
+                     or "NC" in symbol.split("*")[1:]
+        haschildren = not nochildren
+        hassiblings = not bool(symbols_ls[symbols_dic[symbol]])     # not "LS" in symbol.split("*")[1:] and not symbol in "<MASK> <START> <STOP>".split()
+        ctrl = (1 if hassiblings else 3) if haschildren else (2 if hassiblings else 4)
+        symbols2ctrl[i] = ctrl
+    symbols2ctrl_pt = q.var(symbols2ctrl).cuda(cuda).v
+
+    def outsym2insymandctrl(x):
+        cores = torch.index_select(symbols2cores_pt, 0, x)
+        ctrls = torch.index_select(symbols2ctrl_pt, 0, x)
+        return cores, ctrls
+
+    oracle = q.DynamicOracleRunner(tracker=tracker,
+                                   inparggetter=outsym2insymandctrl,
+                                   mode="sample",
+                                   explore=explore)
+    # endregion
+
+    if _opt_test:       # test from out sym to core and ctrl
+        tt.tick("testing from out sym to core&ctrl")
+        testtokens = "<MASK> <START> <STOP> <RARE> <RARE>*LS <RARE>*NC*LS BIN0 BIN0*LS UNI1 UNI1*LS LEAF2 LEAF2*LS".split()
+        testidxs = [linout.D[xe] for xe in testtokens]
+        testidxs_pt = q.var(np.asarray(testidxs)).cuda(cuda).v
+        revcoredic = {v: k for k, v in symbols_core_dic.items()}
+        testcoreidxs_pt, testctrls_pt = outsym2insymandctrl(testidxs_pt)
+        testcoreidxs = list(testcoreidxs_pt.data.numpy())
+        testcoretokens = [revcoredic[xe] for xe in testcoreidxs]
+        expected_core_tokens = "<MASK> <START> <STOP> <RARE> <RARE> <RARE> BIN0 BIN0 UNI1 UNI1 LEAF2 LEAF2".split()
+        assert(expected_core_tokens == testcoretokens)
+        testctrlids = list(testctrls_pt.data.numpy())
+        expected_ctrl_ids = [4, 3, 4, 1, 3, 4, 1, 3, 1, 3, 2, 4]
+        assert(expected_ctrl_ids, testctrlids)
+        tt.tock("tested")
+
+    # TODO: from her
+    # TODO: dynamic oracle broke with new dics in pastrees.py GroupTracker
+    if _opt_test:       # TEST with dummy core decoder
+
+        class DummyCore(q.DecoderCore):
+            def __init__(self, *x, **kw):
+                super(DummyCore, self).__init__(*x, **kw)
+
+            def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
+                cell_out = q.var(torch.randn((y_tm1.size(0), linoutdim))).cuda(y_tm1).v
+                return cell_out, {"t": t, "x_t_emb": outemb(y_tm1), "ctx_t": ctx_t, "mask": outmask_t}
+
+            def reset_state(self):
+                pass
+
+        test_decoder_core = DummyCore(outemb)
+        test_decoder_top = q.DecoderTop(linout)
+        test_decoder = q.ModularDecoderCell(test_decoder_core, test_decoder_top)
+        test_decoder.set_runner(oracle)
+        test_decoder = test_decoder.to_decoder()
+
+        test_eids = q.var(np.arange(0, 3)).cuda(cuda).v
+        test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
+
+        out = test_decoder(test_start_symbols, eids=test_eids, maxtime=15)
+        print(len(out))
+
+
+
 
 
 if __name__ == "__main__":

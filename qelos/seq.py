@@ -883,7 +883,7 @@ class FreeRunner(DecoderRunner):
 
 # DECODER MODULES #################
 
-class DecoderCore(nn.Module):
+class DecoderCore(RecStateful):
     def __init__(self, emb, *layers, **kw):
         super(DecoderCore, self).__init__(**kw)
         self.block = RecStack(*layers)

@@ -169,7 +169,7 @@ class Tracker(object):
         self.possible_paths = []    # list of stacks
         self._nvt = None
         self.last_sibling_suffix = last_sibling_suffix
-        self.terminated = False
+        self.terminated = False         # set to False to expect a <STOP> at the end of sequence
 
     def start(self):
         self.possible_paths.append([[self.root]])
@@ -247,10 +247,11 @@ def build_dic_from_trees(trees, suffixes=["*LS"]):
         treestr = tree.pp(with_parentheses=False)       # take one linearization
         treetokens = set(treestr.split())
         alltokens.update(treetokens)
-    indic = OrderedDict([("<MASK>", 0), ("<RARE>", 1), ("<START>", 2), ("<STOP>", 3)])
+    indic = OrderedDict([("<MASK>", 0), ("<START>", 1), ("<STOP>", 2)])
     outdic = OrderedDict()
     outdic.update(indic)
     offset = len(indic)
+    alltokens = ["<RARE>", "<RARE>*NC"] + sorted(list(alltokens))
     numtokens = len(alltokens)
     newidx = 0
     for token in alltokens:

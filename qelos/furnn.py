@@ -593,14 +593,17 @@ class DynamicOracleRunner(q.DecoderRunner):
 
         if y_t is None:
             assert(t == 0)
+            assert(not q.issequence(x) or len(x) == 1)
+            x = x[0]
             x_t = x
+            gold_t = x_t
         else:
+            assert(not q.issequence(y_t) or len(y_t) == 1)
+            y_t = y_t[0]
             # compute prob mask
             ymask_np = np.zeros(y_t.size(), dtype="float32")
             for i, eid in enumerate(eids_np):
                 validnext = self.tracker.get_valid_next(eid)   # set of ids
-                if validnext == 3:
-                    pass
                 ymask_np[i, list(validnext)] = 1.
             ymask = q.var(ymask_np).cuda(y_t).v
 
@@ -642,13 +645,14 @@ class DynamicOracleRunner(q.DecoderRunner):
             self.seqacc.append(x_t)
             self.goldacc.append(gold_t)
 
-        # update tracker
-        for x_t_e, eid, gold_t_e in zip(x_t.cpu().data.numpy(), eids_np, gold_t.cpu().data.numpy()):
-            self.tracker.update(eid, x_t_e, alt_x=gold_t_e)
+            # update tracker
+            for x_t_e, eid, gold_t_e in zip(x_t.cpu().data.numpy(), eids_np, gold_t.cpu().data.numpy()):
+                # TODO: ?? switch to gold_t here instead of providing to alt_x ??
+                self.tracker.update(eid, x_t_e, alt_x=gold_t_e)
 
         # return
         r = self.inparggetter(x_t)
-        if isinstance(r, tuple):
+        if isinstance(r, tuple) and len(r) == 2 and isinstance(r[1], dict):
             inpargs, kwupd = r
             outkwargs.update(kwupd)
         else:
