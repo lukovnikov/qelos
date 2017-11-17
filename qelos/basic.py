@@ -52,6 +52,15 @@ class persist_kwargs(nn.Module):
     pass
 
 
+class wire(StackSpecFunction):
+    def __init__(self, *spec, **kwspec):
+        super(wire, self).__init__(**kw)
+
+    def forward(self, history, saved_slots):
+        pass
+        # TODO
+
+
 class argmap(StackSpecFunction):
     """
     Only used inside stacks.
@@ -163,6 +172,7 @@ class Stack(nn.Module):
         self.add(*layers)
         self._saved_slots = {}      # not for params
         self._persist_kwargs = False
+        self._wire_nodes = []     # contains outputs of each layer for wiring
 
     def add(self, *layers):
         self._add(*layers)
@@ -173,6 +183,7 @@ class Stack(nn.Module):
     def forward(self, *x, **kw):
         args, kwargs = x, kw
         for layer in self.layers:
+            push_to_wire_nodes = True
             rargs = args
             rkw = {}
             if self._persist_kwargs:
@@ -184,6 +195,9 @@ class Stack(nn.Module):
                 globols = layer(rargs, rkw, self._saved_slots)
             elif isinstance(layer, q.persist_kwargs):
                 self._persist_kwargs = True
+            elif isinstance(layer, q.wire):
+                push_to_wire_nodes = False      # ignores wires in history
+                args, kwargs = layer(self._wire_nodes, self._saved_slots)
             else:
                 layerret = layer(*rargs, **rkw)
                 if isinstance(layerret, tuple) \
@@ -194,6 +208,8 @@ class Stack(nn.Module):
                     args, kwargs = layerret, {}
                 if not q.issequence(args):
                     args = tuple([args])
+            if push_to_wire_nodes:
+                self._wire_nodes.append((args, kwargs))
         if len(args) == 1:
             args = args[0]
         if len(kwargs) > 0:

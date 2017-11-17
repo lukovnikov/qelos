@@ -253,6 +253,22 @@ def run(lr=OPT_LR,
 
 
     )
+
+    encoder = q.RecurrentStack(
+        inpemb,
+        torch.nn.Dropout(dropout),
+        q.BidirGRULayer(inpembdim, encdim//2).return_final(True),
+        q.wire((-2, 0), (-1, 0)), q.Lambda(lambda x, y:
+                 torch.cat([x, y], 2)),
+        q.BidirGRULayer(encdim + inpembdim, encdim // 2).return_final(True),
+        q.wire((3, 0), (5, 0)), q.Lambda(lambda x, y:
+                 q.intercat([q.intercat(torch.chunk(x, 2, 2)),
+                             q.intercat(torch.chunk(y, 2, 2))])),
+        q.wire((3, 1), (5, 1)), q.Lambda(lambda x, y:
+                 q.intercat([q.intercat(torch.chunk(x, 2, 1)),
+                             q.intercat(torch.chunk(y, 2, 1))])),
+        q.wire((-2, 0), (-1, 0)),
+    )
     # endregion
 
     # region initialize twostackcore
