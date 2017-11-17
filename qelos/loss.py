@@ -65,7 +65,7 @@ class DiscreteLoss(Loss):
                 if mask is None:
                     mask = mask_i
                 else:
-                    mask = mask * mask_i
+                    mask = mask & mask_i
         return mask
 
 
@@ -76,7 +76,7 @@ class SeqLoss(nn.Module):
 
     def _forward(self, probs, gold, mask=None):     # (batsize, seqlen, dim), idx^(batsize, seqlen)
         batsize, seqlen, vocsize = probs.size()
-        x = probs.view(batsize * seqlen, vocsize)
+        x = probs.contiguous().view(batsize * seqlen, vocsize)
         y = gold.contiguous().view(batsize * seqlen)
         if mask is not None:
             mask = mask.contiguous().view(batsize * seqlen, -1)

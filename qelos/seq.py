@@ -137,19 +137,29 @@ class Decoder(nn.Module):
                 self.set_init_states(*new_init_states)
         y_list = []
         y_t = None
-        for t in range(maxtime):
+        t = 0
+        stopdecoding = False
+        while True:
             #x_t = [x_e[:, t] if x_e.sequence else x_e for x_e in x]
             x_t, x_t_kw = self.block._get_inputs_t(t=t, x=x, xkw=kw, y_t=y_t)        # let the Rec definition decide what to input
+            stopdecoding |= getkw(x_t_kw, "_stop", default=False)
             if not issequence(x_t):
                 x_t = [x_t]
             x_t = tuple(x_t)
             x_t_kw["t"] = t
             blockret = self.block(*x_t, **x_t_kw)
+            if isinstance(blockret, tuple) and len(blockret) == 2 and isinstance(blockret[1], dict):
+                blockret_kw = blockret[1]
+                stopdecoding |= getkw(blockret_kw, "_stop", default=False)
+                blockret = blockret[0]
             if not issequence(blockret):
                 blockret = [blockret]
             y_t = blockret
             #y_t = [y_t_e.unsqueeze(1) for y_t_e in blockret[:self.block.numstates]]
             y_list.append(y_t)
+            t += 1
+            if (maxtime is not None and t == maxtime) or stopdecoding:
+                break
         y = tuple()
         for i in range(len(y_list[0])):
             yl_e = [y_list[j][i] for j in range(len(y_list))]

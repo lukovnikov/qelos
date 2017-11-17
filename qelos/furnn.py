@@ -473,6 +473,10 @@ class TwoStackCell(RecStatefulContainer):
         # region 1. update stacks
         for i in range(ctrl_tm1.size(0)):
             ctrl = ctrl_tm1.data[i]
+            if ctrl == 0:                    # masked
+                pass
+            else:
+                pass
             if ctrl == 1 or ctrl == 3:       # has children, has siblings
                 # push ancestral stacks
                 self.ance_sym_stacks[i].append(y_tm1[i])
@@ -568,8 +572,8 @@ class DynamicOracleRunner(q.DecoderRunner):
         self.tracker = tracker
         self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs
-        self.seqacc = []
-        self.goldacc = []
+        self.seqacc = []        # history of what has been fed to next time step
+        self.goldacc = []       # use for supervision
         self.mode = mode
         self.explore = explore
 
@@ -612,7 +616,7 @@ class DynamicOracleRunner(q.DecoderRunner):
             if self.explore > 0:
                 unmaskedprobs = self.scores2probs(y_t)
                 if self.mode == "sample":
-                    x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1)
+                    x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
                 elif self.mode == "argmax":
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
@@ -624,7 +628,7 @@ class DynamicOracleRunner(q.DecoderRunner):
 
             # sample gold from probs
             if self.mode == "sample":
-                gold_t = torch.multinomial(goldprobs, 1).squeeze(-1)
+                gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
             elif self.mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
@@ -652,6 +656,10 @@ class DynamicOracleRunner(q.DecoderRunner):
                 # TODO: ?? switch to gold_t here instead of providing to alt_x ??
                 self.tracker.update(eid, x_t_e, alt_x=gold_t_e)
 
+        # termination
+        _terminates = [self.tracker.is_terminated(eid) for eid in eids_np]
+        _terminate = all(_terminates)
+
         # return
         r = self.inparggetter(x_t)
         if isinstance(r, tuple) and len(r) == 2 and isinstance(r[1], dict):
@@ -659,6 +667,9 @@ class DynamicOracleRunner(q.DecoderRunner):
             outkwargs.update(kwupd)
         else:
             inpargs = r
+
+        if _terminate:
+            outkwargs.update({"_stop": _terminate})
         return inpargs, outkwargs
 
 

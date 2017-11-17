@@ -133,7 +133,7 @@ class WordEmb(WordEmbBase):
     """ is a VectorEmbed with a dictionary to map words to ids """
     def __init__(self, dim=50, value=None, worddic=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 sparse=False, fixed=False,
+                 sparse=False, fixed=False, no_maskzero=False,
                  **kw):
         """
         Normal word embedder. Wraps nn.Embedding.
@@ -157,6 +157,8 @@ class WordEmb(WordEmbBase):
         maskid = worddic[self.masktoken] if self.masktoken in worddic else None
         rareid = worddic[self.raretoken] if self.raretoken in worddic else None
         self.maskid = maskid
+
+        maskid = maskid if not no_maskzero else None
 
         indim = max(worddic.values())+1        # to init from worddic
         self.embedding = nn.Embedding(indim, dim, padding_idx=maskid,

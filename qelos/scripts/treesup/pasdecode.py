@@ -24,6 +24,7 @@ def run(lr=OPT_LR,
         cuda=False,
         ):
     tt = q.ticktock("script")
+    ttt = q.ticktock("test")
     # region load data
     ism = q.StringMatrix()
     ism.tokenize = lambda x: x.split()
@@ -72,7 +73,7 @@ def run(lr=OPT_LR,
 
     if linoutjoinmode == "cat":
         linoutdim_core = linoutdim // 10 * 9
-    symbols_core_emb = q.WordEmb(linoutdim_core, worddic=symbols_core_dic)
+    symbols_core_emb = q.WordEmb(linoutdim_core, worddic=symbols_core_dic, no_maskzero=True)
 
     class JointLinoutComputer(torch.nn.Module):
         def __init__(self, coreemb, linoutdim, mode="sum", **kw):
@@ -122,7 +123,7 @@ def run(lr=OPT_LR,
     linout = symbols_linout
 
     if _opt_test:       # TEST
-        tt.tick("testing linouts")
+        ttt.tick("testing linouts")
         symbols_linout_computer.lsemb.embedding.weight.data.fill_(0)
         testvecs = torch.autograd.Variable(torch.randn(3, linoutdim))
         test_linout_output = linout(testvecs).data.numpy()
@@ -130,7 +131,7 @@ def run(lr=OPT_LR,
         symbols_linout_computer.mode = "mul"
         test_linout_output = linout(testvecs).data.numpy()
         assert(np.allclose(test_linout_output, np.zeros_like(test_linout_output)))
-        tt.tock("tested")
+        ttt.tock("tested")
         symbols_linout_computer.mode = "sum"
     # endregion
 
@@ -142,7 +143,7 @@ def run(lr=OPT_LR,
                      or "NC" in symbol.split("*")[1:]
         haschildren = not nochildren
         hassiblings = not bool(symbols_ls[symbols_dic[symbol]])     # not "LS" in symbol.split("*")[1:] and not symbol in "<MASK> <START> <STOP>".split()
-        ctrl = (1 if hassiblings else 3) if haschildren else (2 if hassiblings else 4)
+        ctrl = (1 if hassiblings else 3) if haschildren else (2 if hassiblings else 4) if symbol != "<MASK>" else 0
         symbols2ctrl[i] = ctrl
     symbols2ctrl_pt = q.var(symbols2ctrl).cuda(cuda).v
 
@@ -158,7 +159,7 @@ def run(lr=OPT_LR,
     # endregion
 
     if _opt_test:       # test from out sym to core and ctrl
-        tt.tick("testing from out sym to core&ctrl")
+        ttt.tick("testing from out sym to core&ctrl")
         testtokens = "<MASK> <START> <STOP> <RARE> <RARE>*LS <RARE>*NC*LS BIN0 BIN0*LS UNI1 UNI1*LS LEAF2 LEAF2*LS".split()
         testidxs = [linout.D[xe] for xe in testtokens]
         testidxs_pt = q.var(np.asarray(testidxs)).cuda(cuda).v
@@ -171,10 +172,10 @@ def run(lr=OPT_LR,
         testctrlids = list(testctrls_pt.data.numpy())
         expected_ctrl_ids = [4, 3, 4, 1, 3, 4, 1, 3, 1, 3, 2, 4]
         assert(expected_ctrl_ids, testctrlids)
-        tt.tock("tested")
+        ttt.tock("tested")
 
-    # TODO: from here (seems to be working but what happens with tracker and twostackcell when the masks come?)
     if _opt_test:       # TEST with dummy core decoder
+        ttt.tick("testing with dummy decoder")
 
         class DummyCore(q.DecoderCore):
             def __init__(self, *x, **kw):
@@ -196,10 +197,67 @@ def run(lr=OPT_LR,
         test_eids = q.var(np.arange(0, 3)).cuda(cuda).v
         test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
 
-        out = test_decoder(test_start_symbols, eids=test_eids, maxtime=15)
-        print(len(out))
+        out = test_decoder(test_start_symbols, eids=test_eids, maxtime=100)
+        # get gold (! last timestep in out has no gold --> ensure one too many decoding timesteps)
+        golds = oracle.goldacc
+        seqs = oracle.seqacc
+        golds = torch.stack(golds, 1)
+        seqs = torch.stack(seqs, 1)
+        out = out[:, :-1, :]
+        # test if gold tree linearization produces gold tree
+        for i in range(len(out)):
+            goldtree = Tree.parse(tracker.pp(golds[i].cpu().data.numpy()))
+            predtree = Tree.parse(tracker.pp(seqs[i].cpu().data.numpy()))
+            exptree = trees[i]
+            assert(exptree == goldtree)
+            assert(exptree == predtree)
+
+        # try loss
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        l = loss(out, golds)
+        ttt.msg("loss: {}".format(l.data[0]))
+        l.backward()
+        params = q.params_of(test_decoder)
+        core_params = q.params_of(test_decoder_core)
+        linout_params = q.params_of(linout)
+        outemb_params = q.params_of(outemb)
+        for param in params:
+            topass = False
+            for outemb_param in outemb_params:
+                if param.size() == outemb_param.size() and param is outemb_param:
+                    topass = True
+                    break
+            if topass:
+                pass
+            else:
+                assert(param.grad is not None)
+                assert(param.grad.norm().data[0] > 0)
+        ttt.tock("tested with dummy decoder")
+
+    # region initialize encoder
+
+    encoder = q.RecurrentStack(
+        inpemb,
+        q.argsave.spec(embedding=0, embedding_mask=1),
+        torch.nn.Dropout(dropout),
+        q.BidirGRULayer(inpembdim, encdim//2),
+        q.argsave.spec(first=0),
+        q.argmap.spec(["embedding"], 0),
+        q.Lambda(lambda x, y: torch.cat([x, y], 2)),
+        q.BidirGRULayer(encdim + inpembdim, encdim//2),
+        q.Lambda(lambda x: q.intercat(torch.chunk(x, 2))),
+        q.argsave.spec(secondout=0),
+        q.argmap.spec(["first"]),
+        q.Lambda(lambda x: q.intercat(torch.chunk(x, 2))),
+        q.argmap.spec(["secondout"], 0),
 
 
+    )
+    # endregion
+
+    # region initialize twostackcore
+
+    # endregion
 
 
 

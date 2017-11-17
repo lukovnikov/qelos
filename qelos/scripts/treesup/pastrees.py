@@ -169,13 +169,16 @@ class Tracker(object):
         self.possible_paths = []    # list of stacks
         self._nvt = None
         self.last_sibling_suffix = last_sibling_suffix
-        self.terminated = False         # set to False to expect a <STOP> at the end of sequence
+        self.terminated = True         # set to False to expect a <STOP> at the end of sequence
 
     def start(self):
         self.possible_paths.append([[self.root]])
         allnvts = {self.root.label + "*" + self.last_sibling_suffix}
         self._nvt = allnvts
         return allnvts
+
+    def is_terminated(self):
+        return len(self._nvt) == 0
 
     def nxt(self, x, alt_x=None):       # x is a string or nothing
         if len(self.possible_paths) == 0:   # starting (or ended so restarting)
@@ -300,6 +303,14 @@ class GroupTracker(object):
         else:
             x = self.rdic[x]
             tracker.nxt(x, alt_x=self.rdic[alt_x] if alt_x is not None else None)
+
+    def is_terminated(self, eid):
+        return self.trackers[eid].is_terminated()
+
+    def pp(self, x):
+        xs = [self.rdic[xe] for xe in x if xe != self.dic["<MASK>"]]
+        xstring = " ".join(xs)
+        return xstring
 
 
 def generate_random_trees(n=1000, maxleaves=6, maxunaries=2,
