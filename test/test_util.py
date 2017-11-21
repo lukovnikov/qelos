@@ -2,6 +2,7 @@ from unittest import TestCase
 
 import qelos as q
 import numpy as np
+import torch
 
 
 class TestSplit(TestCase):
@@ -36,3 +37,46 @@ class TestLog(TestCase):
             },
             "level1key2": "level1key2val"})
         pass
+
+
+class TestIntercat(TestCase):
+    def test_it_1D(self):
+        a = torch.zeros(3)
+        b = torch.ones(3)
+        c = q.intercat([a, b])
+        self.assertTrue(np.allclose(c.numpy(), np.asarray([0, 1, 0, 1, 0, 1])))
+        print(c)
+
+    def test_it_2D(self):
+        a = torch.zeros(2, 2)
+        b = torch.ones(2, 2)
+        c = q.intercat([a, b])
+        exp = np.asarray([
+            [0, 1, 0, 1],
+            [0, 1, 0, 1],
+        ])
+        self.assertTrue(np.allclose(c.numpy(), exp))
+        c = q.intercat([a, b], 0)
+        self.assertTrue(np.allclose(c.numpy(), exp.T))
+
+    def test_it_3D(self):
+        a = torch.zeros(2,2,2)
+        b = torch.ones(2,2,2)
+        c = q.intercat([a, b])
+        exp = np.asarray([
+            [
+                [0, 1, 0, 1],
+                [0, 1, 0, 1],
+            ],
+            [
+                [0, 1, 0, 1],
+                [0, 1, 0, 1],
+            ],
+        ])
+        self.assertTrue(np.allclose(c.numpy(), exp))
+        c = q.intercat([a, b], 1)
+        self.assertTrue(np.allclose(c.numpy(), exp.swapaxes(2, 1)))
+        print(exp.swapaxes(2, 1))
+        c = q.intercat([a, b], 0)
+        self.assertTrue(np.allclose(c.numpy(), exp.swapaxes(2, 0)))
+        print(exp.swapaxes(2, 0))

@@ -3,7 +3,7 @@ from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \
     BidirLSTMLayer, Recurrent, Reccable, PositionwiseForward, \
-    TimesharedDropout, CatLSTMCell
+    TimesharedDropout, CatLSTMCell, ReccableLambda, RecurrentLambda
 
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, \
     RankingLoss, SeqRankingLoss, CrossEntropyLoss, \

@@ -963,7 +963,10 @@ class StaticContextDecoderTop(ContextDecoderTop):
             return out
 
     def get_top2core_0(self):
-        return self.stored_ctx
+        if self.ctx2out:
+            return self.stored_ctx
+        else:
+            return None
 
 
 class AttentionContextDecoderTop(ContextDecoderTop):

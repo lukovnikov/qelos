@@ -569,17 +569,19 @@ class DynamicOracleRunner(q.DecoderRunner):
                  explore=0.,
                  **kw):
         super(DynamicOracleRunner, self).__init__(**kw)
-        self.tracker = tracker
         self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs
-        self.seqacc = []        # history of what has been fed to next time step
-        self.goldacc = []       # use for supervision
         self.mode = mode
         self.explore = explore
+        #
+        self.tracker = tracker
+        self.seqacc = []        # history of what has been fed to next time step
+        self.goldacc = []       # use for supervision
 
     def reset(self):
         self.seqacc = []
         self.goldacc = []
+        self.tracker.reset()
 
     def get_sequence(self):
         """ get the chosen sequence """

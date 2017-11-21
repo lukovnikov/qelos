@@ -30,7 +30,7 @@ class Lambda(nn.Module):
         return ret
 
 
-class StackSpecFunction(Lambda):
+class StackSpecFunction(nn.Module):
     """ Only used inside stacks."""
     @staticmethod
     def get_(spece, a, k, g):
@@ -48,20 +48,47 @@ class StackSpecFunction(Lambda):
             return a[spece]
 
 
+class LambdaStackSpecFunction(StackSpecFunction, Lambda):
+    pass
+
+
 class persist_kwargs(nn.Module):
     pass
 
 
 class wire(StackSpecFunction):
-    def __init__(self, *spec, **kwspec):
-        super(wire, self).__init__(**kw)
+    def __init__(self, *specs, **kwspecs):
+        super(wire, self).__init__()
+        self.specs = specs
+        self.kwspecs = kwspecs
 
     def forward(self, history, saved_slots):
-        pass
-        # TODO
+        return wire._forward(self.specs, self.kwspecs, history, saved_slots)
+
+    @staticmethod
+    def _forward(specs, kwspecs, history, saved_slots):
+        outs, kwouts = [], {}
+        def _fn(_spec):
+            if isinstance(_spec, tuple):
+                assert(len(_spec) == 2)
+                layer_id, out_id = _spec
+                assert(not isinstance(out_id, (list, dict)))
+                hist_args, hist_kwargs = history[layer_id]
+                ret = StackSpecFunction.get_(out_id, hist_args, hist_kwargs, {})
+            else:
+                assert(isinstance(_spec, (list, dict)))
+                ret = StackSpecFunction.get_(_spec, [], {}, saved_slots)
+            return ret
+        for spec in specs:
+            outs.append(_fn(spec))
+        for key, value in kwspecs.items():
+            kwouts[key] = _fn(value)
+        return outs, kwouts
 
 
-class argmap(StackSpecFunction):
+
+
+class argmap(LambdaStackSpecFunction):
     """
     Only used inside stacks.
     Provided function must follow .forward()'s specifications
@@ -112,7 +139,7 @@ class argmap(StackSpecFunction):
         return cls(dict_arg_map)
 
 
-class argsave(StackSpecFunction):
+class argsave(LambdaStackSpecFunction):
     """
     Only used inside stacks.
     Provided function must accept .forward()'s argument specification
@@ -165,6 +192,10 @@ class argsave(StackSpecFunction):
         return cls(dict_save_map)
 
 
+class WiredStackLayer(nn.Module):
+    pass    # OVERKILL
+
+
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
@@ -180,8 +211,26 @@ class Stack(nn.Module):
     def _add(self, *layers):
         self.layers.extend(list(layers))
 
+    def reset_stack_state(self):
+        self._wire_nodes = []
+        self._saved_slots = {}
+
     def forward(self, *x, **kw):
+        self.reset_stack_state()
+        self._wire_nodes.append((x, kw))
+        def argsandkwargsfromlayerret(_ret):
+            if isinstance(_ret, tuple) \
+                and len(_ret) == 2 \
+                    and isinstance(_ret[1], dict):
+                args, kwargs = _ret
+            else:
+                args, kwargs = _ret, {}
+            if not q.issequence(args):
+                args = tuple([args])
+            return args, kwargs
+
         args, kwargs = x, kw
+
         for layer in self.layers:
             push_to_wire_nodes = True
             rargs = args
@@ -189,6 +238,14 @@ class Stack(nn.Module):
             if self._persist_kwargs:
                 rkw.update(kw)
             rkw.update(kwargs)
+            """if isinstance(layer, tuple):
+                if len(layer) == 2:
+                    assert(isinstance(layer[0], q.wire))
+                    specargs, speckwargs = layer[0](self._wire_nodes, self._saved_slots)
+                    layerret = layer(*specargs, **speckwargs)
+                    args, kwargs = argsandkwargsfromlayerret(layerret)
+                push_to_wire_nodes = True
+            el"""
             if isinstance(layer, q.argmap):
                 args, kwargs = layer(rargs, rkw, self._saved_slots)
             elif isinstance(layer, argsave):
@@ -196,18 +253,11 @@ class Stack(nn.Module):
             elif isinstance(layer, q.persist_kwargs):
                 self._persist_kwargs = True
             elif isinstance(layer, q.wire):
-                push_to_wire_nodes = False      # ignores wires in history
+                push_to_wire_nodes = True      # ignores wires in history
                 args, kwargs = layer(self._wire_nodes, self._saved_slots)
             else:
                 layerret = layer(*rargs, **rkw)
-                if isinstance(layerret, tuple) \
-                    and len(layerret) == 2 \
-                        and isinstance(layerret[1], dict):
-                    args, kwargs = layerret
-                else:
-                    args, kwargs = layerret, {}
-                if not q.issequence(args):
-                    args = tuple([args])
+                args, kwargs = argsandkwargsfromlayerret(layerret)
             if push_to_wire_nodes:
                 self._wire_nodes.append((args, kwargs))
         if len(args) == 1:

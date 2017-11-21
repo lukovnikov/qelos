@@ -12,6 +12,9 @@ OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
 OPT_JOINT_LINOUT_MODE = "sum"
 OPT_EXPLORE = 0.
+OPT_DROPOUT = 0.3
+OPT_ENCDIM = 100
+
 _opt_test = True
 
 
@@ -19,6 +22,8 @@ def run(lr=OPT_LR,
         inpembdim=OPT_INPEMBDIM,
         outembdim=OPT_OUTEMBDIM,
         linoutdim=OPT_LINOUTDIM,
+        encdim=OPT_ENCDIM,
+        dropout=OPT_DROPOUT,
         linoutjoinmode=OPT_JOINT_LINOUT_MODE,
         explore=OPT_EXPLORE,
         cuda=False,
@@ -48,25 +53,30 @@ def run(lr=OPT_LR,
 
     # computed wordlinout for output symbols with topology annotations
     # dictionaries
-    symbols = []
-    symbols_core = []        # unique cores of output symbols for linout
-    symbols_core_set = set()
-    symbols_ls = []          # set of output linout symbols that are annotated as last sibling
+    symbols_core_dic = OrderedDict()
+    symbols_is_last_sibling = np.zeros((len(tracker.D),), dtype="int64")
     for k, v in tracker.D.items():
-        symbols.append(k)
         ksplits = k.split("*")
-        if not ksplits[0] in symbols_core_set:
-            symbols_core.append(ksplits[0])
-            symbols_core_set.add(ksplits[0])
-        symbols_ls.append("LS" in ksplits[1:] or k in "<MASK> <START> <STOP>".split())
-    symbols_dic = OrderedDict(zip(symbols, range(len(symbols))))
-    symbols_core_dic = OrderedDict(zip(symbols_core, range(len(symbols_core))))
-    symbols2cores = [0] * len(symbols_dic)
-    for symbol in symbols:
-        symbols2cores[symbols_dic[symbol]] = symbols_core_dic[symbol.split("*")[0]]
+        if not ksplits[0] in symbols_core_dic:
+            symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
+        symbols_is_last_sibling[v] = "LS" in ksplits[1:] or k in "<MASK> <START> <STOP>".split()
+    symbols2cores = np.zeros((len(tracker.D),), dtype="int64")
+    for symbol in tracker.D:
+        symbols2cores[tracker.D[symbol]] = symbols_core_dic[symbol.split("*")[0]]
 
-    symbols2cores = np.asarray(symbols2cores, dtype="int64")
-    symbols_ls = np.asarray(symbols_ls, dtype="int64")
+    if _opt_test:
+        ttt.tick("testing dictionaries")
+        testtokens = "<MASK> <START> <STOP> <RARE> <RARE>*LS <RARE>*NC*LS BIN0 BIN0*LS UNI1 UNI1*LS LEAF2 LEAF2*LS".split()
+        testidxs = np.asarray([tracker.D[xe] for xe in testtokens])
+        testcoreidxs = symbols2cores[testidxs]
+        expcoretokens = "<MASK> <START> <STOP> <RARE> <RARE> <RARE> BIN0 BIN0 UNI1 UNI1 LEAF2 LEAF2".split()
+        rcoredic = {v: k for k, v in symbols_core_dic.items()}
+        testcoretokens = [rcoredic[xe] for xe in testcoreidxs]
+        assert(testcoretokens == expcoretokens)
+        exp_is_last_sibling = [1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1]
+        test_is_last_sibling = symbols_is_last_sibling[testidxs]
+        assert(list(test_is_last_sibling) == exp_is_last_sibling)
+        ttt.tock("tested dictionaries")
 
     # linouts
     linoutdim_core, linoutdim_ls = linoutdim, linoutdim
@@ -115,10 +125,10 @@ def run(lr=OPT_LR,
             return embs
 
     symbols_linout_computer = JointLinoutComputer(symbols_core_emb, linoutdim, mode=linoutjoinmode)
-    symbols_linout_data = np.stack([symbols2cores, symbols_ls], axis=1)
+    symbols_linout_data = np.stack([symbols2cores, symbols_is_last_sibling], axis=1)
     symbols_linout = q.ComputedWordLinout(data=symbols_linout_data,
                                           computer=symbols_linout_computer,
-                                          worddic=symbols_dic)
+                                          worddic=tracker.D)
 
     linout = symbols_linout
 
@@ -127,7 +137,7 @@ def run(lr=OPT_LR,
         symbols_linout_computer.lsemb.embedding.weight.data.fill_(0)
         testvecs = torch.autograd.Variable(torch.randn(3, linoutdim))
         test_linout_output = linout(testvecs).data.numpy()
-        assert(np.allclose(test_linout_output[:, 3::2], test_linout_output[:, 4::2]))
+        assert(np.allclose(test_linout_output[:, 3:(test_linout_output.shape[1]-3)//2+3], test_linout_output[:, (test_linout_output.shape[1]-3)//2+3:]))
         symbols_linout_computer.mode = "mul"
         test_linout_output = linout(testvecs).data.numpy()
         assert(np.allclose(test_linout_output, np.zeros_like(test_linout_output)))
@@ -136,15 +146,16 @@ def run(lr=OPT_LR,
     # endregion
 
     # region create oracle
-    symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
     symbols2ctrl = np.zeros_like(symbols2cores)
-    for i, symbol in enumerate(symbols):
+    for symbol in tracker.D:
         nochildren = symbol[:4] == "LEAF" or symbol in "<STOP> <MASK>".split() \
                      or "NC" in symbol.split("*")[1:]
         haschildren = not nochildren
-        hassiblings = not bool(symbols_ls[symbols_dic[symbol]])     # not "LS" in symbol.split("*")[1:] and not symbol in "<MASK> <START> <STOP>".split()
+        hassiblings = not bool(symbols_is_last_sibling[tracker.D[symbol]])     # not "LS" in symbol.split("*")[1:] and not symbol in "<MASK> <START> <STOP>".split()
         ctrl = (1 if hassiblings else 3) if haschildren else (2 if hassiblings else 4) if symbol != "<MASK>" else 0
-        symbols2ctrl[i] = ctrl
+        symbols2ctrl[tracker.D[symbol]] = ctrl
+
+    symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
     symbols2ctrl_pt = q.var(symbols2ctrl).cuda(cuda).v
 
     def outsym2insymandctrl(x):
@@ -156,25 +167,24 @@ def run(lr=OPT_LR,
                                    inparggetter=outsym2insymandctrl,
                                    mode="sample",
                                    explore=explore)
-    # endregion
 
-    if _opt_test:       # test from out sym to core and ctrl
+    if _opt_test:  # test from out sym to core and ctrl
         ttt.tick("testing from out sym to core&ctrl")
         testtokens = "<MASK> <START> <STOP> <RARE> <RARE>*LS <RARE>*NC*LS BIN0 BIN0*LS UNI1 UNI1*LS LEAF2 LEAF2*LS".split()
         testidxs = [linout.D[xe] for xe in testtokens]
         testidxs_pt = q.var(np.asarray(testidxs)).cuda(cuda).v
-        revcoredic = {v: k for k, v in symbols_core_dic.items()}
+        rinpdic = {v: k for k, v in outemb.D.items()}
         testcoreidxs_pt, testctrls_pt = outsym2insymandctrl(testidxs_pt)
         testcoreidxs = list(testcoreidxs_pt.data.numpy())
-        testcoretokens = [revcoredic[xe] for xe in testcoreidxs]
+        testcoretokens = [rinpdic[xe] for xe in testcoreidxs]
         expected_core_tokens = "<MASK> <START> <STOP> <RARE> <RARE> <RARE> BIN0 BIN0 UNI1 UNI1 LEAF2 LEAF2".split()
-        assert(expected_core_tokens == testcoretokens)
+        assert (expected_core_tokens == testcoretokens)
         testctrlids = list(testctrls_pt.data.numpy())
-        expected_ctrl_ids = [4, 3, 4, 1, 3, 4, 1, 3, 1, 3, 2, 4]
-        assert(expected_ctrl_ids, testctrlids)
+        expected_ctrl_ids = [0, 3, 4, 1, 3, 4, 1, 3, 1, 3, 2, 4]
+        assert (expected_ctrl_ids == testctrlids)
         ttt.tock("tested")
 
-    if _opt_test:       # TEST with dummy core decoder
+    if _opt_test:  # TEST with dummy core decoder
         ttt.tick("testing with dummy decoder")
 
         class DummyCore(q.DecoderCore):
@@ -209,8 +219,8 @@ def run(lr=OPT_LR,
             goldtree = Tree.parse(tracker.pp(golds[i].cpu().data.numpy()))
             predtree = Tree.parse(tracker.pp(seqs[i].cpu().data.numpy()))
             exptree = trees[i]
-            assert(exptree == goldtree)
-            assert(exptree == predtree)
+            assert (exptree == goldtree)
+            assert (exptree == predtree)
 
         # try loss
         loss = q.SeqCrossEntropyLoss(ignore_index=0)
@@ -230,49 +240,94 @@ def run(lr=OPT_LR,
             if topass:
                 pass
             else:
-                assert(param.grad is not None)
-                assert(param.grad.norm().data[0] > 0)
+                assert (param.grad is not None)
+                assert (param.grad.norm().data[0] > 0)
         ttt.tock("tested with dummy decoder")
-
-    # region initialize encoder
-
-    encoder = q.RecurrentStack(
-        inpemb,
-        q.argsave.spec(embedding=0, embedding_mask=1),
-        torch.nn.Dropout(dropout),
-        q.BidirGRULayer(inpembdim, encdim//2),
-        q.argsave.spec(first=0),
-        q.argmap.spec(["embedding"], 0),
-        q.Lambda(lambda x, y: torch.cat([x, y], 2)),
-        q.BidirGRULayer(encdim + inpembdim, encdim//2),
-        q.Lambda(lambda x: q.intercat(torch.chunk(x, 2))),
-        q.argsave.spec(secondout=0),
-        q.argmap.spec(["first"]),
-        q.Lambda(lambda x: q.intercat(torch.chunk(x, 2))),
-        q.argmap.spec(["secondout"], 0),
-
-
-    )
-
-    encoder = q.RecurrentStack(
-        inpemb,
-        torch.nn.Dropout(dropout),
-        q.BidirGRULayer(inpembdim, encdim//2).return_final(True),
-        q.wire((-2, 0), (-1, 0)), q.Lambda(lambda x, y:
-                 torch.cat([x, y], 2)),
-        q.BidirGRULayer(encdim + inpembdim, encdim // 2).return_final(True),
-        q.wire((3, 0), (5, 0)), q.Lambda(lambda x, y:
-                 q.intercat([q.intercat(torch.chunk(x, 2, 2)),
-                             q.intercat(torch.chunk(y, 2, 2))])),
-        q.wire((3, 1), (5, 1)), q.Lambda(lambda x, y:
-                 q.intercat([q.intercat(torch.chunk(x, 2, 1)),
-                             q.intercat(torch.chunk(y, 2, 1))])),
-        q.wire((-2, 0), (-1, 0)),
-    )
     # endregion
 
-    # region initialize twostackcore
+    # region initialize encoder
+    encoder = q.RecurrentStack(
+        inpemb,
+        q.wire((-1, 0)),
+        q.TimesharedDropout(dropout),
+        q.wire((1, 0), mask=(1, 1)),
+        q.BidirGRULayer(inpembdim, encdim//2).return_final(True),
+        q.wire((-1, 1)),
+        q.TimesharedDropout(dropout),
+        q.wire((3, 0), (-1, 0)),
+        q.RecurrentLambda(lambda x, y: torch.cat([x, y], 2)),
+        q.wire((-1, 0), mask=(1, 1)),
+        q.BidirGRULayer(encdim + inpembdim, encdim // 2).return_final(True),
+        q.wire((5, 1), (11, 1)),
+        q.RecurrentLambda(lambda x, y: q.intercat([
+                                            q.intercat(torch.chunk(x, 2, 2)),
+                                            q.intercat(torch.chunk(y, 2, 2))])),
+        q.wire((5, 0), (11, 0)),
+        q.RecurrentLambda(lambda x, y: q.intercat([
+                                            q.intercat(torch.chunk(x, 2, 1)),
+                                            q.intercat(torch.chunk(y, 2, 1))])),
+        q.wire((-1, 0), (-3, 0), (1, 1)),
+    )
+    if _opt_test:
+        ttt.tick("testing encoder")
+        # ttt.msg("encoder\n {} \nhas {} layers".format(encoder, len(encoder.layers)))
+        test_input_symbols = q.var(np.random.randint(0, 44, (3, 10))).cuda(cuda).v
+        test_encoder_output = encoder(test_input_symbols)
+        ttt.msg("encoder return {} outputs".format(len(test_encoder_output)))
+        ttt.msg("encoder output shapes: {}".format(" ".join([str(test_encoder_output_e.size()) for test_encoder_output_e in test_encoder_output])))
+        assert(test_encoder_output[1].size() == (3, 10, encdim * 2))
+        assert(test_encoder_output[0].size() == (3, encdim * 2))
+        ttt.tock("tested encoder (output shapes)")
 
+    # endregion
+
+    # region make decoder and put in enc/dec
+    ctxdim = encdim * 2
+    cells = (q.GRUCell(outembdim+ctxdim, linoutdim//2),
+             q.GRUCell(outembdim+ctxdim, linoutdim//2),)
+
+    decoder_core = q.TwoStackCell(outemb, cells)
+    decoder_top = q.StaticContextDecoderTop(linout)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(oracle)
+    decoder = decoder_cell.to_decoder()
+
+    # wrap in encdec
+    class EncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, dec_starts, eids=None, maxtime=None):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(dec_starts, ctx=final_encoding, eids=eids, maxtime=maxtime)
+            return decoding
+
+    encdec = EncDec(encoder, decoder)
+
+    if _opt_test:
+        ttt.tick("testing whole thing dry run")
+        test_eids = q.var(np.arange(0, 3)).cuda(cuda).v
+        test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
+        test_inpseqs = q.var(ism.matrix[:3]).cuda(cuda).v
+        test_encdec_output = encdec(test_inpseqs, test_start_symbols, eids=test_eids, maxtime=100)
+        out = test_encdec_output
+        golds = oracle.goldacc
+        seqs = oracle.seqacc
+        golds = torch.stack(golds, 1)
+        seqs = torch.stack(seqs, 1)
+        out = out[:, :-1, :]
+        # test if gold tree linearization produces gold tree
+        for i in range(len(out)):
+            goldtree = Tree.parse(tracker.pp(golds[i].cpu().data.numpy()))
+            predtree = Tree.parse(tracker.pp(seqs[i].cpu().data.numpy()))
+            exptree = trees[i]
+            assert (exptree == goldtree)
+            assert (exptree == predtree)
+        ttt.tock("tested whole dryrun")
+        # TODO gradients
     # endregion
 
 

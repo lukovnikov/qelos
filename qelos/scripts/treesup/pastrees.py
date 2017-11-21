@@ -164,12 +164,20 @@ class Tracker(object):
         # !!! node name suffixes starting with * are ignored by Tree.parse()
         super(Tracker, self).__init__()
         self.root = root
+        self.last_sibling_suffix = last_sibling_suffix
+        self.terminated = True         # set to False to expect a <STOP> at the end of sequence
         self.current = self.root
         self.stack = [[self.root]]
         self.possible_paths = []    # list of stacks
         self._nvt = None
-        self.last_sibling_suffix = last_sibling_suffix
-        self.terminated = True         # set to False to expect a <STOP> at the end of sequence
+        self.start()
+
+    def reset(self):
+        self.current = self.root
+        self.stack = [[self.root]]
+        self.possible_paths = []    # list of stacks
+        self._nvt = None
+        self.start()
 
     def start(self):
         self.possible_paths.append([[self.root]])
@@ -254,11 +262,17 @@ def build_dic_from_trees(trees, suffixes=["*LS"]):
     outdic = OrderedDict()
     outdic.update(indic)
     offset = len(indic)
-    alltokens = ["<RARE>", "<RARE>*NC"] + sorted(list(alltokens))
-    numtokens = len(alltokens)
+    alltokens = sorted(list(alltokens))
+    alltokens_for_indic = ["<RARE>"] + alltokens
+    alltokens_for_outdic = ["<RARE>", "<RARE>*NC"] + alltokens
+    numtokens = len(alltokens_for_indic)
     newidx = 0
-    for token in alltokens:
+    for token in alltokens_for_indic:
         indic[token] = newidx + offset
+        newidx += 1
+    numtokens = len(alltokens_for_outdic)
+    newidx = 0
+    for token in alltokens_for_outdic:
         outdic[token] = newidx + offset
         for i, suffix in enumerate(suffixes):
             outdic[token + suffix] = newidx + offset + (i + 1) * numtokens
@@ -279,7 +293,6 @@ class GroupTracker(object):
         self.D_in = indic
         for tree in self.trees:
             tracker = tree.track()
-            tracker.start()
             self.trackers.append(tracker)
 
     def get_valid_next(self, eid):
@@ -311,6 +324,11 @@ class GroupTracker(object):
         xs = [self.rdic[xe] for xe in x if xe != self.dic["<MASK>"]]
         xstring = " ".join(xs)
         return xstring
+
+    def reset(self):
+        for tracker in self.trackers:
+            tracker.reset()
+
 
 
 def generate_random_trees(n=1000, maxleaves=6, maxunaries=2,

@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 import qelos as q
-from qelos.basic import Stack
+from qelos.basic import Stack, Lambda
 
 
 # region I. RNN cells
@@ -965,7 +965,7 @@ class RecStack(RecStatefulContainer, Stack):        # contains rec statefuls, no
     """
     def add(self, *layers):
         for layer in layers:
-            if not isinstance(layer, (Reccable, q.argmap, q.argsave, q.persist_kwargs)):
+            if not isinstance(layer, (Reccable, q.argmap, q.argsave, q.persist_kwargs, q.wire)):
                 layer = ReccableWrap(layer)
             self._add(layer)
 
@@ -1056,7 +1056,7 @@ class RecurrentStack(RecStack):
 
     def add(self, *layers):
         for layer in layers:
-            if not isinstance(layer, (Recurrent, q.argmap, q.argsave, q.persist_kwargs)):
+            if not isinstance(layer, (Recurrent, q.argmap, q.argsave, q.persist_kwargs, q.wire)):
                 layer = RecurrentWrapper(layer)
             self._add(layer)
 
@@ -1095,5 +1095,13 @@ class TimesharedDropout(nn.Module, Recurrent):
         shareddropoutmask = shareddropoutmask.unsqueeze(1).repeat(1, x.size(1), 1)
         ret = x * shareddropoutmask
         return ret
+
+
+class ReccableLambda(Lambda, Reccable):
+    pass
+
+
+class RecurrentLambda(Lambda, Recurrent):
+    pass
 
 
