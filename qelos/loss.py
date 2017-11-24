@@ -13,7 +13,7 @@ class Loss(nn.Module):
 
     def forward(self, x, gold, mask=None, _noagg=False):
         y, ignoremask = self._forward(x, gold, mask=mask)
-
+        y = y.float()
         if _noagg:
             return y, ignoremask
 
@@ -92,6 +92,7 @@ class SeqLoss(nn.Module):
             totals = ignoremask.long().sum(1)
         else:
             totals = l.size(1)
+        totals = totals.float()
 
         if self.time_agg == "sum":
             ltotal = l.sum(1)
@@ -271,7 +272,7 @@ class Accuracy(DiscreteLoss):
         same = best == gold
         if ignoremask is not None:
             same.data = same.data | ~ ignoremask.data
-        return same.long(), ignoremask
+        return same.float(), ignoremask
 
 
 class SeqAccuracy(SeqLoss, Accuracy):

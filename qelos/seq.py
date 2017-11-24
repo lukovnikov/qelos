@@ -908,6 +908,9 @@ class DecoderCore(RecStateful):
         o_t = self.block(i_t)
         return o_t, {"mask": outmask_t, "t":t, "x_t_emb": emb, "ctx_t": ctx_t}
 
+    def reset_state(self):
+        self.block.reset_state()
+
 
 class DecoderTop(nn.Module):
     """ Decoder Top - default - applies given layers as a stack """

@@ -7,6 +7,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from qelos.util import ticktock
+import qelos as q
 
 
 
@@ -59,6 +60,30 @@ tt.tick("preparing")
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=5)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=5)
+        self.fc1 = nn.Linear(32 * 4 * 4, 128)
+        self.fc2 = nn.Linear(128, 10)
+
+    def forward(self, x):
+        batsize = x.size(0)
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = F.avg_pool2d(x, 2)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.avg_pool2d(x, 2)
+        x = x.view(batsize, -1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = F.log_softmax(x)
+        return x
+
+
+class OldNet(nn.Module):
+    def __init__(self):
+        super(OldNet, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=(3,3))
         self.conv2 = nn.Conv2d(32, 64, kernel_size=(3,3))
         self.conv2_drop = nn.Dropout2d(p=0.25)
@@ -83,6 +108,11 @@ if args.cuda:
     model.cuda()
 
 optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+
+q.train(model).train_on(train_loader, q.lossarray(nn.NLLLoss(), q.Accuracy()))\
+    .optimizer(optimizer)\
+    .valid_on(test_loader, q.lossarray(nn.NLLLoss(), q.Accuracy()))\
+    .train(args.epochs)
 
 
 def train(epoch):

@@ -330,9 +330,11 @@ class GroupTracker(object):
             tracker.reset()
 
 
-
 def generate_random_trees(n=1000, maxleaves=6, maxunaries=2,
-                          numbinaries=10, numunaries=10, numleaves=20):
+                          numbinaries=10, numunaries=10, numleaves=20,
+                          seed=None):
+    if seed is not None:
+        random.seed(seed)
     # one tree = list of tokens and branches, branches are lists of tokens and branches
     unique_leaves = ["LEAF{}".format(i) for i in range(numleaves)]
     unique_unaries = ["UNI{}".format(i) for i in range(numunaries)]

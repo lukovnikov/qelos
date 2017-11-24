@@ -624,16 +624,27 @@ def get_prop_chains_for_dataset(p="../../../../datasets/lcquad/",
                         outp="lcquad.multilin.chains",
                         upto=2, replace_property=True):
     tt = q.ticktock("propchains builder")
+    import os
     for file in files:
+        if outp is None:
+            outp = p + file + ".vnt"
+        if os.path.isfile(outp):
+            with open(outp) as outf:
+                chains = pickle.load(outf)
+        else:
+            chains = {}
         tt.tick("doing {}".format(file))
         filep = p + file
-        chains = {}
+
+        checkpointfreq = 10
         with codecs.open(filep, encoding="utf-8-sig") as f:
             i = 0
             for line in f:
                 m = re.match("(Q\d+\.P\d+):\s(.+)", line)
                 if m:
                     qpid, parse = m.group(1), m.group(2)
+                    if qpid in chains:
+                        continue
                     startent = parse.split()[0]
                     qpidchains = get_propchains_for_ent(startent, upto=upto)
                     if replace_property:
@@ -642,10 +653,14 @@ def get_prop_chains_for_dataset(p="../../../../datasets/lcquad/",
                     i += 1
                     if i % 1 == 0:
                         tt.msg("{} {}, len: {}".format(i, qpid, str(len(qpidchains))))
+                    if (i+1) % checkpointfreq == 0:
+                        with open(outp, "w") as outf:
+                            pickle.dump(chains, outf)
+                        tt.msg("checkpoint!")
                     # break
-        if outp is None:
-            outp = p + file + ".vnt"
-        pickle.dump(chains, open(outp, "w"))
+
+        with open(outp, "w") as outf:
+            pickle.dump(chains, outf)
         tt.tock("done {}".format(file))
         # reloaded = pickle.load(open(p+file+".vnt"))
         # q.embed()

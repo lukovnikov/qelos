@@ -7,6 +7,9 @@ import re
 
 
 OPT_LR = 0.1
+OPT_BATSIZE = 128
+OPT_GRADNORM = 5.
+OPT_EPOCHS = 50
 OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
@@ -14,8 +17,182 @@ OPT_JOINT_LINOUT_MODE = "sum"
 OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
+OPT_DECDIM = 100
 
 _opt_test = True
+_tree_gen_seed = 1234
+
+
+def run_seq2seq_teacher_forced(lr=OPT_LR,
+                               batsize=OPT_BATSIZE,
+                               epochs=OPT_EPOCHS,
+                               gradnorm=OPT_GRADNORM,
+                               inpembdim=OPT_INPEMBDIM,
+                               outembdim=OPT_OUTEMBDIM,
+                               linoutdim=OPT_LINOUTDIM,
+                               encdim=OPT_ENCDIM,
+                               decdim=OPT_DECDIM,
+                               dropout=OPT_DROPOUT,
+                               cuda=False):
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+    ism, tracker, eids, trees = load_synth_trees()
+    osm = q.StringMatrix(indicate_start=True)
+    osm.tokenize = lambda x: x.split()
+    for tree in trees:
+        treestring = tree.pp(with_parentheses=False, arbitrary=True)
+        osm.add(treestring)
+    osm.finalize()
+    if _opt_test:
+        allsame = True
+        for i in range(len(osm.matrix)):
+            itree = Tree.parse(ism[i])
+            otree = Tree.parse(osm[i, 1:])
+            assert(itree == otree)
+            allsame &= ism[i] == osm[i]
+        assert(not allsame)
+        ttt.msg("trees at output are differently structured from trees at input but are the same trees")
+
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+    outemb = q.WordEmb(outembdim, worddic=osm.D)
+    linout = q.WordLinout(linoutdim, worddic=osm.D)
+
+    # region initialize encoder
+    encoder = q.RecurrentStack(
+        inpemb,
+        q.wire((-1, 0)),
+        q.TimesharedDropout(dropout),
+        q.wire((1, 0), mask=(1, 1)),
+        q.BidirGRULayer(inpembdim, encdim//2).return_final(True),
+        q.wire((-1, 1)),
+        q.TimesharedDropout(dropout),
+        q.wire((3, 0), (-1, 0)),
+        q.RecurrentLambda(lambda x, y: torch.cat([x, y], 2)),
+        q.wire((-1, 0), mask=(1, 1)),
+        q.BidirGRULayer(encdim + inpembdim, encdim // 2).return_final(True),
+        q.wire((5, 1), (11, 1)),
+        q.RecurrentLambda(lambda x, y: q.intercat([
+                                            q.intercat(torch.chunk(x, 2, 2)),
+                                            q.intercat(torch.chunk(y, 2, 2))])),
+        q.wire((5, 0), (11, 0)),
+        q.RecurrentLambda(lambda x, y: q.intercat([
+                                            q.intercat(torch.chunk(x, 2, 1)),
+                                            q.intercat(torch.chunk(y, 2, 1))])),
+        q.wire((-1, 0), (-3, 0), (1, 1)),
+    )
+    if _opt_test:
+        ttt.tick("testing encoder")
+        # ttt.msg("encoder\n {} \nhas {} layers".format(encoder, len(encoder.layers)))
+        test_input_symbols = q.var(np.random.randint(0, 44, (3, 10))).cuda(cuda).v
+        test_encoder_output = encoder(test_input_symbols)
+        ttt.msg("encoder return {} outputs".format(len(test_encoder_output)))
+        ttt.msg("encoder output shapes: {}".format(" ".join([str(test_encoder_output_e.size()) for test_encoder_output_e in test_encoder_output])))
+        assert(test_encoder_output[1].size() == (3, 10, encdim * 2))
+        assert(test_encoder_output[0].size() == (3, encdim * 2))
+        ttt.tock("tested encoder (output shapes)")
+
+    # endregion
+
+    # region make decoder and put in enc/dec
+    ctxdim = encdim * 2
+    layers = (q.GRUCell(outembdim + ctxdim, decdim),
+              q.GRUCell(decdim, linoutdim),)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_top = q.StaticContextDecoderTop(linout)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    # wrap in encdec
+    class EncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(outinpseq, ctx=final_encoding)
+            return decoding
+
+    encdec = EncDec(encoder, decoder)
+
+    if _opt_test:
+        ttt.tick("testing whole thing dry run")
+        test_inpseqs = q.var(ism.matrix[:3]).cuda(cuda).v
+        test_outinpseqs = q.var(osm.matrix[:3, :-1]).cuda(cuda).v
+
+        test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
+
+        ttt.tock("tested whole dryrun")
+        # TODO loss and gradients
+        golds = q.var(osm.matrix[:3, 1:]).cuda(cuda).v
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        lossvalue = loss(test_encdec_output, golds)
+        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
+        encdec.zero_grad()
+        lossvalue.backward()
+        ttt.msg("backward done")
+        params = q.params_of(encdec)
+        for param in params:
+            assert (param.grad is not None)
+            assert (param.grad.norm().data[0] > 0)
+            print(tuple(param.size()), param.grad.norm().data[0])
+        ttt.tock("all gradients non-zero")
+
+    # print(encdec)
+
+    # training
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqElemAccuracy(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),)
+
+    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
+
+    traindata, testdata = q.split([ism.matrix, osm.matrix], random=1234)
+    traindata, validdata = q.split(traindata, random=1234)
+
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+
+    q.train(encdec)\
+        .train_on(train_loader, losses)\
+        .optimizer(optimizer)\
+        .clip_grad_norm(gradnorm)\
+        .set_batch_transformer(
+            lambda inpseq, outseq:
+                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
+        .valid_on(valid_loader, losses)\
+        .cuda(cuda)\
+        .train(epochs)
+
+    results = q.test(encdec).on(test_loader, losses)\
+        .set_batch_transformer(
+            lambda inpseq, outseq:
+                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
+        .cuda(cuda)\
+        .run()
+
+
+def load_synth_trees(n=1000):
+    ism = q.StringMatrix()
+    ism.tokenize = lambda x: x.split()
+    numtrees = n
+    trees = generate_random_trees(numtrees, seed=_tree_gen_seed)
+    tracker = GroupTracker(trees)
+    for tree in trees:
+        treestring = tree.pp(with_parentheses=False, arbitrary=True)
+        ism.add(treestring)
+    ism.finalize()  # ism provides source sequences
+    eids = np.arange(0, len(trees)).astype("int64")
+
+    if _opt_test:  # TEST
+        for eid in eids:
+            assert (tracker.trackers[eid].root == Tree.parse(ism[eid]))
+    return ism, tracker, eids, trees
 
 
 def run(lr=OPT_LR,
@@ -30,22 +207,8 @@ def run(lr=OPT_LR,
         ):
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    # region load data
-    ism = q.StringMatrix()
-    ism.tokenize = lambda x: x.split()
-    numtrees = 1000
-    trees = generate_random_trees(numtrees)
-    tracker = GroupTracker(trees)
-    for tree in trees:
-        treestring = tree.pp(with_parentheses=False, arbitrary=True)
-        ism.add(treestring)
-    ism.finalize()      # ism provides source sequences
-    eids = np.arange(0, len(trees)).astype("int64")
 
-    if _opt_test:       # TEST
-        for eid in eids:
-            assert(tracker.trackers[eid].root == Tree.parse(ism[eid]))
-    # endregion
+    ism, tracker, eids, trees = load_synth_trees()
 
     # region build reps
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
@@ -327,10 +490,23 @@ def run(lr=OPT_LR,
             assert (exptree == goldtree)
             assert (exptree == predtree)
         ttt.tock("tested whole dryrun")
-        # TODO gradients
+        # TODO loss and gradients
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        lossvalue = loss(out, golds)
+        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
+        encdec.zero_grad()
+        lossvalue.backward()
+        ttt.msg("backward done")
+        params = q.params_of(encdec)
+        for param in params:
+            assert (param.grad is not None)
+            assert (param.grad.norm().data[0] > 0)
+            print(tuple(param.size()), param.grad.norm().data[0])
+        ttt.tock("all gradients non-zero")
+
     # endregion
 
 
 
 if __name__ == "__main__":
-    q.argprun(run)
+    q.argprun(run_seq2seq_teacher_forced)

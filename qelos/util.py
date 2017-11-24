@@ -223,7 +223,7 @@ def getnumargs(f):
 class StringMatrix():
     protectedwords = ["<MASK>", "<RARE>", "<START>", "<END>"]
 
-    def __init__(self, maxlen=None, freqcutoff=0, topnwords=None, indicate_start_end=False):
+    def __init__(self, maxlen=None, freqcutoff=0, topnwords=None, indicate_start_end=False, indicate_start=False, indicate_end=False):
         self._strings = []
         self._wordcounts_original = dict(zip(self.protectedwords, [0] * len(self.protectedwords)))
         self._dictionary = dict(zip(self.protectedwords, range(len(self.protectedwords))))
@@ -234,7 +234,8 @@ class StringMatrix():
         self._max_allowable_length = maxlen
         self._rarefreq = freqcutoff
         self._topnwords = topnwords
-        self._indic_s_e = indicate_start_end
+        self._indic_s = indicate_start_end or indicate_start
+        self._indic_e = indicate_start_end or indicate_end
         self._rarewords = set()
         self.tokenize = tokenize
 
@@ -244,11 +245,15 @@ class StringMatrix():
         else:
             return self.matrix.shape[0]
 
-    def __getitem__(self, item):
+    def __getitem__(self, item, *args):
         if self._matrix is None:
             return self._strings[item]
         else:
-            return self.pp(self.matrix[item])
+            ret = self.matrix[item]
+            if len(args) == 1:
+                ret = ret[args[0]]
+            ret = self.pp(ret)
+            return ret
 
     @property
     def numwords(self):
@@ -292,8 +297,10 @@ class StringMatrix():
     def add(self, x):
         tokens = self.tokenize(x)
         tokens = tokens[:self._max_allowable_length]
-        if self._indic_s_e:
-            tokens = ["<START>"] + tokens + ["<END>"]
+        if self._indic_s:
+            tokens = ["<START>"] + tokens
+        if self._indic_e:
+            tokens = tokens = ["<END>"]
         self._maxlen = max(self._maxlen, len(tokens))
         tokenidxs = []
         for token in tokens:

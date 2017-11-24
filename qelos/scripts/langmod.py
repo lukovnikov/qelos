@@ -93,7 +93,10 @@ def run(window=100, subsample=10000, inspectdata=False,
         rnu(embdim, encdim),
     ).return_final()
 
-    m = q.Stack(q.persist_kwargs(), recm, nn.Linear(encdim, vocsize), nn.LogSoftmax())
+    m = q.Stack(q.persist_kwargs(),
+                recm,
+                nn.Linear(encdim, vocsize),
+                nn.LogSoftmax())
 
     # print(m)
 

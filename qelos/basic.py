@@ -211,12 +211,12 @@ class Stack(nn.Module):
     def _add(self, *layers):
         self.layers.extend(list(layers))
 
-    def reset_stack_state(self):
+    def _reset_stack_state(self):
         self._wire_nodes = []
         self._saved_slots = {}
 
     def forward(self, *x, **kw):
-        self.reset_stack_state()
+        self._reset_stack_state()
         self._wire_nodes.append((x, kw))
         def argsandkwargsfromlayerret(_ret):
             if isinstance(_ret, tuple) \
