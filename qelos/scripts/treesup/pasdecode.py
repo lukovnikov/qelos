@@ -39,6 +39,7 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
                                gpu=1):
     if cuda:
         torch.cuda.set_device(gpu)
+    decdim = decdim * 2     # more equivalent to twostackcell ?
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
     ism, tracker, eids, trees = load_synth_trees(n=numex)
@@ -201,11 +202,45 @@ def load_synth_trees(n=1000):
     return ism, tracker, eids, trees
 
 
+class TreeAccuracy(q.DiscreteLoss):
+    def __init__(self, size_average=True, ignore_index=None,
+                 treeparser=None, **kw):
+        """ needs a treeparser that transforms sequences of integer ids to tree objects that support equality """
+        super(TreeAccuracy, self).__init__(size_average=size_average, ignore_index=ignore_index, **kw)
+        self.treeparser = treeparser
+
+    def forward(self, x, gold, mask=None):
+        if mask is not None and mask.data[0, 1] > 1:  # batchable sparse
+            mask = q.batchablesparse2densemask(mask)
+        if mask is not None:
+            x = x + torch.log(mask.float())
+        ignoremask = self._get_ignore_mask(gold)
+        maxes, best = torch.max(x, 2)
+        same = torch.ByteTensor(best.size(0))
+        same.fill_(False)
+        for i in range(best.size(0)):
+            try:
+                best_tree = self.treeparser(best[i].cpu().data.numpy())
+            except Exception as e:
+                best_tree = None
+            gold_tree = self.treeparser(gold[i].cpu().data.numpy())
+            same[i] = best_tree == gold_tree and best_tree is not None
+        same = q.var(same).cuda(x).v
+        acc = torch.sum(same.float())
+        total = float(same.size(0))
+        if self.size_average:
+            acc = acc / total
+        # if ignoremask is not None:
+        #     same.data = same.data | ~ ignoremask.data
+        return acc
+
+
 def run(lr=OPT_LR,
         inpembdim=OPT_INPEMBDIM,
         outembdim=OPT_OUTEMBDIM,
         linoutdim=OPT_LINOUTDIM,
         encdim=OPT_ENCDIM,
+        decdim=OPT_DECDIM,
         dropout=OPT_DROPOUT,
         linoutjoinmode=OPT_JOINT_LINOUT_MODE,
         explore=OPT_EXPLORE,
@@ -452,8 +487,12 @@ def run(lr=OPT_LR,
 
     # region make decoder and put in enc/dec
     ctxdim = encdim * 2
-    cells = (q.GRUCell(outembdim+ctxdim, linoutdim//2),
-             q.GRUCell(outembdim+ctxdim, linoutdim//2),)
+    cells = (q.RecStack(
+                q.GRUCell(outembdim+ctxdim, decdim),
+                q.GRUCell(decdim, linoutdim//2)),
+             q.RecStack(
+                 q.GRUCell(outembdim + ctxdim, decdim),
+                 q.GRUCell(decdim, linoutdim // 2)),)
 
     decoder_core = q.TwoStackCell(outemb, cells)
     decoder_top = q.StaticContextDecoderTop(linout)
@@ -495,8 +534,8 @@ def run(lr=OPT_LR,
             exptree = trees[i]
             assert (exptree == goldtree)
             assert (exptree == predtree)
-        ttt.tock("tested whole dryrun")
-        # TODO loss and gradients
+        ttt.tock("tested whole dryrun").tick()
+
         loss = q.SeqCrossEntropyLoss(ignore_index=0)
         lossvalue = loss(out, golds)
         ttt.msg("value of Seq CE loss: {}".format(lossvalue))
@@ -510,9 +549,22 @@ def run(lr=OPT_LR,
             print(tuple(param.size()), param.grad.norm().data[0])
         ttt.tock("all gradients non-zero")
 
+        loss = TreeAccuracy(treeparser=lambda x: Tree.parse(tracker.pp(x)))
+        lossvalue = loss(out, golds)
+        ttt.msg("value of predicted Tree Accuracy: {}".format(lossvalue))
+        dummyout = q.var(torch.zeros(out.size())).cuda(cuda).v
+        dummyout.scatter_(2, seqs.unsqueeze(2), 1)
+        lossvalue = loss(dummyout, golds)
+        ttt.msg("value of dummy predicted Tree Accuracy: {}".format(lossvalue))
+        loss = q.SeqAccuracy()
+        lossvalue = loss(dummyout, golds)
+        ttt.msg("value of SeqAccuracy on dummy prediction: {}".format(lossvalue))
+
+
     # endregion
 
 
 
 if __name__ == "__main__":
-    q.argprun(run_seq2seq_teacher_forced)
+    # q.argprun(run_seq2seq_teacher_forced)
+    q.argprun(run)

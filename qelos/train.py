@@ -119,7 +119,39 @@ class LossAndAgg(LossWithAgg):
         self.loss.cuda(*a, **kw)
 
 
+class loss_input_transform(object):
+    """ wrapper for full-control loss input lambda
+        __call__ gets the same arguments as lossarray's __call__
+        f argument must accept the same arguments as lossarray's __call__
+        f must return a tuple (prediction, gold, **kw) which will
+            be passed directly to the loss module.
+    """
+    def __init__(self, f):
+        super(loss_input_transform, self).__init__()
+        self.f = f
+
+    def __call__(self, prediction, gold, inputs=None):
+        ret = self.f(prediction, gold, inputs=inputs)
+        return ret
+
+
 class lossarray(object):
+    """ Collection of losses to compute during training, validation or testing
+        First provided loss will be used as training loss when lossarray is used for training.
+        Other losses are there for information purposes.
+
+        Each argument can either be a loss module or a tuple of (loss, tranf)
+            where loss is a loss module and transf is a function applied
+            on the prediction argument before passing it to the loss module itself.
+        Transf is only passed the prediction argument (not gold or input).
+        If transf returns two elements, they are interpreted as prediction and **kw
+            arguments to the loss module (and gold is passed as-is).
+
+        Transf can be of type python function or q.loss_input_transform.
+            In the latter case, there is full control over the inputs as
+            prediction, gold and input arguments are passed to transf.
+    """
+
     def __init__(self, trainloss, *losses):
         super(lossarray, self).__init__()
         self.losses = []
@@ -142,7 +174,10 @@ class lossarray(object):
             kw = {}
             pred = prediction
             if loss_transf is not None:
-                loss_transf_out = loss_transf(prediction)
+                if isinstance(loss_transf, loss_input_transform):
+                    loss_transf_out = loss_transf(prediction, gold, inputs=None)
+                else:
+                    loss_transf_out = loss_transf(prediction)
                 if len(loss_transf_out) == 2:
                     pred, kw = loss_transf_out
                 elif len(loss_transf_out) == 3:

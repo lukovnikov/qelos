@@ -89,23 +89,21 @@ class SeqLoss(nn.Module):
         if ignoremask is not None:
             ignoremask = ignoremask.view(batsize, seqlen)
             outmask = ignoremask.long().sum(1) > 0
-            totals = ignoremask.long().sum(1)
+            totals = ignoremask.float().sum(1)
         else:
-            totals = l.size(1)
-        totals = totals.float()
+            totals = q.var(torch.FloatTensor(l.size(0))).cuda(l).v
+            totals.fill_(l.size(1))
 
+        ltotal = l.float().sum(1)
         if self.time_agg == "sum":
-            ltotal = l.sum(1)
+            pass
         elif self.time_agg == "avg":
-            ltotal = l.sum(1)
-            totals = totals.float().clamp(min=EPS)
+            totals = totals.clamp(min=EPS)
             ltotal = ltotal / totals
         elif self.time_agg == "eqtotal":
-            ltotal = l.sum(1)
-            ltotal = (ltotal == totals).float()
+            ltotal = (ltotal == totals)
         elif self.time_agg == "allone":
-            ltotal = l.sum(1)
-            ltotal = (ltotal == l.size(1)).float()
+            ltotal = (ltotal == l.size(1))
 
         return ltotal, outmask
 
@@ -279,7 +277,7 @@ class SeqAccuracy(SeqLoss, Accuracy):
     def __init__(self, size_average=True, ignore_index=None):
         super(SeqAccuracy, self).__init__(size_average=size_average,
                                           ignore_index=ignore_index,
-                                          time_agg="allone")
+                                          time_agg="eqtotal")
 
 
 class SeqElemAccuracy(DiscreteLoss):
