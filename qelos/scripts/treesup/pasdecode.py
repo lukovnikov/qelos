@@ -10,6 +10,7 @@ OPT_LR = 0.1
 OPT_BATSIZE = 128
 OPT_GRADNORM = 5.
 OPT_EPOCHS = 50
+OPT_NUMEX = 1000
 OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
@@ -26,6 +27,7 @@ _tree_gen_seed = 1234
 def run_seq2seq_teacher_forced(lr=OPT_LR,
                                batsize=OPT_BATSIZE,
                                epochs=OPT_EPOCHS,
+                               numex=OPT_NUMEX,
                                gradnorm=OPT_GRADNORM,
                                inpembdim=OPT_INPEMBDIM,
                                outembdim=OPT_OUTEMBDIM,
@@ -39,7 +41,8 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
         torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, eids, trees = load_synth_trees()
+    ism, tracker, eids, trees = load_synth_trees(n=numex)
+    tt.msg("generated {} synthetic trees".format(ism.shape[0]))
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
     for tree in trees:
