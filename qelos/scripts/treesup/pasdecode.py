@@ -89,7 +89,7 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
     if _opt_test:
         ttt.tick("testing encoder")
         # ttt.msg("encoder\n {} \nhas {} layers".format(encoder, len(encoder.layers)))
-        test_input_symbols = q.var(np.random.randint(0, 44, (3, 10))).cuda(cuda).v
+        test_input_symbols = q.var(np.random.randint(0, 44, (3, 10))).v
         test_encoder_output = encoder(test_input_symbols)
         ttt.msg("encoder return {} outputs".format(len(test_encoder_output)))
         ttt.msg("encoder output shapes: {}".format(" ".join([str(test_encoder_output_e.size()) for test_encoder_output_e in test_encoder_output])))
@@ -127,14 +127,14 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
 
     if _opt_test:
         ttt.tick("testing whole thing dry run")
-        test_inpseqs = q.var(ism.matrix[:3]).cuda(cuda).v
-        test_outinpseqs = q.var(osm.matrix[:3, :-1]).cuda(cuda).v
+        test_inpseqs = q.var(ism.matrix[:3]).v
+        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
 
         test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
 
         ttt.tock("tested whole dryrun")
         # TODO loss and gradients
-        golds = q.var(osm.matrix[:3, 1:]).cuda(cuda).v
+        golds = q.var(osm.matrix[:3, 1:]).v
         loss = q.SeqCrossEntropyLoss(ignore_index=0)
         lossvalue = loss(test_encdec_output, golds)
         ttt.msg("value of Seq CE loss: {}".format(lossvalue))
