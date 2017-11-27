@@ -42,7 +42,7 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
     ism, tracker, eids, trees = load_synth_trees(n=numex)
-    tt.msg("generated {} synthetic trees".format(ism.shape[0]))
+    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
     for tree in trees:
