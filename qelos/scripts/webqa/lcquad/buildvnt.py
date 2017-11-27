@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 import qelos as q
-import re, time, pickle, sys, codecs
+import re, time, pickle, sys, codecs, ujson
 from SPARQLWrapper import SPARQLWrapper, JSON
 from SPARQLWrapper.SPARQLExceptions import EndPointNotFound, EndPointInternalError
 
@@ -621,22 +621,25 @@ def chains_replace_property(chains):
 
 def get_prop_chains_for_dataset(p="../../../../datasets/lcquad/",
                         files=("lcquad.multilin",),
-                        outp="lcquad.multilin.chains",
+                        outp=None,
                         upto=2, replace_property=True):
     tt = q.ticktock("propchains builder")
     import os
     for file in files:
         if outp is None:
-            outp = p + file + ".vnt"
+            outp = file + ".chains"
         if os.path.isfile(outp):
             with open(outp) as outf:
-                chains = pickle.load(outf)
+                tt.tick("loading checkpoint")
+                chains = ujson.load(outf)
+                tt.tock("checkpoint loaded")
+                # q.embed()
         else:
             chains = {}
         tt.tick("doing {}".format(file))
         filep = p + file
 
-        checkpointfreq = 10
+        checkpointfreq = 50
         with codecs.open(filep, encoding="utf-8-sig") as f:
             i = 0
             for line in f:
@@ -654,13 +657,14 @@ def get_prop_chains_for_dataset(p="../../../../datasets/lcquad/",
                     if i % 1 == 0:
                         tt.msg("{} {}, len: {}".format(i, qpid, str(len(qpidchains))))
                     if (i+1) % checkpointfreq == 0:
+                        tt.tick()
                         with open(outp, "w") as outf:
-                            pickle.dump(chains, outf)
-                        tt.msg("checkpoint!")
+                            ujson.dump(chains, outf)
+                        tt.tock("checkpoint")
                     # break
 
         with open(outp, "w") as outf:
-            pickle.dump(chains, outf)
+            ujson.dump(chains, outf)
         tt.tock("done {}".format(file))
         # reloaded = pickle.load(open(p+file+".vnt"))
         # q.embed()

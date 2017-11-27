@@ -15,7 +15,9 @@ class var(object):
         self.v = Variable(x, requires_grad=requires_grad, volatile=volatile)
 
     def cuda(self, crit=None):
-        if crit is False:
+        if isinstance(crit, int) and not isinstance(crit, bool):
+            self.v = self.v.cuda(crit)
+        elif crit is False:
             if self.v.is_cuda:
                 self.v = self.v.cpu()
         elif crit is True:

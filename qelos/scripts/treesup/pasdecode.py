@@ -33,7 +33,10 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
                                encdim=OPT_ENCDIM,
                                decdim=OPT_DECDIM,
                                dropout=OPT_DROPOUT,
-                               cuda=False):
+                               cuda=False,
+                               gpu=1):
+    if cuda:
+        torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
     ism, tracker, eids, trees = load_synth_trees()
