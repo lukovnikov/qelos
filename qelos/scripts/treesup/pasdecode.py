@@ -19,7 +19,7 @@ OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
-OPT_USEATTENTION = True
+OPT_USEATTENTION = False
 
 _opt_test = True
 _tree_gen_seed = 1234
