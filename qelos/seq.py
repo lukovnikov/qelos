@@ -28,7 +28,10 @@ class AttentionGenerator(nn.Module):
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
         if mask is not None:
             assert(mask.size() == scores.size(), "mask should be same size as scores")
-            scores.data.masked_fill_((-1*mask+1).byte().data, -float("inf"))
+            infmask = var(torch.zeros(mask.size())).cuda(mask).v
+            infmask.data.masked_fill_((-1 * mask + 1).byte().data, -float("inf"))
+            scores = scores + infmask
+            # scores.data.masked_fill_((-1*mask+1).byte().data, -float("inf"))
         if self.scale != 1.:
             scores = scores / self.scale
         weights = self.normalizer(scores)
@@ -975,9 +978,9 @@ class StaticContextDecoderTop(ContextDecoderTop):
 class AttentionContextDecoderTop(ContextDecoderTop):
     """ Decoder Top with dynamic attention-based context """
     def __init__(self, attention, *layers, **kw):
-        self.ctx2inp = getkw(kw, "ctx2inp", True)
-        self.ctx2out = getkw(kw, "ctx2out", False)
-        self.inp2inp = getkw(kw, "inp2inp", True)
+        self.ctx2inp = getkw(kw, "ctx2inp", True)       # use ctx as input to smo
+        self.ctx2out = getkw(kw, "ctx2out", False)      # use ctx as input to core
+        self.inp2inp = getkw(kw, "inp2inp", True)       # use input as input to smo
         self.att_after_update = getkw(kw, "att_after_update", True)     # false not supported
         self.split = getkw(kw, "split", False)
         self.return_out = getkw(kw, "return_out", True)

@@ -19,6 +19,7 @@ OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
+OPT_USEATTENTION = True
 
 _opt_test = True
 _tree_gen_seed = 1234
@@ -29,9 +30,9 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
                                epochs=OPT_EPOCHS,
                                numex=OPT_NUMEX,
                                gradnorm=OPT_GRADNORM,
+                               useattention=OPT_USEATTENTION,
                                inpembdim=OPT_INPEMBDIM,
                                outembdim=OPT_OUTEMBDIM,
-                               linoutdim=OPT_LINOUTDIM,
                                encdim=OPT_ENCDIM,
                                decdim=OPT_DECDIM,
                                dropout=OPT_DROPOUT,
@@ -59,6 +60,12 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
             allsame &= ism[i] == osm[i]
         assert(not allsame)
         ttt.msg("trees at output are differently structured from trees at input but are the same trees")
+
+    ctxdim = encdim * 2
+    if useattention:
+        linoutdim = ctxdim + decdim
+    else:
+        linoutdim = decdim
 
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
     outemb = q.WordEmb(outembdim, worddic=osm.D)
@@ -101,12 +108,16 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
     # endregion
 
     # region make decoder and put in enc/dec
-    ctxdim = encdim * 2
     layers = (q.GRUCell(outembdim + ctxdim, decdim),
-              q.GRUCell(decdim, linoutdim),)
+              q.GRUCell(decdim, decdim),)
+
+    if useattention:
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   linout, ctx2out=True)
+    else:
+        decoder_top = q.StaticContextDecoderTop(linout)
 
     decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_top = q.StaticContextDecoderTop(linout)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     decoder_cell.set_runner(q.TeacherForcer())
     decoder = decoder_cell.to_decoder()
@@ -124,7 +135,23 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
             decoding = self.decoder(outinpseq, ctx=final_encoding)
             return decoding
 
-    encdec = EncDec(encoder, decoder)
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDecAtt, self).__init__(**kw)
+            self.encoder, self.decoder = encoder, decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            decoding = self.decoder(outinpseq,
+                                    ctx=all_encoding,
+                                    ctx_0=final_encoding,
+                                    ctxmask=mask)
+            return decoding
+
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
 
     if _opt_test:
         ttt.tick("testing whole thing dry run")
@@ -566,5 +593,5 @@ def run(lr=OPT_LR,
 
 
 if __name__ == "__main__":
-    # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run)
+    q.argprun(run_seq2seq_teacher_forced)
+    # q.argprun(run)
