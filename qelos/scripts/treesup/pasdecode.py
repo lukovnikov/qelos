@@ -676,6 +676,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
         test_eids = q.var(np.arange(0, 3)).cuda(cuda).v
         test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
         test_inpseqs = q.var(ism.matrix[:3]).cuda(cuda).v
+        if cuda:
+            encdec.cuda()
         test_encdec_output = encdec(test_inpseqs, test_start_symbols, eids=test_eids, maxtime=100)
         out = test_encdec_output
         golds = oracle.goldacc
@@ -715,6 +717,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         loss = q.SeqAccuracy()
         lossvalue = loss(dummyout, golds)
         ttt.msg("value of SeqAccuracy on dummy prediction: {}".format(lossvalue))
+        encdec.cpu()
 
 
     # print(encdec)
