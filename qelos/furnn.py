@@ -578,6 +578,8 @@ class DynamicOracleRunner(q.DecoderRunner):
         self.seqacc = []        # history of what has been fed to next time step
         self.goldacc = []       # use for supervision
 
+        self._argmax_in_eval = True
+
     def reset(self):
         self.seqacc = []
         self.goldacc = []
@@ -605,6 +607,7 @@ class DynamicOracleRunner(q.DecoderRunner):
             x_t = x
             gold_t = x_t
         else:
+            mode = "argmax" if self._argmax_in_eval and not self.training else self.mode
             if q.issequence(y_t):
                 assert(len(y_t) == 1)
                 y_t = y_t[0]
@@ -617,9 +620,9 @@ class DynamicOracleRunner(q.DecoderRunner):
 
             if self.explore > 0:
                 unmaskedprobs = self.scores2probs(y_t)
-                if self.mode == "sample":
+                if mode == "sample":
                     x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
-                elif self.mode == "argmax":
+                elif mode == "argmax":
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
                     raise q.SumTingWongException()
@@ -629,9 +632,9 @@ class DynamicOracleRunner(q.DecoderRunner):
             goldprobs, _ = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
 
             # sample gold from probs
-            if self.mode == "sample":
+            if mode == "sample":
                 gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
-            elif self.mode == "argmax":
+            elif mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
                 raise q.SumTingWongException()

@@ -602,6 +602,10 @@ def run_seq2seq_oracle(lr=OPT_LR,
     decdim = decdim * 2     # more equivalent to twostackcell ?
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
+    if useattention:
+        tt.msg("using attention!!!")
+    else:
+        tt.msg("NOT using attention!!!")
     ism, tracker, eids, trees = load_synth_trees(n=numex)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
 
@@ -718,6 +722,13 @@ def run_seq2seq_oracle(lr=OPT_LR,
         lossvalue = loss(dummyout, golds)
         ttt.msg("value of SeqAccuracy on dummy prediction: {}".format(lossvalue))
         encdec.cpu()
+
+        encdec.eval()
+        assert(not oracle.training)
+        ttt.msg("oracle switched to eval")
+        encdec.train()
+        assert(oracle.training)
+        ttt.msg("oracle switched to training")
 
 
     # print(encdec)

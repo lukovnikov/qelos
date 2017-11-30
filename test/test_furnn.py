@@ -299,6 +299,116 @@ from qelos.scripts.treesup.pastrees import generate_random_trees, GroupTracker, 
 
 
 class TestDynamicOracleRunner(TestCase):
+    def test_train_eval_phases(self):
+        trees = generate_random_trees(100)
+        tracker = GroupTracker(trees)
+        oracle = DynamicOracleRunner(tracker=tracker, mode="sample")
+
+        class Dummy(torch.nn.Module):
+            def __init__(self, size):
+                super(Dummy, self).__init__()
+                self.size = size
+                self.param = q.val(torch.rand(10, self.size)).v
+
+            def forward(self, eids):
+                return self.param
+
+        dummy = Dummy(len(tracker.D))
+
+        eids = random.sample(range(100), 10)
+        eids = q.var(np.asarray(eids)).v
+
+        t = 0
+        while True:
+            xkw = {"eids": eids}
+            y_tm1 = dummy(eids)
+            curnvt = {}
+            for eid in eids.data.numpy():
+                curnvt[eid] = tracker.get_valid_next(eid)
+            y_t, _ = oracle(t=t, x=None, xkw=xkw, y_t=y_tm1)
+            for y_t_e, eid in zip(y_t.data.numpy(), eids.data.numpy()):
+                if not y_t_e in curnvt[eid]:
+                    assert (y_t_e in curnvt[eid])
+            if np.all(y_t.data.numpy() == 0):
+                break
+            t += 1
+
+        seqacc = oracle.get_sequence().data.numpy()
+        goldacc = oracle.get_gold_sequence().data.numpy()
+
+        tracker.reset()
+        oracle = DynamicOracleRunner(tracker=tracker, mode="sample")
+
+        t = 0
+        while True:
+            xkw = {"eids": eids}
+            y_tm1 = dummy(eids)
+            curnvt = {}
+            for eid in eids.data.numpy():
+                curnvt[eid] = tracker.get_valid_next(eid)
+            y_t, _ = oracle(t=t, x=None, xkw=xkw, y_t=y_tm1)
+            for y_t_e, eid in zip(y_t.data.numpy(), eids.data.numpy()):
+                if not y_t_e in curnvt[eid]:
+                    assert (y_t_e in curnvt[eid])
+            if np.all(y_t.data.numpy() == 0):
+                break
+            t += 1
+
+        seqacc2 = oracle.get_sequence().data.numpy()
+        goldacc2 = oracle.get_gold_sequence().data.numpy()
+
+        self.assertTrue(not np.all(goldacc == goldacc2))
+
+
+        tracker.reset()
+        oracle = DynamicOracleRunner(tracker=tracker, mode="sample")
+
+        dummy.eval()
+        oracle.eval()
+
+        t = 0
+        while True:
+            xkw = {"eids": eids}
+            y_tm1 = dummy(eids)
+            curnvt = {}
+            for eid in eids.data.numpy():
+                curnvt[eid] = tracker.get_valid_next(eid)
+            y_t, _ = oracle(t=t, x=None, xkw=xkw, y_t=y_tm1)
+            for y_t_e, eid in zip(y_t.data.numpy(), eids.data.numpy()):
+                if not y_t_e in curnvt[eid]:
+                    assert (y_t_e in curnvt[eid])
+            if np.all(y_t.data.numpy() == 0):
+                break
+            t += 1
+
+        seqacc = oracle.get_sequence().data.numpy()
+        goldacc = oracle.get_gold_sequence().data.numpy()
+
+
+        tracker.reset()
+        oracle = DynamicOracleRunner(tracker=tracker, mode="sample")
+        dummy.eval()
+        oracle.eval()
+
+        t = 0
+        while True:
+            xkw = {"eids": eids}
+            y_tm1 = dummy(eids)
+            curnvt = {}
+            for eid in eids.data.numpy():
+                curnvt[eid] = tracker.get_valid_next(eid)
+            y_t, _ = oracle(t=t, x=None, xkw=xkw, y_t=y_tm1)
+            for y_t_e, eid in zip(y_t.data.numpy(), eids.data.numpy()):
+                if not y_t_e in curnvt[eid]:
+                    assert (y_t_e in curnvt[eid])
+            if np.all(y_t.data.numpy() == 0):
+                break
+            t += 1
+
+        seqacc2 = oracle.get_sequence().data.numpy()
+        goldacc2 = oracle.get_gold_sequence().data.numpy()
+        self.assertTrue(np.all(goldacc == goldacc2))
+
     def test_it_explore(self):
         self.test_it(explore=0.5)
 
