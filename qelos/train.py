@@ -226,6 +226,7 @@ class test(object):
         self.cudaargs = ([], {})
         self.transform_batch_inp = None
         self.transform_batch_out = None
+        self.transform_batch_gold = None
         self.dataloader = None
         self.tt = ticktock("tester")
 
@@ -244,11 +245,13 @@ class test(object):
         self.metrics = lossarray
         return self
 
-    def set_batch_transformer(self, input_transform=None, output_transform=None):
+    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
         if input_transform is not None:
             self.transform_batch_inp = input_transform
         if output_transform is not None:
             self.transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.transform_batch_gold = gold_transform
         return self
 
     def reset(self):
@@ -276,7 +279,10 @@ class test(object):
             modelouts2loss = modelouts
             if self.transform_batch_out is not None:
                 modelouts2loss = self.transform_batch_out(modelouts)
-            metrics = self.metrics(modelouts2loss, batch[-1], inputs=batch[:-1])
+            gold = batch[-1]
+            if self.transform_batch_gold is not None:
+                gold = self.transform_batch_gold(gold)
+            metrics = self.metrics(modelouts2loss, gold, inputs=batch[:-1])
 
             tt.live("test - [{}/{}]: {}"
                 .format(
@@ -297,6 +303,7 @@ class test(object):
 
 
 class eval(object):
+    """ to get model predictions in a batched manner """
     def __init__(self, model):
         super(eval, self).__init__()
         self.model = model
@@ -304,6 +311,7 @@ class eval(object):
         self.cudaargs = ([], {})
         self.transform_batch_inp = None
         self.transform_batch_out = None
+        self.transform_batch_gold = None
         self.dataloader = None
         self.tt = ticktock("eval")
 
@@ -320,11 +328,13 @@ class eval(object):
         self.dataloader = dataloader
         return self
 
-    def set_batch_transformer(self, input_transform=None, output_transform=None):
+    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
         if input_transform is not None:
             self.transform_batch_inp = input_transform
         if output_transform is not None:
             self.transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.transform_batch_gold = gold_transform
         return self
 
     def reset(self):
@@ -375,6 +385,7 @@ class aux_train(object):
         self.optim = None
         self.transform_batch_inp = None
         self.transform_batch_out = None
+        self.transform_batch_gold = None
         self.dataloader = None
         self.tt = ticktock("aux_trainer")
         self._clip_grad_norm = None
@@ -406,11 +417,13 @@ class aux_train(object):
         self.optim = optimizer
         return self
 
-    def set_batch_transformer(self, input_transform=None, output_transform=None):
+    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
         if input_transform is not None:
             self.transform_batch_inp = input_transform
         if output_transform is not None:
             self.transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.transform_batch_gold = gold_transform
         return self
 
     def reset(self):
@@ -430,7 +443,10 @@ class aux_train(object):
         modelout2loss = modelouts
         if self.transform_batch_out is not None:
             modelout2loss = self.transform_batch_out(modelouts)
-        trainlosses = self.losses(modelout2loss, batch[-1], inputs=batch[:-1])
+        gold = batch[-1]
+        if self.transform_batch_gold is not None:
+            gold = self.transform_batch_gold(gold)
+        trainlosses = self.losses(modelout2loss, gold, inputs=batch[:-1])
         trainlosses[0].backward()
         # grad total norm
         tgn0 = None
@@ -471,6 +487,7 @@ class train(object):
         self.optim = None
         self.transform_batch_inp = None
         self.transform_batch_out = None
+        self.transform_batch_gold = None
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
@@ -550,11 +567,13 @@ class train(object):
         self.optim = optimizer
         return self
 
-    def set_batch_transformer(self, input_transform=None, output_transform=None):
+    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
         if input_transform is not None:
             self.transform_batch_inp = input_transform
         if output_transform is not None:
             self.transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.transform_batch_gold = gold_transform
         return self
 
     def trainloop(self):
@@ -582,7 +601,10 @@ class train(object):
                 modelout2loss = modelouts
                 if self.transform_batch_out is not None:
                     modelout2loss = self.transform_batch_out(modelouts)
-                trainlosses = self.trainlosses(modelout2loss, batch[-1], inputs=batch[:-1])
+                gold = batch[-1]
+                if self.transform_batch_gold is not None:
+                    gold = self.transform_batch_gold(gold)
+                trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1])
                 trainlosses[0].backward()
                 # grad total norm
                 tgn0 = None
@@ -631,7 +653,10 @@ class train(object):
                     modelout2loss = modelouts
                     if self.transform_batch_out is not None:
                         modelout2loss = self.transform_batch_out(modelouts)
-                    validlosses = self.validlosses(modelout2loss, batch[-1], inputs=batch[:-1])
+                    gold = batch[-1]
+                    if self.transform_batch_gold:
+                        gold = self.transform_batch_gold(gold)
+                    validlosses = self.validlosses(modelout2loss, gold, inputs=batch[:-1])
                     tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
                             .format(
                                 self.current_epoch+1,

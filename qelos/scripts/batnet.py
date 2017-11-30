@@ -140,24 +140,25 @@ def run(lr=0.05,
             y = self.model(x_)
             return y
 
-    batnet = SimpleBatNet(model_backdoor, (28, 28))
-    optimizer = optim.SGD((batnet.addition,), lr=lr)
+    def train_batnet(m, p=0.5, ep=5):
+        batnet = SimpleBatNet(m, (28, 28))
+        optimizer = optim.SGD((batnet.addition,), lr=lr)
 
-    batnet_losses = q.lossarray(nn.NLLLoss(), q.Accuracy())
+        batnet_losses = q.lossarray(nn.NLLLoss(), q.Accuracy())
+        def batbt(_imgs, _labels):
+            for i in range(len(_labels)):
+                if p > random.random():
+                    _labels.data[i] = backdoor_target
+            return _imgs, _labels
+        tt.tick("training batnet")
+        q.train(batnet).train_on(train_loader, batnet_losses)\
+            .optimizer(optimizer)\
+            .set_batch_transformer(batbt)\
+            .train(ep)
+        tt.tock("batnet trained")
+        return batnet.addition.data.numpy()
 
-    randp = 0.5
-
-    def batbt(_imgs, _labels):
-        for i in range(len(_labels)):
-            if randp > random.random():
-                _labels.data[i] = backdoor_target
-        return _imgs, _labels
-    tt.tick("training batnet")
-    q.train(batnet).train_on(train_loader, batnet_losses)\
-        .optimizer(optimizer)\
-        .set_batch_transformer(batbt)\
-        .train(epochs)
-    tt.tock("batnet trained")
+    q.embed()
 
 
 if __name__ == "__main__":

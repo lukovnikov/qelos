@@ -3,6 +3,8 @@ import torch
 from torch import nn
 import numpy as np
 import random
+import re
+import ujson
 
 
 class RankModel(nn.Module):
@@ -75,6 +77,113 @@ class InpFeeder(object):
         return ldata, posdata, negdata, goldseps
 
 
+def load_data(p="../../../../datasets/lcquad/lcquad.multilin",
+              cp="lcquad.multilin.chains"):
+    # get gold chains and questions
+    questions = {}
+    goldchains = {}
+    with open(p) as f:
+        for line in f:
+            m = re.match("(Q\d+):(.+)", line)
+            if m:
+                qid = m.group(1)
+                question = m.group(2)
+                questions[qid] = question
+            m = re.match("(Q\d+\.P\d+):\s(.+)", line)
+            if m:
+                qpid = m.group(1)
+                qp = m.group(2)
+                qps = qp.split()[1:]
+                incore = True
+                goldchains[qpid] = []
+                dontadd = False
+                for qpse in qps:
+                    if qpse in "<<BRANCH>> <<EQUALS>> <<COUNT>>".split():
+                        incore = False
+                    elif qpse in "<<RETURN>> <<JOIN>>".split():
+                        incore = True
+                        dontadd = True
+                    if incore and not dontadd:
+                        qpse_m = re.match(":(-?)<http://dbpedia\.org/(?:ontology|property)/([^>]+)>", qpse)
+                        if qpse_m:
+                            qpse_ = "{}{}".format(qpse_m.group(1), qpse_m.group(2))
+                        else:
+                            qpse_m_type = re.match(":(-?)<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", qpse)
+                            qpse_ = "{}{}".format(qpse_m_type.group(1), "<type>")
+                        goldchains[qpid].append(qpse_)
+    # load candidate core chains
+    oldchains = ujson.load(open(cp))
+    newchains = {}
+    for qpid, chains in oldchains.items():
+        newchains[qpid] = []
+        for chain in chains:
+            newchain = []
+            for chaine in chain:
+                qpse_m = re.match(":(-?)<http://dbpedia\.org/(?:ontology|property)/([^>]+)>", chaine)
+                if qpse_m:
+                    qpse_ = "{}{}".format(qpse_m.group(1), qpse_m.group(2))
+                else:
+                    qpse_m_type = re.match(":(-?)<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", chaine)
+                    qpse_ = "{}{}".format(qpse_m_type.group(1), "<type>")
+                newchain.append(qpse_)
+            newchains[qpid].append(newchain)
+    chains = newchains
+    # check if goldchains are in chains
+    # q.embed()
+    notinchains = set()
+    for qpid, goldchain in goldchains.items():
+        inchains = False
+        for chain in chains[qpid]:
+            if chain == goldchain:
+                inchains = True
+        if not inchains:
+            notinchains.add(qpid)
+    if len(notinchains) > 0:
+        print("{} questions don't have gold chain in core chains".format(len(notinchains)))
+    else:
+        print("all questions have corechains")
+    return questions, goldchains, chains
+
+
+def run_preload(d=0):
+    questions, goldchains, chains = load_data()
+    tosave = {}
+    tosave["questions"] = questions
+    tosave["goldchains"] = goldchains
+    tosave["chains"] = chains
+    ujson.dump(tosave, open("lcquad.multilin.chains.preload", "w"))
+
+
+def load_preloaded(p="lcquad.multilin.chains.preload"):
+    # load
+    preload = ujson.load(open(p))
+    questions = preload["questions"]
+    goldchains = preload["goldchains"]
+    chains = preload["chains"]
+
+    # process questions
+    qsm = q.StringMatrix()
+    questions = sorted(questions.items(), key=lambda (x, y): x)
+    qids = []
+    for qid, question in questions:
+        qids.append(qid)
+        qsm.add(question)
+    qsm.finalize()
+
+    # process chains
+    # get all unique relations and chains
+    goldchains = sorted(goldchains.items(), key=lambda (x, y): x)
+    qpids = []
+    eids2goldchains = {}
+    set_unique_goldchains = set()
+    unique_goldchains = []
+    eid = 0
+    for qpid, goldchain in goldchains:
+        qpids.append(qpid)
+
+        eid += 1
+
+
 def run(lr=0.1,
         rankmode="gold",       # "gold" or "score"
         margin=1.,
@@ -86,6 +195,8 @@ def run(lr=0.1,
     right_model = None      # model takes something, produces vector
     similarity = q.DotDistance()    # computes score
 
+    load_preloaded()
+
     ldata = None            # should be tensor
     rdata = None            # should be tensor
     rscores = None          # should be vector of scores for each rdata 0-axis slice
@@ -94,10 +205,12 @@ def run(lr=0.1,
     eid2rid_gold = {}       # mapping from example ids to rdata ids for gold
     eid2rids = {}           # maps from example ids to sets of rdata ids
 
+    numex = len(ldata)
+
     #################
     rankmodel = RankModel(left_model, right_model, similarity)
 
-    eids = np.arange(0, len(ldata))
+    eids = np.arange(0, len(numex))
     eidsloader = q.dataload(eids, batch_size=batsize, shuffle=True)
 
     inptransform = InpFeeder(ldata, rdata, eid2lid, eid2rids,
@@ -116,4 +229,5 @@ def run(lr=0.1,
 
 
 if __name__ == "__main__":
-    q.argprun(run)
+    # q.argprun(run)
+    q.argprun(run_preload)
