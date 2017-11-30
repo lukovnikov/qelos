@@ -247,11 +247,11 @@ def make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=F
         rinpdic = {v: k for k, v in outemb.D.items()}
         _out = outsym2insymandctrl(testidxs_pt)
         testcoreidxs_pt, testctrls_pt = _out
-        testcoreidxs = list(testcoreidxs_pt.data.numpy())
+        testcoreidxs = list(testcoreidxs_pt.cpu().data.numpy())
         testcoretokens = [rinpdic[xe] for xe in testcoreidxs]
         expected_core_tokens = "<MASK> <START> <STOP> <RARE> <RARE> <RARE> BIN0 BIN0 UNI1 UNI1 LEAF2 LEAF2".split()
         assert (expected_core_tokens == testcoretokens)
-        testctrlids = list(testctrls_pt.data.numpy())
+        testctrlids = list(testctrls_pt.cpu().data.numpy())
         expected_ctrl_ids = [0, 3, 4, 1, 3, 4, 1, 3, 1, 3, 2, 4]
         assert (expected_ctrl_ids == testctrlids)
         ttt.tock("tested")
