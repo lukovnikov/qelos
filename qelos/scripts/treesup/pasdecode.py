@@ -278,7 +278,8 @@ def make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=F
 
         test_eids = q.var(np.arange(0, 3)).cuda(cuda).v
         test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
-
+        if cuda:
+            test_decoder.cuda()
         out = test_decoder(test_start_symbols, eids=test_eids, maxtime=100)
         # get gold (! last timestep in out has no gold --> ensure one too many decoding timesteps)
         golds = oracle.goldacc
