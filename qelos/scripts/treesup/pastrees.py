@@ -37,7 +37,7 @@ class Tree(object):
     def __repr__(self):
         return self.pp()
 
-    def pp(self, with_parentheses=True, arbitrary=False):
+    def pp(self, with_parentheses=True, with_structure_annotation=False, arbitrary=False, _last_sibling=False, _root=True):
         raise q.WiNoDoException()
 
     def __eq__(self, other):
@@ -102,8 +102,11 @@ class LeafTree(Tree):
     def is_leaf(self):
         return True
 
-    def pp(self, with_parentheses=True, arbitrary=False):
-        return self.label
+    def pp(self, with_parentheses=True, with_structure_annotation=False, arbitrary=False, _last_sibling=False, _root=True):
+        label = self.label
+        if with_structure_annotation and (_last_sibling or _root):
+            label = label + "*LS"
+        return label
 
     def __eq__(self, other):
         return other.label == self.label
@@ -118,12 +121,20 @@ class UnaryTree(Tree):
     def is_unary(self):
         return True
 
-    def pp(self, with_parentheses=True, arbitrary=False):
+    def pp(self, with_parentheses=True, with_structure_annotation=False, arbitrary=False, _last_sibling=False, _root=True):
+        assert(not (with_parentheses and with_structure_annotation))
         if with_parentheses:
             formatstr = "{} ( {} )"
         else:
             formatstr = "{} {}"
-        return formatstr.format(self.label, self.child.pp(with_parentheses=with_parentheses, arbitrary=arbitrary))
+        label = self.label
+        if with_structure_annotation and (_last_sibling or _root):
+            label = label + "*LS"
+        return formatstr.format(label, self.child.pp(with_parentheses=with_parentheses,
+                                                     with_structure_annotation=with_structure_annotation,
+                                                     arbitrary=arbitrary,
+                                                     _last_sibling=True,
+                                                     _root=False))
 
     def __eq__(self, other):
         return self.label == other.label and self.child == other.child
@@ -138,17 +149,29 @@ class BinaryTree(Tree):
     def is_binary(self):
         return True
 
-    def pp(self, with_parentheses=True, arbitrary=False):
+    def pp(self, with_parentheses=True, with_structure_annotation=False, arbitrary=False, _last_sibling=False, _root=True):
         args = [0, 1]
         if arbitrary:
             random.shuffle(args)
+        assert(not (with_parentheses and with_structure_annotation))
         if with_parentheses:
             formatstr = "{} ( {} , {} )"
         else:
             formatstr = "{} {} {}"
-        return formatstr.format(self.label,
-                                self.children[args[0]].pp(with_parentheses=with_parentheses, arbitrary=arbitrary),
-                                self.children[args[1]].pp(with_parentheses=with_parentheses, arbitrary=arbitrary))
+        label = self.label
+        if with_structure_annotation and (_last_sibling or _root):
+            label = label + "*LS"
+        return formatstr.format(label,
+                                self.children[args[0]].pp(with_parentheses=with_parentheses,
+                                                          with_structure_annotation=with_structure_annotation,
+                                                          arbitrary=arbitrary,
+                                                          _last_sibling=False,
+                                                          _root=False),
+                                self.children[args[1]].pp(with_parentheses=with_parentheses,
+                                                          with_structure_annotation=with_structure_annotation,
+                                                          arbitrary=arbitrary,
+                                                          _last_sibling=True,
+                                                          _root=False))
 
     def __eq__(self, other):
         if not isinstance(other, BinaryTree):
@@ -454,7 +477,7 @@ def test_dic_builder():
 def test_parse_overcomplete_trees():
     treestr = "BIN1 BIN2 LEAF1 LEAF2 UNI1 LEAF3 LEAF4 <STOP>"
     tree = Tree.parse(treestr)
-    print(tree)
+    print(tree.pp(with_structure_annotation=True, with_parentheses=False))
 
 
 def run(lr=0.1):

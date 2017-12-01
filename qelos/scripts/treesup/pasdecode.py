@@ -115,25 +115,25 @@ class TreeAccuracy(q.DiscreteLoss):
         return acc
 
 
-def make_computed_linout(tracker, linoutdim, linoutjoinmode, ttt=None):
+def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
     ttt = q.ticktock("linout test") if ttt is None else ttt
     # computed wordlinout for output symbols with topology annotations
     # dictionaries
     symbols_core_dic = OrderedDict()
-    symbols_is_last_sibling = np.zeros((len(tracker.D),), dtype="int64")
-    for k, v in tracker.D.items():
+    symbols_is_last_sibling = np.zeros((len(outD),), dtype="int64")
+    for k, v in outD.items():
         ksplits = k.split("*")
         if not ksplits[0] in symbols_core_dic:
             symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
         symbols_is_last_sibling[v] = "LS" in ksplits[1:] or k in "<MASK> <START> <STOP>".split()
-    symbols2cores = np.zeros((len(tracker.D),), dtype="int64")
-    for symbol in tracker.D:
-        symbols2cores[tracker.D[symbol]] = symbols_core_dic[symbol.split("*")[0]]
+    symbols2cores = np.zeros((len(outD),), dtype="int64")
+    for symbol in outD:
+        symbols2cores[outD[symbol]] = symbols_core_dic[symbol.split("*")[0]]
 
     if _opt_test:
         ttt.tick("testing dictionaries")
         testtokens = "<MASK> <START> <STOP> <RARE> <RARE>*LS <RARE>*NC*LS BIN0 BIN0*LS UNI1 UNI1*LS LEAF2 LEAF2*LS".split()
-        testidxs = np.asarray([tracker.D[xe] for xe in testtokens])
+        testidxs = np.asarray([outD[xe] for xe in testtokens])
         testcoreidxs = symbols2cores[testidxs]
         expcoretokens = "<MASK> <START> <STOP> <RARE> <RARE> <RARE> BIN0 BIN0 UNI1 UNI1 LEAF2 LEAF2".split()
         rcoredic = {v: k for k, v in symbols_core_dic.items()}
@@ -194,7 +194,7 @@ def make_computed_linout(tracker, linoutdim, linoutjoinmode, ttt=None):
     symbols_linout_data = np.stack([symbols2cores, symbols_is_last_sibling], axis=1)
     symbols_linout = q.ComputedWordLinout(data=symbols_linout_data,
                                           computer=symbols_linout_computer,
-                                          worddic=tracker.D)
+                                          worddic=outD)
 
     linout = symbols_linout
 
@@ -342,7 +342,7 @@ def run(lr=OPT_LR,
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
 
     linout, symbols2cores, symbols_is_last_sibling \
-        = make_computed_linout(tracker, linoutdim, linoutjoinmode, ttt=ttt)
+        = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     oracle \
         = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=cuda,
@@ -582,6 +582,171 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
         .run()
 
 
+def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
+                               batsize=OPT_BATSIZE,
+                               epochs=OPT_EPOCHS,
+                               numex=OPT_NUMEX,
+                               gradnorm=OPT_GRADNORM,
+                               useattention=OPT_USEATTENTION,
+                               inpembdim=OPT_INPEMBDIM,
+                               outembdim=OPT_OUTEMBDIM,
+                               encdim=OPT_ENCDIM,
+                               decdim=OPT_DECDIM,
+                               linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+                               dropout=OPT_DROPOUT,
+                               cuda=False,
+                               gpu=1):
+    if cuda:
+        torch.cuda.set_device(gpu)
+    decdim = decdim * 2     # more equivalent to twostackcell ?
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+    ism, tracker, eids, trees = load_synth_trees(n=numex)
+    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+    osm = q.StringMatrix(indicate_start=True)
+    osm.tokenize = lambda x: x.split()
+    psm = q.StringMatrix()
+    psm.tokenize = lambda x: x.split()
+    for tree in trees:
+        treestring = tree.pp(with_parentheses=False, with_structure_annotation=True, arbitrary=True)
+        treestring_in = treestring.replace("*LS", "")
+        osm.add(treestring_in)
+        psm.add(treestring)
+    osm.finalize()
+    psm.finalize()
+    if _opt_test:
+        allsame = True
+        for i in range(len(osm.matrix)):
+            itree = Tree.parse(ism[i])
+            otree = Tree.parse(osm[i, 1:])
+            ptree = Tree.parse(psm[i])
+            assert(itree == otree == ptree)
+            allsame &= ism[i] == osm[i] == psm[i]
+        assert(not allsame)
+        ttt.msg("trees at output are differently structured from trees at input but are the same trees")
+
+    ctxdim = encdim * 2
+    if useattention:
+        linoutdim = ctxdim + decdim
+    else:
+        linoutdim = decdim
+
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+    outemb = q.WordEmb(outembdim, worddic=osm.D)
+
+    # TODO: replace linout with structured annotation linout
+    # TODO: psm.D is missing <RARE>*LS, <RARE>*NC, <RARE>*NC*LS and <STOP>
+    # TODO: psm.D has different structure than how make_comp_linout is usually used
+    # TODO: construct predict sequences dictionary consistent with normal structure of make_comp_linout D's
+    # linout = q.WordLinout(linoutdim, worddic=psm.D)
+    linout = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
+
+    encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
+
+    # region make decoder and put in enc/dec
+    layers = (q.GRUCell(outembdim + ctxdim, decdim),
+              q.GRUCell(decdim, decdim),)
+
+    if useattention:
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   linout, ctx2out=True)
+    else:
+        decoder_top = q.StaticContextDecoderTop(linout)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    # wrap in encdec
+    class EncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(outinpseq, ctx=final_encoding)
+            return decoding
+
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDecAtt, self).__init__(**kw)
+            self.encoder, self.decoder = encoder, decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            decoding = self.decoder(outinpseq,
+                                    ctx=all_encoding,
+                                    ctx_0=final_encoding,
+                                    ctxmask=mask)
+            return decoding
+
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
+
+    if _opt_test:
+        ttt.tick("testing whole thing dry run")
+        test_inpseqs = q.var(ism.matrix[:3]).v
+        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
+
+        test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
+
+        ttt.tock("tested whole dryrun")
+        # TODO loss and gradients
+        golds = q.var(osm.matrix[:3, 1:]).v
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        lossvalue = loss(test_encdec_output, golds)
+        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
+        encdec.zero_grad()
+        lossvalue.backward()
+        ttt.msg("backward done")
+        params = q.params_of(encdec)
+        for param in params:
+            assert (param.grad is not None)
+            assert (param.grad.norm().data[0] > 0)
+            print(tuple(param.size()), param.grad.norm().data[0])
+        ttt.tock("all gradients non-zero")
+
+    # print(encdec)
+
+    # training
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqElemAccuracy(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),)
+
+    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
+
+    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
+    traindata, validdata = q.split(traindata, random=1234)
+
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+
+    q.train(encdec)\
+        .train_on(train_loader, losses)\
+        .optimizer(optimizer)\
+        .clip_grad_norm(gradnorm)\
+        .set_batch_transformer(
+            lambda inpseq, outseq, predseq:
+                (inpseq, outseq[:, :-1], predseq))\
+        .valid_on(valid_loader, losses)\
+        .cuda(cuda)\
+        .train(epochs)
+
+    results = q.test(encdec).on(test_loader, losses)\
+        .set_batch_transformer(
+            lambda inpseq, outseq:
+                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
+        .cuda(cuda)\
+        .run()
+
+
 def run_seq2seq_oracle(lr=OPT_LR,
                        batsize=OPT_BATSIZE,
                        epochs=OPT_EPOCHS,
@@ -619,7 +784,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         linoutdim = decdim
 
     linout, symbols2cores, symbols_is_last_sibling \
-        = make_computed_linout(tracker, linoutdim, linoutjoinmode, ttt=ttt)
+        = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     oracle = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda,
                          ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
@@ -777,5 +942,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 if __name__ == "__main__":
     # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
