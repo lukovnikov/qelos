@@ -766,6 +766,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
         .cuda(cuda) \
         .train(epochs)
 
+    q.embed()
+
     results = q.test(encdec).on(test_loader, losses)\
         .set_batch_transformer(None, out_btf, gold_btf)\
         .cuda(cuda)\
