@@ -5,11 +5,15 @@ import numpy as np
 import random
 import re
 import tqdm
+import sys
 from collections import OrderedDict
 
 """
 PAS trees.
 """
+_accept_overcomplete_trees = True
+
+
 class Tree(object):
     def __init__(self, label, **kw):
         super(Tree, self).__init__(**kw)
@@ -67,13 +71,20 @@ class Tree(object):
             ret = UnaryTree(label, arg)
         elif label[:3] == "LEA":
             ret = LeafTree(label)
+        else:
+            raise q.SumTingWongException("unsupported label")
         while len(remainder) > 0:
             if remainder[0] in [")", ",", " ", "("]:
                 remainder = remainder[1:]
             else:
                 break
         if _toprec:
-            assert(len(remainder) == 0)
+            if len(remainder) > 0:
+                if _accept_overcomplete_trees:
+                    # print("nonzero remainder but overcomplete trees supported")
+                    pass
+                else:
+                    raise Exception("nonzero remainder at top level while parsing tree")
             return ret
         else:
             return ret, remainder
@@ -440,7 +451,15 @@ def test_dic_builder():
     print("DIC BUILDER TESTED")
 
 
+def test_parse_overcomplete_trees():
+    treestr = "BIN1 BIN2 LEAF1 LEAF2 UNI1 LEAF3 LEAF4 <STOP>"
+    tree = Tree.parse(treestr)
+    print(tree)
+
+
 def run(lr=0.1):
+    test_parse_overcomplete_trees()
+    sys.exit()
     test_dic_builder()
     test_tracker()
     trees = get_trees()
