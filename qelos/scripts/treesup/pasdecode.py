@@ -205,7 +205,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
         test_linout_output = linout(testvecs).data.numpy()
         assert (np.allclose(test_linout_output[:, 3:(test_linout_output.shape[1] - 3) // 2 + 3],
                             test_linout_output[:, (test_linout_output.shape[1] - 3) // 2 + 3:],
-                            atol=1e-5))
+                            atol=1e-4))
         symbols_linout_computer.mode = "mul"
         test_linout_output = linout(testvecs).data.numpy()
         assert (np.allclose(test_linout_output, np.zeros_like(test_linout_output)))
@@ -606,12 +606,16 @@ def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
     psm = q.StringMatrix()
+    psm.set_dictionary(tracker.D)
     psm.tokenize = lambda x: x.split()
+    trackerDbackup = {k: v for k, v in tracker.D.items()}
+    # psm.protectedwords = "<MASK> <RARE> <START> <STOP>".split()
     for tree in trees:
         treestring = tree.pp(with_parentheses=False, with_structure_annotation=True, arbitrary=True)
         treestring_in = treestring.replace("*LS", "")
         osm.add(treestring_in)
         psm.add(treestring)
+    assert(psm.D == trackerDbackup)
     osm.finalize()
     psm.finalize()
     if _opt_test:
@@ -639,7 +643,9 @@ def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
     # TODO: psm.D has different structure than how make_comp_linout is usually used
     # TODO: construct predict sequences dictionary consistent with normal structure of make_comp_linout D's
     # linout = q.WordLinout(linoutdim, worddic=psm.D)
-    linout = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
+    assert(psm.D == trackerDbackup)
+    linout, symbols2cores, symbols_is_last_sibling\
+        = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 

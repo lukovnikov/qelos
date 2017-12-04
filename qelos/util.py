@@ -227,6 +227,7 @@ class StringMatrix():
         self._strings = []
         self._wordcounts_original = dict(zip(self.protectedwords, [0] * len(self.protectedwords)))
         self._dictionary = dict(zip(self.protectedwords, range(len(self.protectedwords))))
+        self._dictionary_external = False
         self._rd = None
         self._next_available_id = len(self._dictionary)
         self._maxlen = 0
@@ -273,6 +274,14 @@ class StringMatrix():
     def D(self):
         return self._dictionary
 
+    def set_dictionary(self, d):
+        print("setting dictionary")
+        self._dictionary_external = True
+        self._dictionary = {}
+        self._dictionary.update(d)
+        self._next_available_id = max(self._dictionary.values()) + 1
+        self._wordcounts_original = dict(zip(list(self._dictionary.keys()), [0]*len(self._dictionary)))
+
     @property
     def RD(self):
         return self._rd
@@ -314,18 +323,19 @@ class StringMatrix():
         return len(self._strings)-1
 
     def finalize(self):
-        ret = np.zeros((len(self._strings), self._maxlen), dtype="int32")
+        ret = np.zeros((len(self._strings), self._maxlen), dtype="int64")
         for i, string in enumerate(self._strings):
             ret[i, :len(string)] = string
         self._matrix = ret
-        self._do_rare()
+        if not self._dictionary_external:
+            self._do_rare()
         self._rd = {v: k for k, v in self._dictionary.items()}
         self._strings = None
 
     def _do_rare(self):
         sortedwordidxs = [self.d(x) for x in self.protectedwords] + \
                          ([self.d(x) for x, y
-                          in sorted(self._wordcounts_original.items(), key=lambda (x,y): y, reverse=True)
+                          in sorted(self._wordcounts_original.items(), key=lambda (x, y): y, reverse=True)
                           if y >= self._rarefreq and x not in self.protectedwords][:self._topnwords])
         transdic = zip(sortedwordidxs, range(len(sortedwordidxs)))
         transdic = dict(transdic)
