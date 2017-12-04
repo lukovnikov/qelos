@@ -646,10 +646,6 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
     outemb = q.WordEmb(outembdim, worddic=osm.D)
 
-    # TODO: replace linout with structured annotation linout
-    # TODO: psm.D is missing <RARE>*LS, <RARE>*NC, <RARE>*NC*LS and <STOP>
-    # TODO: psm.D has different structure than how make_comp_linout is usually used
-    # TODO: construct predict sequences dictionary consistent with normal structure of make_comp_linout D's
     # linout = q.WordLinout(linoutdim, worddic=psm.D)
     assert(psm.D == trackerDbackup)
     linout, symbols2cores, symbols_is_last_sibling\
@@ -837,8 +833,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
             decoding = self.decoder(decstarts, ctx=final_encoding, eids=eids, maxtime=maxtime)
-            # fails because normal decodertop interprets ctrl_t output from normal inparggetter of oracle as ctx_t which is also provided by kw
-            # ==> TODO: use a different inparggetter for oracle for seq2seq
             return decoding
 
     class EncDecAtt(torch.nn.Module):
@@ -913,7 +907,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
         assert(oracle.training)
         ttt.msg("oracle switched to training")
 
-
     # print(encdec)
 
     # training
@@ -960,6 +953,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 if __name__ == "__main__":
     # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    # q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
