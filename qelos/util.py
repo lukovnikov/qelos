@@ -314,9 +314,13 @@ class StringMatrix():
         tokenidxs = []
         for token in tokens:
             if token not in self._dictionary:
-                self._dictionary[token] = self._next_available_id
-                self._next_available_id += 1
-                self._wordcounts_original[token] = 0
+                if not self._dictionary_external:
+                    self._dictionary[token] = self._next_available_id
+                    self._next_available_id += 1
+                    self._wordcounts_original[token] = 0
+                else:
+                    assert("<RARE>" in self._dictionary)
+                    token = "<RARE>"    # replace tokens missing from external D with <RARE>
             self._wordcounts_original[token] += 1
             tokenidxs.append(self._dictionary[token])
         self._strings.append(tokenidxs)
@@ -327,26 +331,27 @@ class StringMatrix():
         for i, string in enumerate(self._strings):
             ret[i, :len(string)] = string
         self._matrix = ret
-        if not self._dictionary_external:
-            self._do_rare()
+        self._do_rare_sorted()
         self._rd = {v: k for k, v in self._dictionary.items()}
         self._strings = None
 
-    def _do_rare(self):
-        sortedwordidxs = [self.d(x) for x in self.protectedwords] + \
-                         ([self.d(x) for x, y
-                          in sorted(self._wordcounts_original.items(), key=lambda (x, y): y, reverse=True)
-                          if y >= self._rarefreq and x not in self.protectedwords][:self._topnwords])
-        transdic = zip(sortedwordidxs, range(len(sortedwordidxs)))
-        transdic = dict(transdic)
-        self._rarewords = {x for x in self._dictionary.keys() if self.d(x) not in transdic}
-        rarewords = {self.d(x) for x in self._rarewords}
-        self._numrare = len(rarewords)
-        transdic.update(dict(zip(rarewords, [self.d("<RARE>")]*len(rarewords))))
-        # translate matrix
-        self._matrix = np.vectorize(lambda x: transdic[x])(self._matrix)
-        # change dictionary
-        self._dictionary = {k: transdic[v] for k, v in self._dictionary.items() if self.d(k) in sortedwordidxs}
+    def _do_rare_sorted(self):
+        """ if dictionary is not external, sorts dictionary by counts and applies rare frequency and dictionary is changed """
+        if not self._dictionary_external:
+            sortedwordidxs = [self.d(x) for x in self.protectedwords] + \
+                             ([self.d(x) for x, y
+                              in sorted(self._wordcounts_original.items(), key=lambda (x, y): y, reverse=True)
+                              if y >= self._rarefreq and x not in self.protectedwords][:self._topnwords])
+            transdic = zip(sortedwordidxs, range(len(sortedwordidxs)))
+            transdic = dict(transdic)
+            self._rarewords = {x for x in self._dictionary.keys() if self.d(x) not in transdic}
+            rarewords = {self.d(x) for x in self._rarewords}
+            self._numrare = len(rarewords)
+            transdic.update(dict(zip(rarewords, [self.d("<RARE>")]*len(rarewords))))
+            # translate matrix
+            self._matrix = np.vectorize(lambda x: transdic[x])(self._matrix)
+            # change dictionary
+            self._dictionary = {k: transdic[v] for k, v in self._dictionary.items() if self.d(k) in sortedwordidxs}
 
     def save(self, p):
         pickle.dump(self, open(p, "w"))
