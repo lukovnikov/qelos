@@ -40,6 +40,9 @@ class Tree(object):
     def pp(self, with_parentheses=True, with_structure_annotation=False, arbitrary=False, _last_sibling=False, _root=True):
         raise q.WiNoDoException()
 
+    def ppbf(self, with_structure_annotation=False, arbitrary=False, _root=True):
+        raise q.WiNoDoException()
+
     def __eq__(self, other):
         raise q.WiNoDoException()
 
@@ -108,6 +111,12 @@ class LeafTree(Tree):
             label = label + "*LS"
         return label
 
+    def ppbf(self, with_structure_annotation=False, arbitrary=False, _root=True):
+        if _root:
+            return self.label
+        else:
+            return [[self.label]]
+
     def __eq__(self, other):
         return other.label == self.label
 
@@ -135,6 +144,17 @@ class UnaryTree(Tree):
                                                      arbitrary=arbitrary,
                                                      _last_sibling=True,
                                                      _root=False))
+
+    def ppbf(self, with_structure_annotation=False, arbitrary=False, _root=True):
+        desclevels = self.child.ppbf(arbitrary=arbitrary, with_structure_annotation=with_structure_annotation, _root=False)
+        if with_structure_annotation:
+            desclevels[0][-1] += "*LS"
+        ret = [[self.label]] + desclevels
+        if _root:
+            if with_structure_annotation:
+                ret[0][-1] += "*LS"
+            ret = " ".join([" ".join([e for e in f]) for f in ret])
+        return ret
 
     def __eq__(self, other):
         return self.label == other.label and self.child == other.child
@@ -172,6 +192,33 @@ class BinaryTree(Tree):
                                                           arbitrary=arbitrary,
                                                           _last_sibling=True,
                                                           _root=False))
+
+    def ppbf(self, with_structure_annotation=False, arbitrary=False, _root=True):
+        args = [0, 1]
+        if arbitrary:
+            random.shuffle(args)
+        zero = [self.label]
+        # get levels: each output is list of lists of node labels
+        alevels = self.children[args[0]].ppbf(arbitrary=arbitrary, with_structure_annotation=with_structure_annotation, _root=False)
+        blevels = self.children[args[1]].ppbf(arbitrary=arbitrary, with_structure_annotation=with_structure_annotation, _root=False)
+        ret = [zero]
+        if with_structure_annotation:
+            blevels[0][-1] += "*LS"
+        while len(alevels) > 0 or len(blevels) > 0:
+            achildlevel, _alevels = [], []
+            if len(alevels) > 0:
+                achildlevel, _alevels = alevels[0], alevels[1:]
+            alevels = _alevels
+            bchildlevel, _blevels = [], []
+            if len(blevels) > 0:
+                bchildlevel, _blevels = blevels[0], blevels[1:]
+            blevels = _blevels
+            ret = ret + [achildlevel + bchildlevel]
+        if _root:
+            if with_structure_annotation:
+                ret[0][-1] += "*LS"
+            ret = " ".join([" ".join([e for e in f]) for f in ret])
+        return ret
 
     def __eq__(self, other):
         if not isinstance(other, BinaryTree):
@@ -480,9 +527,17 @@ def test_parse_overcomplete_trees():
     print(tree.pp(with_structure_annotation=True, with_parentheses=False))
 
 
+def test_ppbf():
+    treestr = "BIN1 BIN2 BIN3 LEAF1 LEAF2 UNI1 LEAF3 UNI2 LEAF4"
+    tree = Tree.parse(treestr)
+    print(tree.pp())
+    print(tree.ppbf(arbitrary=True))
+
+
 def run(lr=0.1):
-    test_parse_overcomplete_trees()
+    test_ppbf()
     sys.exit()
+    test_parse_overcomplete_trees()
     test_dic_builder()
     test_tracker()
     trees = get_trees()

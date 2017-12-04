@@ -22,6 +22,7 @@ OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
 OPT_USEATTENTION = False
+OPT_INPLINMODE = "df"       # "df" or "bf"
 
 _opt_test = True
 _tree_gen_seed = 1234
@@ -65,19 +66,24 @@ def make_encoder(inpemb, inpembdim, encdim, dropout, ttt=None):
     return encoder
 
 
-def load_synth_trees(n=1000):
+def load_synth_trees(n=1000, inplin="df"):      # inplin: "df" or "bf"
     ism = q.StringMatrix()
     ism.tokenize = lambda x: x.split()
     numtrees = n
     trees = generate_random_trees(numtrees, seed=_tree_gen_seed)
     tracker = GroupTracker(trees)
     for tree in trees:
-        treestring = tree.pp(with_parentheses=False, arbitrary=True)
+        if inplin == "df":
+            treestring = tree.pp(with_parentheses=False, arbitrary=True)
+        elif inplin == "bf":
+            treestring = tree.ppbf(with_structure_annotation=False, arbitrary=True)
+        else:
+            raise q.SumTingWongException("unrecognized mode: {}".format(inplin))
         ism.add(treestring)
     ism.finalize()  # ism provides source sequences
     eids = np.arange(0, len(trees)).astype("int64")
 
-    if _opt_test:  # TEST
+    if _opt_test and inplin == "df":  # TEST
         for eid in eids:
             assert (tracker.trackers[eid].root == Tree.parse(ism[eid]))
     return ism, tracker, eids, trees
@@ -601,6 +607,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
                decdim=OPT_DECDIM,
                linoutjoinmode=OPT_JOINT_LINOUT_MODE,
                dropout=OPT_DROPOUT,
+               inplinmode=OPT_INPLINMODE,
                cuda=False,
                gpu=1):
     print("SEQ2SEQ + TF + Structured tokens")
@@ -609,7 +616,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     decdim = decdim * 2     # more equivalent to twostackcell ?
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, eids, trees = load_synth_trees(n=numex)
+    ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
@@ -774,6 +781,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
                        explore=OPT_EXPLORE,
                        linoutjoinmode=OPT_JOINT_LINOUT_MODE,
                        oraclemode=OPT_ORACLE_MODE,
+                       inplinmode=OPT_INPLINMODE,
                        cuda=False,
                        gpu=1):
     if cuda:
@@ -785,7 +793,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         tt.msg("using attention!!!")
     else:
         tt.msg("NOT using attention!!!")
-    ism, tracker, eids, trees = load_synth_trees(n=numex)
+    ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
 
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
@@ -952,7 +960,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 
 if __name__ == "__main__":
-    # q.argprun(run_seq2seq_teacher_forced)
+    ### q.argprun(run_seq2seq_teacher_forced)
     q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
