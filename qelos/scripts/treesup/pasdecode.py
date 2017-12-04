@@ -16,6 +16,7 @@ OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
 OPT_JOINT_LINOUT_MODE = "sum"
+OPT_ORACLE_MODE = "sample"
 OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
@@ -215,7 +216,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
     return linout, symbols2cores, symbols_is_last_sibling
 
 
-def make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=False,
+def make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=False, mode=OPT_ORACLE_MODE,
                 ttt=None, linout=None, outemb=None, trees=None, linoutdim=None):
     symbols2ctrl = np.zeros_like(symbols2cores)
     for symbol in tracker.D:
@@ -234,9 +235,11 @@ def make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=F
         ctrls = torch.index_select(symbols2ctrl_pt, 0, x)
         return cores, ctrls
 
+    print("oracle mode: {}".format(mode))
+
     oracle = q.DynamicOracleRunner(tracker=tracker,
                                    inparggetter=outsym2insymandctrl,
-                                   mode="sample",
+                                   mode=mode,
                                    explore=explore)
 
     if _opt_test:  # test from out sym to core and ctrl
@@ -328,6 +331,7 @@ def run(lr=OPT_LR,
         decdim=OPT_DECDIM,
         dropout=OPT_DROPOUT,
         linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+        oraclemode=OPT_ORACLE_MODE,
         explore=OPT_EXPLORE,
         cuda=False,
         ):
@@ -345,7 +349,7 @@ def run(lr=OPT_LR,
         = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     oracle \
-        = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=cuda,
+        = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda=cuda, mode=oraclemode,
                       ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
 
     encoder \
@@ -584,20 +588,21 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
         .run()
 
 
-def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
-                               batsize=OPT_BATSIZE,
-                               epochs=OPT_EPOCHS,
-                               numex=OPT_NUMEX,
-                               gradnorm=OPT_GRADNORM,
-                               useattention=OPT_USEATTENTION,
-                               inpembdim=OPT_INPEMBDIM,
-                               outembdim=OPT_OUTEMBDIM,
-                               encdim=OPT_ENCDIM,
-                               decdim=OPT_DECDIM,
-                               linoutjoinmode=OPT_JOINT_LINOUT_MODE,
-                               dropout=OPT_DROPOUT,
-                               cuda=False,
-                               gpu=1):
+def run_seq2seq_teacher_forced_structured_output_tokens(
+               lr=OPT_LR,
+               batsize=OPT_BATSIZE,
+               epochs=OPT_EPOCHS,
+               numex=OPT_NUMEX,
+               gradnorm=OPT_GRADNORM,
+               useattention=OPT_USEATTENTION,
+               inpembdim=OPT_INPEMBDIM,
+               outembdim=OPT_OUTEMBDIM,
+               encdim=OPT_ENCDIM,
+               decdim=OPT_DECDIM,
+               linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+               dropout=OPT_DROPOUT,
+               cuda=False,
+               gpu=1):
     print("SEQ2SEQ + TF + Structured tokens")
     if cuda:
         torch.cuda.set_device(gpu)
@@ -771,6 +776,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
                        dropout=OPT_DROPOUT,
                        explore=OPT_EXPLORE,
                        linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+                       oraclemode=OPT_ORACLE_MODE,
                        cuda=False,
                        gpu=1):
     if cuda:
@@ -797,7 +803,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     linout, symbols2cores, symbols_is_last_sibling \
         = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
-    oracle = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda,
+    oracle = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda, mode=oraclemode,
                          ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
     original_inparggetter = oracle.inparggetter
     oracle.inparggetter = lambda x: original_inparggetter(x)[0]
@@ -953,6 +959,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 if __name__ == "__main__":
     # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    # q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
