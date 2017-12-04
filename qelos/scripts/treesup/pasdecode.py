@@ -953,6 +953,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 if __name__ == "__main__":
     # q.argprun(run_seq2seq_teacher_forced)
-    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
