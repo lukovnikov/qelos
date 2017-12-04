@@ -275,6 +275,9 @@ class StringMatrix():
         return self._dictionary
 
     def set_dictionary(self, d):
+        """ dictionary set in this way is not allowed to grow,
+        tokens missing from provided dictionary will be replaced with <RARE>
+        provided dictionary must contain <RARE> if missing tokens are to be supported"""
         print("setting dictionary")
         self._dictionary_external = True
         self._dictionary = {}

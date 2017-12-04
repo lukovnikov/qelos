@@ -483,9 +483,11 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
               q.GRUCell(decdim, decdim),)
 
     if useattention:
+        tt.msg("USING ATTENTION!!!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                    linout, ctx2out=True)
     else:
+        tt.msg("NOT using attention !!!")
         decoder_top = q.StaticContextDecoderTop(linout)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -596,6 +598,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
                                dropout=OPT_DROPOUT,
                                cuda=False,
                                gpu=1):
+    print("SEQ2SEQ + TF + Structured tokens")
     if cuda:
         torch.cuda.set_device(gpu)
     decdim = decdim * 2     # more equivalent to twostackcell ?
@@ -654,9 +657,11 @@ def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
               q.GRUCell(decdim, decdim),)
 
     if useattention:
+        tt.msg("USING ATTENTION !!!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                    linout, ctx2out=True)
     else:
+        tt.msg("NOT using attention !!!")
         decoder_top = q.StaticContextDecoderTop(linout)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -747,8 +752,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens(lr=OPT_LR,
 
     results = q.test(encdec).on(test_loader, losses)\
         .set_batch_transformer(
-            lambda inpseq, outseq:
-                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
+            lambda inpseq, outseq, predseq:
+                (inpseq, outseq[:, :-1], predseq))\
         .cuda(cuda)\
         .run()
 
