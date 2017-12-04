@@ -636,11 +636,15 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     if _opt_test:
         allsame = True
         for i in range(len(osm.matrix)):
-            itree = Tree.parse(ism[i])
             otree = Tree.parse(osm[i, 1:])
             ptree = Tree.parse(psm[i])
-            assert(itree == otree == ptree)
-            allsame &= ism[i] == osm[i] == psm[i]
+            if inplinmode == "bf":
+                assert(otree == ptree)
+                allsame &= osm[i] == psm[i]
+            else:
+                itree = Tree.parse(ism[i])
+                assert(itree == otree == ptree)
+                allsame &= ism[i] == osm[i] == psm[i]
         assert(not allsame)
         ttt.msg("trees at output are differently structured from trees at input but are the same trees")
 
