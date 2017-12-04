@@ -625,7 +625,7 @@ class DynamicOracleRunner(q.DecoderRunner):
                 elif mode == "argmax":
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
-                    raise q.SumTingWongException()
+                    raise q.SumTingWongException("unsupported mode: {}".format(mode))
 
             # get probs
             _y_t = y_t + torch.log(ymask)
@@ -637,7 +637,7 @@ class DynamicOracleRunner(q.DecoderRunner):
             elif mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
-                raise q.SumTingWongException()
+                raise q.SumTingWongException("unsupported mode: {}".format(mode))
 
             if self.explore == 0:
                 x_t = gold_t

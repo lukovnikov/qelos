@@ -733,7 +733,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     # training
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqElemAccuracy(ignore_index=0),
-                         q.SeqAccuracy(ignore_index=0),)
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Tree.parse(tracker.pp(x))))
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
@@ -959,6 +960,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
 if __name__ == "__main__":
     # q.argprun(run_seq2seq_teacher_forced)
-    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
