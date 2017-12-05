@@ -133,6 +133,7 @@ def run_conv():
 
 
 def run():
+    print("pytorch version: {}".format(torch.version.__version__))
     wd = {"<MASK>": 0, "cat": 1, "dog": 2, "elephant": 3}
     td = "<MASK> #ca cat at# #do dog og# #el ele lep eph pha han ant nt#"
     td = OrderedDict(zip(td.split(), range(len(td.split()))))
@@ -181,5 +182,6 @@ def run():
 
 
 if __name__ == "__main__":
+    print("pytorch version: {}".format(torch.version.__version__))
     run_conv()
 

@@ -324,9 +324,9 @@ class Softmax(nn.Module):
             x = x + torch.log(mask)
         # if mask is None:
         if self._log:
-            o_exp = F.log_softmax(x)
+            o_exp = F.log_softmax(x, -1)
         else:
-            o_exp = F.softmax(x)
+            o_exp = F.softmax(x, -1)
         # else:    # this is old implementation, handled by -infty now
         #     if self._log:
         #         o_exp_sum = self.logsumexp(x, mask)

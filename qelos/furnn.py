@@ -621,7 +621,8 @@ class DynamicOracleRunner(q.DecoderRunner):
             if self.explore > 0:
                 unmaskedprobs = self.scores2probs(y_t)
                 if mode == "sample":
-                    x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
+                    x_t = torch.distributions.Categorical(unmaskedprobs).sample()
+                    # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
                 elif mode == "argmax":
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
@@ -633,7 +634,8 @@ class DynamicOracleRunner(q.DecoderRunner):
 
             # sample gold from probs
             if mode == "sample":
-                gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
+                gold_t = torch.distributions.Categorical(goldprobs).sample()
+                # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
             elif mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
