@@ -121,6 +121,7 @@ def run_conv():
     assert (np.all(subemb.embedding.weight.grad.data.numpy()[0] == np.zeros((embdim * numchan,))))
     print(subemb.embedding.weight.grad.data.numpy()[1])
     assert (np.all(subemb.embedding.weight.grad.data.numpy()[1:]))
+    emb.zero_grad()
 
     # test sequence mapper
     m = ConvSubWordEmbWin(emb)
@@ -154,7 +155,21 @@ def run_conv():
     print(test_y.size())
     assert(np.allclose(test_y[0].data.numpy(), expret.data.numpy()))
 
-    print("same as naive")
+    print("prediction same as naive")
+
+    m.zero_grad()
+    l = test_y[0].sum()
+    l.backward()
+    weightgrad = subemb.embedding.weight.grad.data.numpy() + 0
+    m.zero_grad()
+    assert(not np.any(subemb.embedding.weight.grad.data.numpy()))
+    l = expret.sum()
+    l.backward()
+    expgrad = subemb.embedding.weight.grad.data.numpy() + 0
+    assert(np.allclose(weightgrad, expgrad))
+
+    print("grads same as naive")
+
 
 
 def run():
