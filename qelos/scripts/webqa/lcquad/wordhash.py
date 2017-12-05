@@ -49,7 +49,29 @@ def make_subword_embedder(worddic, subworddic, word2subwordmat, embdim, numchan)
 
     emb = SubWordEmbedder(_emb)
 
-    return emb
+    return emb, _emb
+
+
+class ConvSubWordEmbWin(nn.Module):
+    def __init__(self, wordemb):
+        super(ConvSubWordEmbWin, self).__init__()
+        self.emb = wordemb
+        self.convkernel = q.val(torch.stack(
+            torch.eye(self.emb.computer.numchan * self.emb.computer.embdim)
+                .chunk(self.emb.computer.numchan, 1),
+            0).transpose(2, 0)).v
+
+    def forward(self, x):
+        batsize, seqlen = x.size()
+        x = torch.cat([x, q.var(torch.zeros(batsize, self.emb.computer.numchan-1).long()).cuda(x).v], 1)
+        batsize, seqlen = x.size()
+        _x = x.view(-1)
+        _xemb, _mask = self.emb(_x)
+        _xemb = _xemb.view(batsize, seqlen, -1)
+        _mask = _mask.view(batsize, seqlen)
+        _out = torch.nn.functional.conv1d(_xemb.transpose(1, 2), self.convkernel).transpose(1, 2)
+        _mask = _mask[:, :_out.size(1)]
+        return _out, _mask
 
 
 class SeqWordEmbWin(nn.Module):
@@ -73,7 +95,7 @@ class SeqWordEmbWin(nn.Module):
         return out
 
 
-if __name__ == "__main__":
+def run_conv():
     wd = {"<MASK>": 0, "cat": 1, "dog": 2, "elephant": 3}
     td = "<MASK> #ca cat at# #do dog og# #el ele lep eph pha han ant nt#"
     td = OrderedDict(zip(td.split(), range(len(td.split()))))
@@ -86,7 +108,44 @@ if __name__ == "__main__":
     m = np.asarray(m, dtype="int64")
     print(m)
     print(td)
-    emb = make_subword_embedder(wd, td, m, embdim, numchan)
+    _, emb = make_subword_embedder(wd, td, m, embdim, numchan)
+
+    # test
+    test_x = q.var(np.asarray([0, 1, 2, 3])).v
+    test_y, _ = emb(test_x)
+    print(test_y.size())
+    assert (test_y.size() == (4, numchan* embdim))
+    l = test_y.sum()
+    l.backward()
+    subemb = emb.computer.subemb
+    assert (np.all(subemb.embedding.weight.grad.data.numpy()[0] == np.zeros((embdim * numchan,))))
+    print(subemb.embedding.weight.grad.data.numpy()[1])
+    assert (np.all(subemb.embedding.weight.grad.data.numpy()[1:]))
+
+    # test sequence mapper
+    m = ConvSubWordEmbWin(emb)
+    test_x = q.var(np.asarray([[1, 1, 3, 2], [2, 2, 3, 1]])).v
+    test_y, mask_y = m(test_x)
+    print(test_y.size())
+    print(test_y[0, :, :5])
+    print(mask_y)
+    pass
+
+
+def run():
+    wd = {"<MASK>": 0, "cat": 1, "dog": 2, "elephant": 3}
+    td = "<MASK> #ca cat at# #do dog og# #el ele lep eph pha han ant nt#"
+    td = OrderedDict(zip(td.split(), range(len(td.split()))))
+    embdim = 10
+    numchan = 3
+    m = [[0]*8,
+         [1, 2, 3] + [0]*5,
+         [4, 5, 6] + [0]*5,
+         [7, 8, 9, 10, 11, 12, 13, 14]]
+    m = np.asarray(m, dtype="int64")
+    print(m)
+    print(td)
+    emb, _ = make_subword_embedder(wd, td, m, embdim, numchan)
 
     # test
     test_x = q.var(np.asarray([[0, 1, 2, 3]]).T).v
@@ -119,3 +178,8 @@ if __name__ == "__main__":
     test_y = m(test_x)
     print(test_y.size())
     pass
+
+
+if __name__ == "__main__":
+    run_conv()
+
