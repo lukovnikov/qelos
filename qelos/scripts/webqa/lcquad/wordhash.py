@@ -131,6 +131,31 @@ def run_conv():
     print(mask_y)
     pass
 
+    # test equivalent to naive
+    word2hot = np.zeros((4, 15))
+    word2hot[1, [1, 2, 3]] = 1
+    word2hot[2, [4, 5, 6]] = 1
+    word2hot[3, 7:] = 1
+
+    w_c = subemb.embedding.weight
+    w_c = torch.cat(w_c.chunk(3, 1), 0).transpose(0, 1)
+    lts = np.stack(
+          [np.concatenate([word2hot[1], word2hot[1], word2hot[3]], 0),
+           np.concatenate([word2hot[1], word2hot[3], word2hot[2]], 0),
+           np.concatenate([word2hot[3], word2hot[2], word2hot[0]], 0),
+           np.concatenate([word2hot[2], word2hot[0], word2hot[0]], 0)], 1).astype("float32")
+    print(lts.shape, w_c.size())
+    lts = q.var(lts).v
+
+    expret = torch.nn.functional.conv1d(lts.unsqueeze(0),
+                                        w_c.unsqueeze(2)).transpose(1, 2).squeeze(0)
+
+    print(expret.size())
+    print(test_y.size())
+    assert(np.allclose(test_y[0].data.numpy(), expret.data.numpy()))
+
+    print("same as naive")
+
 
 def run():
     print("pytorch version: {}".format(torch.version.__version__))
