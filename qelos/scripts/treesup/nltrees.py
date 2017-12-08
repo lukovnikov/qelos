@@ -231,40 +231,56 @@ class Sentence(object):
     def tokens(self):
         return self.tokenizer(self.x)
 
-    @staticmethod
-    def parse_order(*tokens):
+    @classmethod
+    def parse(cls):
+        raise NotImplemented("use subclass")
+
+    def track(self):
+        raise NotImplemented("use subclass")
+
+    @classmethod
+    def build_dict_from(cls, sentences):
+        raise NotImplemented("use subclass")
+
+
+class OrderSentence(Sentence):
+    def track(self):
+        return OrderTracker(self)
+
+    @classmethod
+    def parse(cls, *tokens):
         if isinstance(tokens[0], (list, tuple)) and len(tokens) == 1:
             tokens = tokens[0]
-        ret, tree, remainder = Sentence._parse_order(tokens)
+        ret, tree, remainder = cls._parse_order(tokens)
 
         return ret, tree, remainder
 
-    @staticmethod
-    def _parse_order(tokens):
+    @classmethod
+    def _parse_order(cls, tokens):
         head, remainder = tokens[0], tokens[1:]
         xsplits = head.split("*")
-        isleaf, islast = Sentence.leaf_suffix in xsplits, Sentence.last_suffix in xsplits
+        isleaf, islast = cls.leaf_suffix in xsplits, cls.last_suffix in xsplits
         x = xsplits[0]
-        isleaf = isleaf or Sentence.parent_token == x
+        isleaf = isleaf or cls.parent_token == x
         if isleaf:
             return x, head, remainder
         else:
             children, lsubtrees, rsubtrees, seen_parent = [], [], [], False
             while True:
-                child, childtree, remainder = Sentence._parse_order(remainder)
+                child, childtree, remainder = cls._parse_order(remainder)
                 childtreeroot = childtree[0] if isinstance(childtree, tuple) else childtree
-                islastchild = Sentence.last_suffix in childtreeroot.split("*")
+                islastchild = cls.last_suffix in childtreeroot.split("*")
                 children.append(child)
-                seen_parent = seen_parent or childtreeroot.split("*")[0] == Sentence.parent_token
+                seen_parent = seen_parent or childtreeroot.split("*")[0] == cls.parent_token
                 if not seen_parent:
                     lsubtrees.append(childtree)
                 else:
-                    if childtreeroot.split("*")[0] != Sentence.parent_token:
+                    if childtreeroot.split("*")[0] != cls.parent_token:
                         rsubtrees.append(childtree)
                 if islastchild:
                     break
             subtreestring = " ".join(children)
-            subtreestring = subtreestring.replace(Sentence.parent_token, x)
+            subtreestring = subtreestring.replace(cls.parent_token, x)
             if len(lsubtrees) == 0:
                 lsubtrees = [""]
             if len(rsubtrees) == 0:
@@ -272,31 +288,65 @@ class Sentence(object):
             subtree = (head, lsubtrees, rsubtrees)
             return subtreestring, subtree, remainder
 
-    @staticmethod
-    def parse_binary(*tokens):
+    @classmethod
+    def build_dict_from(cls, sentences):
+        alltokens = set()
+        for sentence in sentences:
+            assert(isinstance(sentence, OrderSentence))
+            tokens = sentence.tokens
+            alltokens.update(tokens)
+        indic = OrderedDict([("<MASK>", 0), ("<START>", 1), ("<STOP>", 2),
+                             (cls.root_token, 3), (cls.parent_token, 4), (cls.parent_token+"*"+cls.last_suffix, 5)])
+        outdic = OrderedDict()
+        outdic.update(indic)
+        offset = len(indic)
+        alltokens = sorted(list(alltokens))
+        alltokens_for_indic = ["<RARE>"] + alltokens
+        alltokens_for_outdic = ["<RARE>"] + alltokens
+        numtokens = len(alltokens_for_indic)
+        newidx = 0
+        for token in alltokens_for_indic:
+            indic[token] = newidx + offset
+            newidx += 1
+        numtokens = len(alltokens_for_indic)
+        newidx = 0
+        for token in alltokens_for_outdic:
+            outdic[token] = newidx + offset
+            for i, suffix in enumerate(["*"+cls.leaf_suffix, "*"+cls.last_suffix, "*"+cls.leaf_suffix+"*"+cls.last_suffix]):
+                outdic[token + suffix] = newidx + offset + (i + 1) * numtokens
+            newidx += 1
+        return indic, outdic
+
+
+class BinarySentence(Sentence):
+    @classmethod
+    def parse(cls, *tokens):
         if isinstance(tokens[0], (list, tuple)):
             tokens = tokens[0]
-        ret, tree, remainder = Sentence._parse_binary(tokens)
+        ret, tree, remainder = cls._parse_binary(tokens)
         ret = ret.replace("<NONE>", "").replace("  ", " ").strip()
         return ret, tree, remainder
 
-    @staticmethod
-    def _parse_binary(tokens):
+    @classmethod
+    def _parse_binary(cls, tokens):
         if len(tokens) == 0:
             return ""
             raise q.SumTingWongException("zero length tokens")
         else:
             token, remainder = tokens[0], tokens[1:]
             xsplits = token.split("*")
-            token_isleaf = token == Sentence.none_symbol
-            if len(xsplits) > 1 and xsplits[1] == Sentence.leaf_suffix:
+            token_isleaf = token == cls.none_symbol
+            if len(xsplits) > 1 and xsplits[1] == cls.leaf_suffix:
                 token, token_isleaf = xsplits[0], True
             if token_isleaf:
                 return token, token, remainder
             else:
-                left, ltree, remainder = Sentence._parse_binary(remainder)
-                right, rtree, remainder = Sentence._parse_binary(remainder)
+                left, ltree, remainder = cls._parse_binary(remainder)
+                right, rtree, remainder = cls._parse_binary(remainder)
                 return " ".join([left, token, right]), (token, ltree, rtree), remainder
+
+    def track(self):
+        return BinaryTracker(self)
 
 
 class OrderTracker(object):
@@ -329,6 +379,9 @@ class OrderTracker(object):
         # allnvts.add(self._root_tokens[0] + "*" + Sentence.leaf_suffix)
         self._nvt = allnvts
         return allnvts
+
+    def is_terminated(self):
+        return len(self._nvt) == 0
 
     def nxt(self, x):
         if len(self.possible_paths) == 0:
@@ -541,6 +594,50 @@ class BinaryTracker(object):
                     allnvts.add(topnode)
         self._nvt = allnvts
         return allnvts
+
+
+class GroupTracker(object):
+    def __init__(self, trackables):
+        super(GroupTracker, self).__init__()
+        self.x = trackables
+        indic, outdic = trackables[0].build_dict_from(trackables)
+        self.dic = outdic
+        self.rdic = {v: k for k, v in self.dic.items()}
+        self.trackers = []
+        self.D = outdic
+        self.D_in = indic
+        for xe in self.x:
+            tracker = xe.track()
+            self.trackers.append(tracker)
+
+    def get_valid_next(self, eid):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt
+        if len(nvt) == 0:  # done
+            nvt = {"<MASK>"}
+        nvt = map(lambda x: self.dic[x], nvt)
+        return nvt
+
+    def update(self, eid, x):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt
+        if len(nvt) == 0:  # done
+            pass
+        else:
+            x = self.rdic[x]
+            tracker.nxt(x)
+
+    def is_terminated(self, eid):
+        return self.trackers[eid].is_terminated()
+
+    def pp(self, x):
+        xs = [self.rdic[xe] for xe in x if xe != self.dic["<MASK>"]]
+        xstring = " ".join(xs)
+        return xstring
+
+    def reset(self):
+        for tracker in self.trackers:
+            tracker.reset()
 
 
 def run_binary(x=0):

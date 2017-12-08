@@ -922,7 +922,7 @@ class DecoderTop(nn.Module):
         self.layers = Stack(*layers)
 
     def forward(self, x, **kw):   # x = vector from decoder core
-        out = self.layers(x)
+        out = self.layers(x, **kw)
         return out
 
 

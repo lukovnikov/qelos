@@ -312,7 +312,7 @@ class StringMatrix():
         if self._indic_s:
             tokens = ["<START>"] + tokens
         if self._indic_e:
-            tokens = tokens = ["<END>"]
+            tokens = tokens + ["<END>"]
         self._maxlen = max(self._maxlen, len(tokens))
         tokenidxs = []
         for token in tokens:
