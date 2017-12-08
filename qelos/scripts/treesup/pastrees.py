@@ -75,7 +75,7 @@ class Tree(object):
         elif label[:3] == "LEA":
             ret = LeafTree(label)
         else:
-            raise q.SumTingWongException("unsupported label")
+            raise q.SumTingWongException("unsupported label {}".format(label))
         while len(remainder) > 0:
             if remainder[0] in [")", ",", " ", "("]:
                 remainder = remainder[1:]
