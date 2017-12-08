@@ -61,9 +61,11 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
         pass
         # lines = lines[:1000]
     sm = q.StringMatrix(topnwords=100000, freqcutoff=5, indicate_start_end=True, maxlen=maxlen)
-    for line in lines:
-        sm.add(line)
-    sm.finalize()
+    iscached = sm.cached(".jokes.sm.cache")
+    if not iscached:
+        for line in lines:
+            sm.add(line)
+        sm.finalize()
     tt.msg("data matrix size: {}".format(sm.matrix.shape))
     tt.msg("size dict: {}".format(len(sm.D)))
     for i in range(10):
@@ -71,7 +73,7 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
     tt.tock("data loaded")
     # endregion
 
-    sys.exit()
+    # sys.exit()
 
     # region make model
     # normal sequence generator model with teacher forcing

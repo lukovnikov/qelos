@@ -7,6 +7,7 @@ import argparse
 import collections
 import inspect
 import re
+import os
 import signal
 import sys
 from datetime import datetime as dt
@@ -239,12 +240,18 @@ class StringMatrix():
         self._indic_e = indicate_start_end or indicate_end
         self._rarewords = set()
         self.tokenize = tokenize
+        self._cache_p = None
 
     def __len__(self):
         if self._matrix is None:
             return len(self._strings)
         else:
             return self.matrix.shape[0]
+
+    def cached(self, p):
+        self._cache_p = p
+        if os.path.isfile(p):
+            pickle.load()
 
     def __getitem__(self, item, *args):
         if self._matrix is None:
