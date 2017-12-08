@@ -50,6 +50,7 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
                            embdim=100, lindim=100, decdim=200, maxlen=100,
                            cuda=False, gpu=0, devmode=False):
     """ normal language model with single RNN """
+    print("started")
     if cuda:
         torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
