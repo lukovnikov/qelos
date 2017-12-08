@@ -368,7 +368,10 @@ class StringMatrix():
 
     @staticmethod
     def load(p):
-        return pickle.load(open(p))
+        if os.path.isfile(p):
+            return pickle.load(open(p))
+        else:
+            return None
 
 
 def tokenize(s, preserve_patterns=None):

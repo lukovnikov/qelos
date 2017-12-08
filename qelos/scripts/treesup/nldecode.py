@@ -32,7 +32,8 @@ _tree_gen_seed = 1234
 
 def load_jokes(p="../../../datasets/jokes/reddit_jokes.json",
                min_rating=0, maxlen=100):
-    f = ujson.load(open(p))
+    with open(p) as f:
+        f = ujson.load(f)
     # print(len(f))
     lines = []
     for joke in f:
@@ -60,12 +61,13 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
     if devmode:
         pass
         # lines = lines[:1000]
-    sm = q.StringMatrix(topnwords=100000, freqcutoff=5, indicate_start_end=True, maxlen=maxlen)
-    iscached = sm.cached(".jokes.sm.cache")
-    if not iscached:
+    sm = q.StringMatrix.load(".jokes.sm.cached")
+    if sm is None:
+        sm = q.StringMatrix(topnwords=100000, freqcutoff=5, indicate_start_end=True, maxlen=maxlen)
         for line in lines:
             sm.add(line)
         sm.finalize()
+        sm.save(".jokes.sm.cached")
     tt.msg("data matrix size: {}".format(sm.matrix.shape))
     tt.msg("size dict: {}".format(len(sm.D)))
     for i in range(10):
