@@ -61,6 +61,15 @@ class Node(object):
     def __str__(self):  return self.pp()
     def __repr__(self): return self.pp()
 
+    def symbol(self, with_label=True, with_annotation=True):
+        ret = self.name
+        if with_label:
+            ret += "/"+self.label if self.label is not None else ""
+        if with_annotation:
+            if self.is_leaf:
+                ret += "*"+self.leaf_suffix
+        return ret
+
     def pptree(self, arbitrary=False, _rec_arg=False, _top_rec=True):
         return self.pp(mode="tree", arbitrary=arbitrary, _rec_arg=_rec_arg, _top_rec=_top_rec)
 
@@ -116,15 +125,94 @@ class Node(object):
         otherchildren = other.children + tuple()
         for child in self.children:
             found = False
-            for i in range(len(otherchildren)):
-                if child == otherchildren:
+            i = 0
+            while i < len(otherchildren):
+                if child == otherchildren[i]:
                     found = True
                     break
-            otherchildren = otherchildren[:i] + otherchildren[i+1:]
+                i += 1
+            if found:
+                otherchildren = otherchildren[:i] + otherchildren[i+1:]
             same &= found
         return same
 
 
+class NodeTracker(object):
+    with_label = True
+
+    def __init__(self, root, **kw):
+        super(NodeTracker, self).__init__(**kw)
+        self.root = root
+        self.possible_paths = []
+        self._nvt = None
+        self.start()
+
+    def reset(self):
+        self.possible_paths = []
+        self._nvt = None
+        self.start()
+
+    def start(self):
+        self.possible_paths.append([[self.root]])
+        allnvts = {self.root.symbol(with_label=self.with_label) + "*" + self.root.last_suffix}
+        self._nvt = allnvts
+        return allnvts
+
+    def nxt(self, x):
+        if len(self.possible_paths) == 0:
+            return None
+        else:
+            if x not in self._nvt:
+                print("!!!replacing x because not in vnt")
+                assert(self._nvt is not None and len(self._nvt) > 0)
+                x = random.sample(self._nvt, 1)[0]
+            allnewpossiblepaths = []
+            xsplits = x.split("*")
+            x_isleaf, x_islast = False, False
+            if len(xsplits) > 1:
+                x, x_isleaf, x_islast = xsplits[0], self.root.leaf_suffix in xsplits, self.root.last_suffix in xsplits
+            j = 0
+            # check every possible path
+            while j < len(self.possible_paths):
+                possible_path = self.possible_paths[j]
+                new_possible_paths = []
+                i = 0
+                node_islast = len(possible_path[-1]) == 1
+                # check every token in top of stack
+                while i < len(possible_path[-1]):
+                    node = possible_path[-1][i]
+                    if x == node.symbol(with_label=self.with_label, with_annotation=False) \
+                            and node_islast == x_islast and node.is_leaf == x_isleaf:
+                        new_possible_path = possible_path + []
+                        new_possible_path[-1] = new_possible_path[-1] + []
+                        del new_possible_path[-1][i]
+
+                        if len(new_possible_path[-1]) == 0:
+                            del new_possible_path[-1]
+
+                        if not node.is_leaf:
+                            new_possible_path.append(list(node.children))
+
+                        if len(new_possible_path) > 0:
+                            new_possible_paths.append(new_possible_path)
+                    i += 1
+                allnewpossiblepaths += new_possible_paths
+                if len(new_possible_paths) == 0:
+                    del self.possible_paths[j]
+                else:
+                    j += 1
+            self.possible_paths = allnewpossiblepaths
+        allnvts = set()
+        for possible_path in self.possible_paths:
+            if len(possible_path[-1]) == 1:
+                topnode = possible_path[-1][0]
+                allnvts.add(topnode.symbol(with_label=self.with_label, with_annotation=True)
+                            + "*" + self.root.last_suffix)
+            else:
+                for topnode in possible_path[-1]:
+                    allnvts.add(topnode.symbol(with_label=self.with_label, with_annotation=True))
+        self._nvt = allnvts
+        return allnvts
 
 
 class Sentence(object):
@@ -246,7 +334,6 @@ class OrderTracker(object):
         if len(self.possible_paths) == 0:
             return None
         else:
-
             if x not in self._nvt:
                 print("replacing x because not in vnt")
                 assert(self._nvt is not None and len(self._nvt) > 0)
@@ -594,9 +681,38 @@ def _pptree_bin(tree):
 
 
 def run(x=0):
-    treestr = "A*LS B C*NC D*NC E*NC F*LS G*NC H*NC*LS I*NC*LS"
+    treestr = "A/d*LS B/d C/d*NC D/a*NC E/b*NC F*LS G/h*NC H*NC*LS I*NC*LS"
     tree = Node.parse(treestr, mode="ann")
-    print(tree.pp(arbitrary=True, mode="tree"))
+    # print(tree.pp(arbitrary=True, mode="tree"))
+
+    tracker = NodeTracker(tree)
+    uniquetrees = set()
+
+    num_samples = 1000
+    for i in range(num_samples):
+        tracker.reset()
+        nvts = tracker._nvt
+        tokens = []
+        while len(nvts) > 0:
+            token = random.sample(nvts, 1)[0]
+            # print(token)
+            tokens.append(token)
+            tracker.nxt(token)
+            nvts = tracker._nvt
+            # print(nvts)
+        # print(" ".join(tokens))
+        uniquetrees.add(" ".join(tokens))
+
+        # sys.exit()
+
+        recons = Node.parse(" ".join(tokens), mode="ann")
+        if i % 1000 == 0:
+            print(i)
+        # print(recons.pptree())
+        # print(tree.pptree())
+        assert(recons == tree)
+
+    print("{} unique trees for the sentence after {} samples".format(len(uniquetrees), num_samples))
 
 
 if __name__ == "__main__":
