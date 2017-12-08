@@ -5,6 +5,7 @@ from qelos.scripts.treesup.nltrees import GroupTracker, OrderSentence
 import numpy as np
 from collections import OrderedDict
 import re
+import ujson
 
 
 OPT_LR = 0.1
@@ -29,6 +30,20 @@ _opt_test = True
 _tree_gen_seed = 1234
 
 
+def load_jokes(p="../../../datasets/jokes/reddit_jokes.json",
+               min_rating=0, maxlen=100):
+    f = ujson.load(open(p))
+    # print(len(f))
+    lines = []
+    for joke in f:
+        if min_rating <= joke["score"]:
+            line = joke["title"] + " . " + joke["body"]
+            if maxlen is None or len(line.split()) < maxlen:
+                lines.append(line)
+    # print(len(lines))
+    return lines
+
+
 def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
                            dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM, wreg=OPT_WREG,
                            embdim=100, lindim=100, decdim=200, maxlen=100,
@@ -41,17 +56,22 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
     # region load data
     tt.tick("loading data")
 
-    p = "../../../datasets/billionwords/training/news.en-00001-of-00100"
+    lines = load_jokes()
     if devmode:
-        p = "../../../datasets/billionwords/heldout/news.en.heldout-00000-of-00050"
-    sm = q.StringMatrix(topnwords=10000, indicate_start_end=True, maxlen=maxlen)
-    with open(p) as f:
-        for line in f:
-            sm.add(line)
+        pass
+        # lines = lines[:1000]
+    sm = q.StringMatrix(topnwords=100000, freqcutoff=5, indicate_start_end=True, maxlen=maxlen)
+    for line in lines:
+        sm.add(line)
     sm.finalize()
     tt.msg("data matrix size: {}".format(sm.matrix.shape))
+    tt.msg("size dict: {}".format(len(sm.D)))
+    for i in range(10):
+        print(sm[i])
     tt.tock("data loaded")
     # endregion
+
+    sys.exit()
 
     # region make model
     # normal sequence generator model with teacher forcing
@@ -68,8 +88,6 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
 
     if _opt_test:
         ttt.tick("testing dry-run")
-        for i in range(10):
-            print(sm[i])
         test_inp = q.var(sm.matrix[:5, :-1]).v
         test_gold = q.var(sm.matrix[:5, 1:]).v
         test_out = decoder(test_inp)
