@@ -15,7 +15,7 @@ class Node(object):
 
     def __init__(self, name, label=None, children=tuple(), **kw):
         super(Node, self).__init__(**kw)
-        self.name = name
+        self.name = name    # name must be unique in a tree
         self.label = label
         self.children = tuple(children)
 
@@ -135,6 +135,149 @@ class Node(object):
                 otherchildren = otherchildren[:i] + otherchildren[i+1:]
             same &= found
         return same
+
+
+# TODO: implement special UniqueNodeGroupTracker that returns both nvt's and anvt's to oracle
+# TODO: implement in Oracle sampling of gold from returned nvt's and sampling of next from anvt's
+class UniqueNodeTracker(object):
+    """ nodes must have unique names,
+        computes both nvt's (to sample gold from)
+        and anvt's (to sample next token from) """
+    # the allowable nvts must lead to a valid tree (covering all available names)
+    def __init__(self, root, labels=None, **kw):
+        super(UniqueNodeTracker, self).__init__(**kw)
+        # store
+        self.root = root
+        self._possible_labels = labels  # must be a set
+        # settings
+        self._enable_allowable = True
+        self._projective = False        # TODO support projective-only too
+        # state
+        self.current_node = self.root
+        self._nvt = None
+        self._anvt = None
+        self._available_names = self.get_available_names(self.root) # {}
+        self._lost_children = {}    # nodes we still have to attach
+                                    # but which could not be attached to their true parent anymore
+        self._stack = []    # to keep track of non-terminated parent sibling lists
+        # start
+        self.start()
+
+    def reset(self):
+        self.current_node = self.root
+        self._nvt = None
+        self._anvt = None
+        self._available_names = self.get_available_names(self.root)
+        self._lost_children = {}
+        self._stack = []
+        self.start()
+
+    def start(self):
+        return self.compute_nvts()
+
+    def get_available_names(self, node):
+        acc = {}
+        acc[node.name] = node
+        for child in node.children:
+            acc.update(self.get_available_names(child))
+        return acc
+
+    def compute_nvts(self):     # computes nvts and anvts from current path and available names and labels
+        # TODO
+        # ! ensure that some valid tree is reachable with any anvt
+        # region nvt
+        nvt = set()
+        own_children = list(filter(lambda x: x.name in self._available_names,
+                                   self.current_node.children))
+        lost_children = list(self._lost_children.values())
+        possible_children = own_children + lost_children
+        if len(possible_children) > 0:
+            islast = False
+            if len(possible_children) == 1:    # then must be last
+                islast = True
+            for child in possible_children:
+                token = child.name
+                token += ("/" + child.label) if child.label is not None else ""
+                token += ("*" + child.leaf_suffix) if child.is_leaf else ""
+                token += ("*" + child.last_suffix) if islast else ""
+                nvt.add(token)
+
+        # endregion
+        self._nvt = nvt
+        # region anvt
+        anvt = set()
+        available_names = list(self._available_names.keys())
+        number_non_term_parents = sum([1 if len(_a) > 0 else 0
+                                       for _a in self._stack])
+        number_tokens_left = len(available_names)
+        if self._possible_labels is None:
+            possible_symbols = available_names
+        else:
+            possible_symbols = sum([[_name + "/" + _label for _label in self._possible_labels]
+                                    for _name in available_names])
+
+        for possible_symbol in possible_symbols:
+            if number_tokens_left - 1 >= number_non_term_parents + 1:   # losing at least two potential terminators (will need one child and one sibling)
+                anvt.add(possible_symbol)
+            if number_tokens_left - 1 >= number_non_term_parents:   # losing at least on potential terminator in any of the below scenarios
+                anvt.add(possible_symbol + "*" + self.root.last_suffix)
+                anvt.add(possible_symbol + "*" + self.root.leaf_suffix)
+            if number_non_term_parents > 0 or number_tokens_left == 1:     # must be last one left or the rest can be sent up
+                anvt.add(possible_symbol + "*" + self.root.leaf_suffix + "*" + self.root.last_suffix)
+        #endregion
+        self._anvt = anvt
+        # check if every nvt is in anvt:
+        assert(len(nvt - anvt) == 0)
+        return nvt, anvt
+
+    def nxt(self, inpx):
+        if len(self._stack) == 0:
+            return set(), set()
+        else:
+            assert(inpx in self._anvt)
+
+            # region process the input symbol x
+            x, x_isleaf, x_islast = inpx + "", False, False
+            inpxsplits = inpx.split("*")
+            if len(inpxsplits) > 1:
+                x, x_isleaf, x_islast = inpxsplits[0], self.root.leaf_suffix in inpxsplits, self.root.last_suffix in inpxsplits
+            x_name, x_label = x, None
+            xsplits = x.split("/")  # get label
+            if len(xsplits) > 1:
+                x_name, x_label = xsplits[0], xsplits[1]
+            # endregion
+            assert(x_name in self._available_names)
+
+            # region stack management
+            stack = self._stack + []
+
+            stack[-1].append(x_name)
+            if x_islast:
+                stack[-1] = []      # empty sibling list
+            if x_isleaf:    # should go up until next non-finished list or done
+                while len(stack) > 0 and len(stack[-1]) == 0:
+                    del stack[-1]
+            else:           # should go down
+                stack.append([])    # empty sibling list for deeper level
+
+            self._stack = stack
+            # endregion
+
+            # region managing stored lists
+            del self._available_names[x_name]
+            if x_name in self._lost_children:
+                del self._lost_children[x_name]
+            if x_islast:    # if x is last, get children of current node we still had to decode
+                            # and put them in lost children
+                own_children = list(filter(lambda x: x.name in self._available_names,
+                                   self.current_node.children))
+                for own_child in own_children:
+                    self._lost_children[own_child.name] = own_child
+            # endregion
+
+            self.current_node = self._available_names[x_name]
+
+            return self.compute_nvts()
 
 
 class NodeTracker(object):

@@ -60,8 +60,8 @@ def run_seq_teacher_forced(lr=OPT_LR, batsize=OPT_BATSIZE, epochs=OPT_EPOCHS,
 
     lines = load_jokes()
     if devmode:
-        pass
-        # lines = lines[:1000]
+        # pass
+        lines = lines[:1000]
     sm = q.StringMatrix.load(".jokes.sm.cached")
     if sm is None:
         sm = q.StringMatrix(topnwords=100000, freqcutoff=5, indicate_start_end=True, maxlen=maxlen)
