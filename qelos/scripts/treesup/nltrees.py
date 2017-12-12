@@ -138,7 +138,6 @@ class Node(object):
 
 
 # TODO: implement special UniqueNodeGroupTracker that returns both nvt's and anvt's to oracle
-# TODO: implement in Oracle sampling of gold from returned nvt's and sampling of next from anvt's
 class UniqueNodeTracker(object):
     """ nodes must have unique names,
         computes both nvt's (to sample gold from)

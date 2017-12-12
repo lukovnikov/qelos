@@ -243,7 +243,7 @@ class SimpleDGTNSparse(nn.Module):
         return z
 
 
-class TwoStackCell(RecStatefulContainer):
+class TwoStackCell(RecStatefulContainer):   # for depth-first tree decoding
     """ Works with two or one single-state cells (GRU or CatLSTM).
         Can be used as a core in ModularDecoderCell
         ===
@@ -545,6 +545,217 @@ class TwoStackCell(RecStatefulContainer):
         return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
+# TODO
+class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
+    """ Works with two or one single-state cells (GRU or CatLSTM).
+        Can be used as a core in ModularDecoderCell
+        ===
+        Maintains a stack of stacks of parent states and symbols,
+        one outer stack for each parent level
+        and one inner stack for parent level parents' states and symbols
+    """
+    def __init__(self, emb, cell, frat_init="zero",
+                 cell_inp_router_mode="default", **kw):
+        """ same as TwoStackCell """
+        super(ParentStackCell, self).__init__(**kw)
+        self.state_stacks = None
+        self.symbol_stacks = None
+        # TODO ??? zero stacks?
+
+        if isinstance(frat_init, basestring):
+            self.frat_init_mode = frat_init
+        else:
+            self.frat_init_mode = "value"
+            self.frat_init_value = frat_init
+
+        if isinstance(cell, tuple):  # dual cell, cell contains recstacks
+            assert (len(cell) == 2)
+            cells = cell
+            cell_inp_router_mode = "separated" if cell_inp_router_mode == "default" else cell_inp_router_mode
+        else:
+            cells = (cell,)
+            cell_inp_router_mode = "joined" if cell_inp_router_mode == "default" else cell_inp_router_mode
+
+        self.cells = q.ModuleList(list(cells))
+
+        if isinstance(emb, tuple):
+            assert (len(emb) == 2)
+            self.ancemb = emb[0]
+            self.fratemb = emb[1]
+        else:
+            self.ancemb = emb
+            self.fratemb = emb
+
+        fratstartsym = self.fratemb.D["<START>"]
+        self.y_f_0 = q.val(torch.LongTensor(1, )).v
+        self.y_f_0.data.fill_(fratstartsym)
+
+        def cell_inp_router(a, b, ctx):
+            if cell_inp_router_mode == "joined":
+                tocat = [a, b]
+                if q.issequence(ctx):
+                    tocat += list(ctx)
+                else:
+                    tocat += [ctx]
+                return torch.cat([xe for xe in tocat if xe is not None], 1)
+            elif cell_inp_router_mode == "separated":
+                tocat_anc, tocat_frat = [a], [b]
+                if q.issequence(ctx):
+                    tocat_anc += [ctx[0]]
+                    tocat_frat += [ctx[1]]
+                else:
+                    tocat_anc += [ctx]
+                    tocat_frat += [ctx]
+                return torch.cat([xe for xe in tocat_anc if xe is not None], 1), \
+                       torch.cat([xe for xe in tocat_frat if xe is not None], 1)
+
+        self.cell_inp_router = cell_inp_router
+
+    @property
+    def state_spec(self):
+        if len(self.cells) == 1:
+            return self.cells[0].outdim // 2, self.cells[0].outdim // 2
+        else:
+            return self.cells[0].outdim, self.cells[1].outdim
+
+    def reset_state(self):
+        for cell in self.cells:
+            cell.reset_state()
+        self.state_stacks = None
+        self.symbol_stacks = None
+
+    def read_states_from_cells(self, batsize):
+        # TODO: copied - check
+        if len(self.cells) == 2:
+            ance_states = self.cells[0].get_states(batsize)
+            frat_states = self.cells[1].get_states(batsize)
+        else:
+            ance_states, frat_states = [], []
+            all_states = self.cells[0].get_states(batsize)
+            for all_state in all_states:
+                ac, fc, ay, fy = torch.chunk(all_state, 4, 1)
+                ance_state, frat_state = torch.cat([ac, ay], 1), torch.cat([fc, fy], 1)
+                ance_states.append(ance_state)
+                frat_states.append(frat_state)
+            ance_states, frat_states = tuple(ance_states), tuple(frat_states)
+        return ance_states, frat_states
+
+    def set_states_of_cells(self, ance_states, frat_states):
+        # TODO copied - check
+        if len(self.cells) == 2:
+            self.cells[0].set_states(*ance_states)
+            self.cells[1].set_states(*frat_states)
+        else:
+            inp_states = []
+            for ance_state, frat_state in zip(ance_states, frat_states):
+                ac, ay, fc, fy = torch.chunk(ance_state, 2, 1) + torch.chunk(frat_state, 2, 1)
+                inp_state = torch.cat([ac, fc, ay, fy], 1)
+                inp_states.append(inp_state)
+            self.cells[0].set_states(*inp_states)
+
+    @property
+    def initialized(self):
+        return self.state_stacks is not None
+
+    def init_all(self, batsize):
+        self.state_stacks = tuple([[] for _ in range(batsize)])
+        self.symbol_stacks = tuple([[] for _ in range(batsize)])
+
+    def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
+        batsize = y_tm1.size(0)
+
+        ha_tm1, hf_tm1 = self.read_states_from_cells(batsize)
+
+        if not self.initialized:
+            self.init_all(batsize)
+            # TODO: initial parent state from first network state
+
+        frat_symbols = torch.split(y_tm1, 1, 0)
+        frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
+        # !!: overriding frat line can be more efficient
+
+        # region update stacks
+        for i in range(ctrl_tm1.size(0)):
+            ctrl = ctrl_tm1.data[i]
+            state_stack = self.state_stacks[i]
+            symbol_stack = self.symbol_stacks[i]
+            if ctrl == 0:       # masked
+                pass
+            else:
+                pass
+            previous_was_last = ctrl == 3 or ctrl == 4
+            previous_was_leaf = ctrl == 2 or ctrl == 4
+
+            if previous_was_leaf:   # no children --> ancestral data not queued
+                pass
+            else:       # --> queue ancestral data for next level deeper
+                state_stack[-1].append(ha_tm1[i])
+                symbol_stack[-1].append(y_tm1[i])
+
+            if previous_was_last:
+                # pop parent queue
+                if len(state_stack) > 1:    # should only be false at init
+                    del state_stack[-2][0]
+                    del symbol_stack[-2][0]
+                    # pop stack until empty or next non-finished
+                    if len(state_stack[-2]) == 0:   # all parents have been consumed
+                        del state_stack[-2]
+                        del symbol_stack[-2]
+                # pop or push last stack
+                if len(state_stack) < 2 or len(state_stack[-2]) == 0:
+                    if len(state_stack[-1]) == 0:   # no next depth level needed -> terminate
+                        del state_stack[-1]
+                        del symbol_stack[-1]
+                    else:
+                        self.state_stacks.append([])    # new depth level
+                        self.symbol_stacks.append([])
+
+                # reset frat
+                frat_symbols[i] = self.y_f_0
+                if self.frat_init_mode == "zero":
+                    zerofrat = [q.var(torch.zeros(frat_stacks_top_i_e.size())).cuda(frat_stacks_top_i_e).v
+                                for frat_stacks_top_i_e in hf_tm1[i]]
+                elif self.frat_init_mode == "ancestor":
+                    zerofrat = ha_tm1[i]
+                elif self.frat_init_mode == "value":
+                    zerofrat = self.frat_init_param
+                else:
+                    raise q.SumTingWongException()
+                frat_states[i] = zerofrat
+        # endregion
+
+        # region make cell update
+        ance_states = [state_stack[-2][0] for state_stack in self.state_stacks]
+        ance_symbols = [symbol_stack[-2][0] for symbol_stack in self.symbol_stacks]
+
+        ance_states = [torch.cat(l, 0) for l in zip(*ance_states)]
+        frat_states = [torch.cat(l, 0) for l in zip(*frat_states)]
+
+        self.set_states_of_cells(ance_states, frat_states)
+
+        y_a_tm1 = torch.cat(ance_symbols, 0)
+        y_f_tm1 = torch.cat(frat_symbols, 0)
+        y_a_tm1_emb, _ = self.ancemb(y_a_tm1)
+        y_f_tm1_emb, _ = self.fratemb(y_f_tm1)
+
+        if len(self.cells) == 2:
+            cellinprouterout = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            if len(cellinprouterout) == 2:
+                x_a_t, x_f_t = cellinprouterout
+            else:
+                x_a_t, x_f_t = cellinprouterout, cellinprouterout
+            ance_cell_out = self.cells[0].forward(x_a_t, t=t, **kw)
+            frat_cell_out = self.cells[1].forward(x_f_t, t=t, **kw)
+            # cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
+            cell_out = q.intercat([ance_cell_out, frat_cell_out])   # in case split attention is used later
+            # TODO: check that intercatted is not fed back in here again
+        else:
+            x_t = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            cell_out = self.cells[0].forward(x_t, t=t, **kw)
+        # endregion
+        return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
+
+
 class DynamicOracleRunner(q.DecoderRunner):
     """
     Runs a decoder using the provided dynamic tracker.
@@ -613,13 +824,24 @@ class DynamicOracleRunner(q.DecoderRunner):
                 y_t = y_t[0]
             # compute prob mask
             ymask_np = np.zeros(y_t.size(), dtype="float32")
+            ymask_expl_np = np.ones(y_t.size(), dtype="float32")
+            use_expl_mask = False
             for i, eid in enumerate(eids_np):
+                avalidnext = None
                 validnext = self.tracker.get_valid_next(eid)   # set of ids
+                if len(validnext) == 2:
+                    validnext, avalidnext = validnext
                 ymask_np[i, list(validnext)] = 1.
+                if avalidnext is not None:
+                    ymask_expl_np[i, :] = 0.
+                    ymask_expl_np[i, list(avalidnext)] = 1.
+                    use_expl_mask = True
             ymask = q.var(ymask_np).cuda(y_t).v
+            ymask_expl = q.var(ymask_expl_np).cuda(y_t).v if use_expl_mask else None
 
             if self.explore > 0:
-                unmaskedprobs = self.scores2probs(y_t)
+                _y_t = y_t + torch.log(ymask_expl) if ymask_expl is not None else y_t
+                unmaskedprobs = self.scores2probs(_y_t)
                 if mode == "sample":
                     x_t = torch.distributions.Categorical(unmaskedprobs).sample()
                     # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
