@@ -1165,6 +1165,7 @@ def test_treegen():
     print(len(indic))
     print(len(outdic))
     print(outdic["N1"], outdic["N1*NC"], outdic["N1*LS"], outdic["N1*NC*LS"])
+    print(outdic["N2"], outdic["N2*NC"], outdic["N2*LS"], outdic["N2*NC*LS"])
 
 
 if __name__ == "__main__":

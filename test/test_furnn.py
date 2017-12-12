@@ -3,7 +3,7 @@ from unittest import TestCase
 import qelos as q
 import numpy as np
 import random
-from qelos.furnn import TwoStackCell, DynamicOracleRunner
+from qelos.furnn import TwoStackCell, DynamicOracleRunner, ParentStackCell
 
 
 class TestMemGRUCell(TestCase):
@@ -475,6 +475,280 @@ class TestDynamicOracleRunner(TestCase):
         print(seqacc)
 
 
+class TestParentStackDecoder(TestCase):
+    def do_tst_it(self, innercell = lambda a, b: q.RecStack(q.GRUCell(a, b))):
+        indim, outdim = 10, 16
+        data = [
+            "<START> <ROOT> BIN1 LEAF1 LEAF2",
+            "<START> <ROOT> BIN2 UNI1 LEAF2 LEAF1",
+            "<START> <ROOT> BIN3 LEAF1 BIN4 LEAF2 LEAF3",
+            "<START> <ROOT> LEAF4",
+            "<START> <ROOT> BIN1 BIN2 UNI1 LEAF1 UNI2 LEAF2 LEAF3"
+        ]
+        ctrl = [
+            "LS LS LS NC NCLS",
+            "LS LS LS A NCLS NCLS",
+            "LS LS LS NC LS NC NCLS",
+            "LS LS NCLS",
+            "LS LS LS A LS NC LS NCLS NCLS"
+        ]
+        sm, csm = q.StringMatrix(), q.StringMatrix()
+        sm.tokenize, csm.tokenize = lambda x: x.split(), lambda x: x.split()
+        csm.set_dictionary({"<MASK>": 0, "LS": 3, "A": 1, "NC": 2, "NCLS": 4})
+        for data_e, ctrl_e in zip(data, ctrl):
+            sm.add(data_e); csm.add(ctrl_e)
+        sm.finalize(); csm.finalize()
+        # print(sm[-1])
+        # print(csm[-1])
+
+        vocsize = max(sm.D.values()) + 1
+
+        inneremb = q.WordEmb(indim//2, worddic=sm.D)
+        innercell = innercell(indim, outdim)
+        decoder_core = ParentStackCell(inneremb, innercell)
+        decoder_top = q.DecoderTop(q.wire((0,0)), torch.nn.Linear(outdim, vocsize))
+
+        decodercell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decoder = decodercell.to_decoder()
+
+        x = q.var(sm.matrix).v
+        ctrl = q.var(csm.matrix).v
+
+        y = decoder(x, ctrl)
+        self.assertEqual(y.size(), (5, 9, vocsize))
+        pass
+
+
+    def test_it_gru(self):
+        innercell = lambda a, b: q.RecStack(q.GRUCell(a, b))
+        self.do_tst_it(innercell)
+
+    def test_it_catlstm(self):
+        innercell = lambda a, b: q.RecStack(q.CatLSTMCell(a, b))
+        self.do_tst_it(innercell)
+
+    def test_it_dual_catlstm(self):
+        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a // 2, b//2)),
+                                  q.RecStack(q.CatLSTMCell(a // 2, b//2)))
+        self.do_tst_it(innercell)
+
+
+class TestParentStackDecoder_StaticInputContext(TestCase):
+    def do_tst_it(self, innercell=lambda a, b: q.RecStack(q.GRUCell(a, b))):
+        indim, outdim, ctxdim = 10, 16, 11
+        data = [
+            "<START> <ROOT> BIN1 LEAF1 LEAF2",
+            "<START> <ROOT> BIN2 UNI1 LEAF2 LEAF1",
+            "<START> <ROOT> BIN3 LEAF1 BIN4 LEAF2 LEAF3",
+            "<START> <ROOT> LEAF4",
+            "<START> <ROOT> BIN1 BIN2 UNI1 LEAF1 UNI2 LEAF2 LEAF3"
+        ]
+        ctrl = [
+            "LS LS LS NC NCLS",
+            "LS LS LS A NCLS NCLS",
+            "LS LS LS NC LS NC NCLS",
+            "LS LS NCLS",
+            "LS LS LS A LS NC LS NCLS NCLS"
+        ]
+        sm, csm = q.StringMatrix(), q.StringMatrix()
+        sm.tokenize, csm.tokenize = lambda x: x.split(), lambda x: x.split()
+        csm.set_dictionary({"<MASK>": 0, "LS": 3, "A": 1, "NC": 2, "NCLS": 4})
+        for data_e, ctrl_e in zip(data, ctrl):
+            sm.add(data_e); csm.add(ctrl_e)
+        sm.finalize(); csm.finalize()
+        # print(sm[-1])
+        # print(csm[-1])
+
+        vocsize = max(sm.D.values()) + 1
+
+        inneremb = q.WordEmb(indim // 2, worddic=sm.D)
+        innercell = innercell(indim, ctxdim, outdim)
+        decoder_core = ParentStackCell(inneremb, innercell)
+        decoder_top = q.StaticContextDecoderTop(q.wire((0, 0)),
+                                                torch.nn.Linear(outdim, vocsize))
+
+        decodercell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decoder = decodercell.to_decoder()
+
+        x = q.var(sm.matrix).v
+        ctrl = q.var(csm.matrix).v
+        ctx = np.random.random((5, ctxdim)).astype("float32")
+        ctx = q.var(ctx).v
+
+        y = decoder(x, ctrl, ctx=ctx)
+        self.assertEqual(y.size(), (5, 9, vocsize))
+        pass
+
+    def test_it_gru(self):
+        innercell = lambda a, c, b: q.RecStack(q.GRUCell(a + c, b))
+        self.do_tst_it(innercell)
+
+    def test_it_catlstm(self):
+        innercell = lambda a, c, b: q.RecStack(q.CatLSTMCell(a + c, b))
+        self.do_tst_it(innercell)
+
+    def test_it_dual_catlstm(self):
+        innercell = lambda a, c, b: (q.RecStack(q.CatLSTMCell(a // 2 + c, b // 2)),
+                                     q.RecStack(q.CatLSTMCell(a // 2 + c, b // 2)))
+        self.do_tst_it(innercell)
+
+
+class TestParentStackDecoder_InitStateContext(TestCase):
+    def do_tst_it(self, innercell=lambda a, b: q.RecStack(q.GRUCell(a, b)),
+                  statesetter=lambda *x, **kw: kw["ctx"], dual=False):
+        indim, outdim, ctxdim = 10, 16, (16 if not dual else 8)
+        data = [
+            "<START> <ROOT> BIN1 LEAF1 LEAF2",
+            "<START> <ROOT> BIN2 UNI1 LEAF2 LEAF1",
+            "<START> <ROOT> BIN3 LEAF1 BIN4 LEAF2 LEAF3",
+            "<START> <ROOT> LEAF4",
+            "<START> <ROOT> BIN1 BIN2 UNI1 LEAF1 UNI2 LEAF2 LEAF3"
+        ]
+        ctrl = [
+            "LS LS LS NC NCLS",
+            "LS LS LS A NCLS NCLS",
+            "LS LS LS NC LS NC NCLS",
+            "LS LS NCLS",
+            "LS LS LS A LS NC LS NCLS NCLS"
+        ]
+        sm, csm = q.StringMatrix(), q.StringMatrix()
+        sm.tokenize, csm.tokenize = lambda x: x.split(), lambda x: x.split()
+        csm.set_dictionary({"<MASK>": 0, "LS": 3, "A": 1, "NC": 2, "NCLS": 4})
+        for data_e, ctrl_e in zip(data, ctrl):
+            sm.add(data_e); csm.add(ctrl_e)
+        sm.finalize(); csm.finalize()
+        # print(sm[-1])
+        # print(csm[-1])
+
+        vocsize = max(sm.D.values()) + 1
+
+        inneremb = q.WordEmb(indim // 2, worddic=sm.D)
+        innercell = innercell(indim, outdim)
+        decoder_core = ParentStackCell(inneremb, innercell)
+        decoder_top = q.DecoderTop(q.wire((0, 0)),
+                                                torch.nn.Linear(outdim, vocsize))
+
+        decodercell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decodercell.set_init_states_computer(statesetter)
+        decoder = decodercell.to_decoder()
+
+        x = q.var(sm.matrix).v
+        ctrl = q.var(csm.matrix).v
+        ctx = np.random.random((5, ctxdim)).astype("float32")
+        ctx = q.var(ctx).v
+
+        y = decoder(x, ctrl, ctx=ctx)
+        self.assertEqual(y.size(), (5, 9, vocsize))
+        pass
+
+    def test_it_gru(self):
+        innercell = lambda a, b: q.RecStack(q.GRUCell(a, b))
+        statesetter = lambda *x, **kw: kw["ctx"]
+        self.do_tst_it(innercell, statesetter)
+
+    def test_it_catlstm(self):
+        innercell = lambda a, b: q.RecStack(q.CatLSTMCell(a, b))
+        statesetter = lambda *x, **kw: torch.cat([kw["ctx"], kw["ctx"]], 1)
+        self.do_tst_it(innercell, statesetter)
+
+    def test_it_dual_catlstm(self):
+        innercell = lambda a, b: (q.RecStack(q.CatLSTMCell(a // 2, b // 2)),
+                                  q.RecStack(q.CatLSTMCell(a // 2, b // 2)))
+
+        def statesetter(*x, **kw):
+            ctx = kw["ctx"]
+            ancestralinit = (torch.cat([ctx, ctx], 1),)
+            fraternalinit = (None,)
+            return ancestralinit + fraternalinit
+
+        self.do_tst_it(innercell, statesetter, dual=True)
+
+    def test_it_dual_twolayer_catlstm(self):
+        innercell = lambda a, b: (q.RecStack(
+            q.CatLSTMCell(a // 2, b),
+            q.CatLSTMCell(b, b // 2)),
+                                  q.RecStack(
+                                      q.CatLSTMCell(a // 2, b),
+                                      q.CatLSTMCell(b, b // 2)))
+
+        def statesetter(*x, **kw):
+            ctx = kw["ctx"]
+            ancestralinit = (None, torch.cat([ctx, ctx], 1),)
+            fraternalinit = (None, None)
+            return ancestralinit + fraternalinit
+
+        self.do_tst_it(innercell, statesetter, dual=True)
+
+
+
+class TestParentStackDecoder_AttentionContext(TestCase):
+    def do_tst_it(self, innercell=lambda a, b, c: q.RecStack(q.GRUCell(a+b, b))):
+        indim, outdim, ctxdim = 10, 16, 16
+        data = [
+            "<START> <ROOT> BIN1 LEAF1 LEAF2",
+            "<START> <ROOT> BIN2 UNI1 LEAF2 LEAF1",
+            "<START> <ROOT> BIN3 LEAF1 BIN4 LEAF2 LEAF3",
+            "<START> <ROOT> LEAF4",
+            "<START> <ROOT> BIN1 BIN2 UNI1 LEAF1 UNI2 LEAF2 LEAF3"
+        ]
+        ctrl = [
+            "LS LS LS NC NCLS",
+            "LS LS LS A NCLS NCLS",
+            "LS LS LS NC LS NC NCLS",
+            "LS LS NCLS",
+            "LS LS LS A LS NC LS NCLS NCLS"
+        ]
+        sm, csm = q.StringMatrix(), q.StringMatrix()
+        sm.tokenize, csm.tokenize = lambda x: x.split(), lambda x: x.split()
+        csm.set_dictionary({"<MASK>": 0, "LS": 3, "A": 1, "NC": 2, "NCLS": 4})
+        for data_e, ctrl_e in zip(data, ctrl):
+            sm.add(data_e); csm.add(ctrl_e)
+        sm.finalize(); csm.finalize()
+        # print(sm[-1])
+        # print(csm[-1])
+
+        vocsize = max(sm.D.values()) + 1
+
+        inneremb = q.WordEmb(indim // 2, worddic=sm.D)
+        innercell = innercell(indim, ctxdim//2, outdim)
+        decoder_core = ParentStackCell(inneremb, innercell)
+        decoder_top = q.AttentionContextDecoderTop(
+            q.Attention().cosine_gen(),
+            q.wire((0, 0)),
+            torch.nn.Linear(outdim//2+ctxdim//2, vocsize),
+            split=True
+        )
+
+        decodercell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decoder = decodercell.to_decoder()
+
+        x = q.var(sm.matrix).v
+        ctrl = q.var(csm.matrix).v
+        ctx = np.random.random((5, 6, ctxdim)).astype("float32")
+        ctx_0 = np.random.random((5, ctxdim)).astype("float32")
+        ctx = q.var(ctx).v
+        ctx_0 = q.var(ctx_0).v
+
+        y = decoder(x, ctrl, ctx=ctx, ctx_0=ctx_0)
+        self.assertEqual(y.size(), (5, 9, vocsize))
+        pass
+
+    def test_it_gru(self):
+        innercell = lambda a, b, c: q.RecStack(q.GRUCell(a + b, c))
+        self.do_tst_it(innercell)
+
+    def test_it_catlstm(self):
+        innercell = lambda a, b, c: q.RecStack(q.CatLSTMCell(a + b, c))
+        self.do_tst_it(innercell)
+
+    def test_it_dual_catlstm(self):
+        innercell = lambda a, b, c: (q.RecStack(q.CatLSTMCell(a // 2 + b, c // 2)),
+                                     q.RecStack(q.CatLSTMCell(a // 2 + b, c // 2)))
+        self.do_tst_it(innercell)
+
+
 if __name__ == "__main__":
-    t = TestDynamicOracleRunner()
-    t.test_it()
+    import unittest
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestParentStackDecoder_AttentionContext)
+    unittest.TextTestRunner(verbosity=3).run(suite)
+

@@ -545,7 +545,7 @@ class TwoStackCell(RecStatefulContainer):   # for depth-first tree decoding
         return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
-# TODO
+# TODO: test
 class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
     """ Works with two or one single-state cells (GRU or CatLSTM).
         Can be used as a core in ModularDecoderCell
@@ -560,13 +560,13 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
         super(ParentStackCell, self).__init__(**kw)
         self.state_stacks = None
         self.symbol_stacks = None
-        # TODO ??? zero stacks?
 
-        if isinstance(frat_init, basestring):
+        if isinstance(frat_init, basestring):   # zero or initial
             self.frat_init_mode = frat_init
         else:
             self.frat_init_mode = "value"
             self.frat_init_value = frat_init
+        self._init_frat_states = None
 
         if isinstance(cell, tuple):  # dual cell, cell contains recstacks
             assert (len(cell) == 2)
@@ -623,9 +623,18 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
             cell.reset_state()
         self.state_stacks = None
         self.symbol_stacks = None
+        self._init_frat_states = None
+
+    def set_init_states(self, *states):
+        if len(self.cells) == 1:
+            self.cells[0].set_init_states(*states)
+        else:   # ancestral first
+            anc_states = states[:self.cells[0].numstates]
+            frat_states = states[self.cells[0].numstates:]
+            self.cells[0].set_init_states(*anc_states)
+            self.cells[1].set_init_states(*frat_states)
 
     def read_states_from_cells(self, batsize):
-        # TODO: copied - check
         if len(self.cells) == 2:
             ance_states = self.cells[0].get_states(batsize)
             frat_states = self.cells[1].get_states(batsize)
@@ -641,7 +650,6 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
         return ance_states, frat_states
 
     def set_states_of_cells(self, ance_states, frat_states):
-        # TODO copied - check
         if len(self.cells) == 2:
             self.cells[0].set_states(*ance_states)
             self.cells[1].set_states(*frat_states)
@@ -658,21 +666,25 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
         return self.state_stacks is not None
 
     def init_all(self, batsize):
-        self.state_stacks = tuple([[] for _ in range(batsize)])
-        self.symbol_stacks = tuple([[] for _ in range(batsize)])
+        self.state_stacks =  tuple([[[]] for _ in range(batsize)])
+        self.symbol_stacks = tuple([[[]] for _ in range(batsize)])
 
     def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
         batsize = y_tm1.size(0)
 
         ha_tm1, hf_tm1 = self.read_states_from_cells(batsize)
+        ance_states = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
+        ance_symbols = list(torch.split(y_tm1, 1, 0))
+        frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
+        frat_symbols = list(torch.split(y_tm1, 1, 0))
+        # !!: overriding frat line can be more efficient
 
         if not self.initialized:
             self.init_all(batsize)
-            # TODO: initial parent state from first network state
-
-        frat_symbols = torch.split(y_tm1, 1, 0)
-        frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
-        # !!: overriding frat line can be more efficient
+            # initial parent state is set because first symbol is a root*LS
+            # --> ha_tm1 (initial ancestral part of rec states) is pushed onto stack
+            if self.frat_init_mode == "initial":    # save initial frat states
+                self._init_frat_states = frat_states + []
 
         # region update stacks
         for i in range(ctrl_tm1.size(0)):
@@ -680,16 +692,16 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
             state_stack = self.state_stacks[i]
             symbol_stack = self.symbol_stacks[i]
             if ctrl == 0:       # masked
-                pass
+                continue
             else:
                 pass
+
             previous_was_last = ctrl == 3 or ctrl == 4
             previous_was_leaf = ctrl == 2 or ctrl == 4
 
-            if previous_was_leaf:   # no children --> ancestral data not queued
-                pass
-            else:       # --> queue ancestral data for next level deeper
-                state_stack[-1].append(ha_tm1[i])
+            if not previous_was_leaf:   # no children --> ancestral data not queued
+                                        # --> queue ancestral data for next level deeper
+                state_stack[-1].append(ance_states[i])
                 symbol_stack[-1].append(y_tm1[i])
 
             if previous_was_last:
@@ -707,26 +719,38 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
                         del state_stack[-1]
                         del symbol_stack[-1]
                     else:
-                        self.state_stacks.append([])    # new depth level
-                        self.symbol_stacks.append([])
+                        state_stack.append([])    # new depth level
+                        symbol_stack.append([])
 
                 # reset frat
                 frat_symbols[i] = self.y_f_0
                 if self.frat_init_mode == "zero":
                     zerofrat = [q.var(torch.zeros(frat_stacks_top_i_e.size())).cuda(frat_stacks_top_i_e).v
-                                for frat_stacks_top_i_e in hf_tm1[i]]
+                                for frat_stacks_top_i_e in frat_states[i]]
+                elif self.frat_init_mode == "initial":
+                    zerofrat = self._init_frat_states[i]
                 elif self.frat_init_mode == "ancestor":
-                    zerofrat = ha_tm1[i]
+                    zerofrat = ance_states[i]
                 elif self.frat_init_mode == "value":
-                    zerofrat = self.frat_init_param
+                    zerofrat = self.frat_init_value
                 else:
                     raise q.SumTingWongException()
                 frat_states[i] = zerofrat
         # endregion
 
         # region make cell update
-        ance_states = [state_stack[-2][0] for state_stack in self.state_stacks]
-        ance_symbols = [symbol_stack[-2][0] for symbol_stack in self.symbol_stacks]
+        for i, state_stack, symbol_stack in zip(range(len(self.state_stacks)),
+                                                self.state_stacks, self.symbol_stacks):
+            if len(state_stack) > 0:
+                ance_states[i] = state_stack[-2][0]
+                ance_symbols[i] = symbol_stack[-2][0]
+            else:       # terminated
+                ance_states[i] = [q.var(torch.zeros(ance_states_i_e.size())).cuda(ance_states_i_e).v for ance_states_i_e in ance_states[i]]
+                frat_states[i] = [q.var(torch.zeros(frat_states_i_e.size())).cuda(frat_states_i_e).v for frat_states_i_e in frat_states[i]]
+                ance_symbols[i] = q.var(torch.zeros(ance_symbols[i].size()).long()).cuda(ance_symbols[i]).v
+                frat_symbols[i] = q.var(torch.zeros(frat_symbols[i].size()).long()).cuda(frat_symbols[i]).v
+        # ance_states = [state_stack[-2][0] for state_stack in self.state_stacks]
+        # ance_symbols = [symbol_stack[-2][0] for symbol_stack in self.symbol_stacks]
 
         ance_states = [torch.cat(l, 0) for l in zip(*ance_states)]
         frat_states = [torch.cat(l, 0) for l in zip(*frat_states)]
