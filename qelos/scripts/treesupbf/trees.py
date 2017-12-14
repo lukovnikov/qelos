@@ -13,7 +13,7 @@ class Tracker(object):
     def reset(self):
         raise NotImplemented("use subclass")
 
-    def nxt(self, x):
+    def nxt(self, x, alt_x=None):
         raise NotImplemented("use subclass")
 
     def get_nvt(self):
@@ -96,6 +96,7 @@ class Node(Trackable):
                 ret.delete_nones()
                 return ret
             else:
+                raise Exception("sublings is a list")
                 return siblings
 
     def delete_nodes(self, *nodes):
@@ -132,25 +133,37 @@ class Node(Trackable):
         if with_label:
             ret += "/"+self.label if self.label is not None else ""
         if with_annotation:
-            if self.is_leaf:
+            if self.is_leaf and not self.name in [self.none_symbol, self.root_symbol]:
                 ret += "*"+self.leaf_suffix
         return ret
 
     def pptree(self, arbitrary=False, _rec_arg=False, _top_rec=True):
         return self.pp(mode="tree", arbitrary=arbitrary, _rec_arg=_rec_arg, _top_rec=_top_rec)
 
+    def ppdf(self, mode="par", arbitrary=False):
+        mode = "dfpar" if mode == "par" else "dfann"
+        return self.pp(mode=mode, arbitrary=arbitrary)
+
     def pp(self, mode="ann", arbitrary=False, _rec_arg=None, _top_rec=True):
-        assert(mode in "ann tree dfpar".split())
+        assert(mode in "ann tree dfpar dfann".split())
         children = list(self.children)
         if arbitrary:
             random.shuffle(children)
         if mode == "dfpar":     # depth-first with parentheses
             children = [child.pp(mode=mode, arbitrary=arbitrary) for child in children]
             ret = self.symbol(with_label=True, with_annotation=False) \
-                  + ("" if len(children) == 0 else " ({})".format(", ".join(children)))
+                  + ("" if len(children) == 0 else " ( {} )".format(", ".join(children)))
+        if mode == "dfann":
+            _is_last = True if _rec_arg is None else _rec_arg
+            children = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=_is_last_child)
+                        for child, _is_last_child
+                        in zip(children, [False] * (len(children)-1) + [True])]
+            ret = self.symbol(with_label=True, with_annotation=False) \
+                  + ("*NC" if len(children) == 0 else "") + ("*LS" if _is_last else "")
+            ret += "" if len(children) == 0 else " " + " ".join(children)
         if mode == "ann":
             _rec_arg = True if _rec_arg is None else _rec_arg
-            stacks = [self.symbol(with_annotation=True, with_label=True) + (("*" + self.last_suffix) if _rec_arg is True else "")]
+            stacks = [self.symbol(with_annotation=True, with_label=True) + (("*" + self.last_suffix) if (_rec_arg is True and not self.name in [self.root_symbol, self.none_symbol]) else "")]
             if len(children) > 0:
                 last_child = [False] * (len(children) - 1) + [True]
                 children_stacks = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=recarg, _top_rec=False)
@@ -195,10 +208,11 @@ class Node(Trackable):
             ret = "\n".join(lines)
         return ret
 
-    def build_dict_from(self, trees):
+    @classmethod
+    def build_dict_from(cls, trees):
         allnames = set()
         alllabels = set()
-        suffixes = ["*" + self.leaf_suffix, "*" + self.last_suffix, "*{}*{}".format(self.leaf_suffix, self.last_suffix)]
+        suffixes = ["*" + cls.leaf_suffix, "*" + cls.last_suffix, "*{}*{}".format(cls.leaf_suffix, cls.last_suffix)]
         for tree in trees:
             treenames, treelabels = tree._all_names_and_labels()
             allnames.update(treenames)
@@ -209,7 +223,7 @@ class Node(Trackable):
             alltokens = set(sum([[token+"/"+label for label in alllabels] for token in allnames], []))
 
         indic = OrderedDict([("<MASK>", 0), ("<START>", 1), ("<STOP>", 2),
-                             (self.root_symbol, 3), (self.none_symbol, 4)])
+                             (cls.root_symbol, 3), (cls.none_symbol, 4)])
         outdic = OrderedDict()
         outdic.update(indic)
         offset = len(indic)
@@ -240,10 +254,15 @@ class Node(Trackable):
         return names, labels
 
     def __eq__(self, other):
+        if isinstance(other, list):
+            print("other is list")
         same = self.name == other.name
         same &= self.label == other.label
+        ownchildren = self.children + tuple()
         otherchildren = other.children + tuple()
-        for child in self.children:
+        j = 0
+        while j < len(ownchildren):
+            child = ownchildren[j]
             found = False
             i = 0
             while i < len(otherchildren):
@@ -253,7 +272,11 @@ class Node(Trackable):
                 i += 1
             if found:
                 otherchildren = otherchildren[:i] + otherchildren[i+1:]
+                ownchildren = ownchildren[:j] + ownchildren[j+1:]
+            else:
+                j += 1
             same &= found
+        same &= len(otherchildren) == 0 and len(ownchildren) == 0   # all children must be matched
         return same
 
 
@@ -308,7 +331,7 @@ class UniqueNodeTracker(Tracker):
     def is_terminated(self):
         return len(self._anvt) == 0
 
-    def nxt(self, inpx):
+    def nxt(self, inpx, **kw):
         assert(inpx in self._anvt)        # TODO reenable
 
         # region process input symbol
@@ -459,7 +482,7 @@ class NodeTracker(Tracker):
     def is_terminated(self):
         return len(self._nvt) == 0
 
-    def nxt(self, inpx):
+    def nxt(self, inpx, **kw):
         if len(self.possible_paths) == 0:
             return None
         else:
@@ -805,7 +828,7 @@ class SentenceTracker(Tracker):
     def is_terminated(self):
         return len(self._nvt) == 0
 
-    def nxt(self, inp):
+    def nxt(self, inp, **kw):
         if len(self.possible_paths) == 0:
             return None
         else:
@@ -950,7 +973,7 @@ class GroupTracker(object):
         else:
             return nvt
 
-    def update(self, eid, x):
+    def update(self, eid, x, alt_x=None):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:  # done

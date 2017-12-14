@@ -8,7 +8,353 @@ from scipy import optimize as spopt
 EPS = 1e-6
 
 
-class GANTrainer(object):
+class DataloaderIterator(object):
+    def __init__(self, dataloader):
+        super(DataloaderIterator, self).__init__()
+        self.dataloader = dataloader
+        self.dataloaderiter = iter(dataloader)
+        self._epoch_count = 0
+
+    def __next__(self):
+        try:
+            return next(self.dataloader)
+        except StopIteration as e:
+            """ done one epoch of data """
+            self.dataloaderiter = iter(self.dataloader)
+            return next(self)
+
+    def reset(self):
+        self._epoch_count = 0
+        self.dataloaderiter = iter(self.dataloader)
+
+
+class Cudable(object):
+    def __init__(self, _usecuda=False):
+        self.usecuda = _usecuda
+        self.cudaargs = ([], {})
+
+    def cuda(self, usecuda, *a, **kw):
+        self.usecuda = usecuda
+        self.cudaargs = (a, kw)
+        return self
+
+
+class InfNoise(Cudable):
+    def __init__(self, batsize, noisedim=100, **kw):
+        super(InfNoise, self).__init__(**kw)
+        self.batsize = batsize
+        self.noisedim = noisedim
+
+    def __next__(self):
+        noise = q.var(torch.zeros(self.batsize, self.noisedim)).cuda(self.usecuda).v
+        noise.data.normal_(0, 1)
+        return noise
+
+
+class InfIterWithNoise(Cudable):
+    """ default implementation that takes a dataloader
+        and returns batches of data coupled with noise.
+        Wraps data (and noise) in Variables """
+    def __init__(self, dataloader, noisedim=100, **kw):
+        super(InfIterWithNoise, self).__init__(**kw)
+        self.dataloader = dataloader
+        self.dataloaderiter = iter(self.dataloader)
+        self._epoch_count = 0
+        self.noisedim = noisedim
+
+    def reset(self):
+        self._epoch_count = 0
+        self.dataloaderiter = iter(self.dataloader)
+
+    def __next__(self):
+        try:
+            batch = next(self.dataloader)
+            if not q.issequence(batch):
+                batch = [batch]
+            batsize = batch[0].size(0)
+            batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
+            noise = q.var(torch.zeros(batsize, self.noisedim)).cuda(self.usecuda).v
+            noise.data.normal_(0, 1)
+            return batch, [noise]
+        except StopIteration as e:
+            """ done one epoch of data """
+            self.dataloaderiter = iter(self.dataloader)
+            return next(self)
+
+
+class GANTrainer(Cudable):
+    opt_lr = 0.00001
+
+    def __init__(self, discriminator, generator, **kw):
+        super(GANTrainer, self).__init__(**kw)
+        self.discriminator = discriminator
+        self.generator = generator
+        self.optD, self.optG = None, None
+        self.dataD, self.dataG = None, None     # should be inf-iters
+        self.valid_dataD, self.valid_dataG = None, None     # should be inf-iters
+        self.valid_metrics = []
+        self.valid_inter = 1
+        # scheduling
+        self.niterD, self.niterG = 1, 1
+        self.niterD_burnin, self.niterD_burnin_interval = 0, 0
+        self.niterD_burnin_number = 1
+        self._phase = None
+
+    def optimizers(self, optD, optG):
+        self.optD = optD
+        self.optG = optG
+        return self
+
+    def train_on(self, dataiterD, dataiterG):
+        """
+        :param dataiterD:   infinite data iterator to use for training discriminator
+                            must provide data for both discriminator and generator
+                            must return a pair of (possibly sequences) of data to feed to discriminator resp. generator
+        :param dataiterG:   infinite data iterator to use for training generator
+                            must only provide data for generator
+        """
+        self.dataD = dataiterD
+        self.dataG = dataiterG
+        return self
+
+    def schedule(self, niterD=5, niterG=1, niterD_burnin=25, niterD_burnin_interval=500, niterD_burnin_number=100):
+        self.niterD, self.niterG = niterD, niterG
+        self.niterD_burnin, self.niterD_burnin_interval = niterD_burnin, niterD_burnin_interval
+        self.niterD_burnin_number = niterD_burnin_number
+        return self
+
+    def valid_on(self, dataiterD, dataiterG, metrics, interval=10):
+        self.valid_dataD = dataiterD
+        self.valid_dataG = dataiterG
+        self.valid_metrics = metrics
+        self.valid_inter = interval
+        return self
+
+    def initialize(self):
+        if self.usecuda:
+            self.discriminator.cuda(*self.cudaargs[0], **self.cudaargs[1])
+            self.generator.cuda(*self.cudaargs[0], **self.cudaargs[1])
+        if self.optD is None:
+            print("WARNING: discriminator optimizer was not set. Setting default (RMSProp, lr={})".format(self.opt_lr))
+            self.optD = torch.optim.RMSprop(q.params_of(self.discriminator), lr=self.opt_lr)
+        if self.optG is None:
+            print("WARNING: generator optimizer was not set. Setting default (RMSProp, lr={})".format(self.opt_lr))
+            self.optG = torch.optim.RMSprop(q.params_of(self.generator), lr=self.opt_lr)
+
+    def reset(self):
+        self.current_iter = 0
+
+    def train(self, iters=1000):
+        self.iters = iters
+        self.reset()
+        self.initialize()
+        self.trainloop()
+
+    def trainloop(self):
+        for _iter in range(0, self.iters):
+            self.current_iter = _iter
+            self.train_discriminator()
+            self.train_generator()
+            if _iter % self.valid_inter == 0:
+                self.run_valid()
+
+    def _get_niterD(self, iteration, totaliterations):
+        niterD = self.niterD
+        if iteration < self.niterD_burnin or \
+            (self.niterD_burnin_interval > 0
+             and self.current_iter % self.niterD_burnin_interval == 0):
+            niterD = self.niterD_burnin_number
+        return niterD
+
+    def _get_niterG(self, iteration, totaliterations):
+        return self.niterG
+
+    def train_discriminator(self):
+        self._phase = "trainD"
+        niterD = self._get_niterD(self.current_iter, self.iters)
+        for j in range(niterD):
+            self.discriminator.zero_grad()
+            self._before_iterD()
+
+            real, noise = next(self.dataD)
+
+            if not q.issequence(real):
+                real = [real]
+            real = [q.var(real_e).cuda(self.usecuda).v
+                    if not isinstance(real_e, Variable) else real_e
+                    for real_e in real]
+            if not q.issequence(noise):
+                noise = [noise]
+            noise = [q.var(noise_e).cuda(self.usecuda).v
+                     if not isinstance(noise_e, Variable) else noise_e
+                     for noise_e in noise]
+
+            fake = self.generator(*noise)
+            if not q.issequence(fake):
+                fake = [fake]
+
+            fake4D = self._get_fake4D(fake)
+
+            scoreD_real = self.discriminator(*real)
+            scoreD_fake = self.discriminator(*[fake_e.detach() for fake_e in fake4D])
+
+            lossDadd = 0
+            lossD = self._get_lossD(scoreD_real, scoreD_fake, real=real, fake=fake, noise=noise)
+            if len(lossD) == 2:
+                lossD, lossDadd = lossD
+
+            costD = lossD + lossDadd
+            costD.backward()
+            self._log_trainD(costD=costD, lossD=lossD, lossDadd=lossDadd,
+                             scoreD_real=scoreD_real, scoreD_fake=scoreD_fake,
+                             real=real, fake=fake, noise=noise)
+            self.optD.step()
+            self._after_iterD()
+
+    def _log_trainD(self, costD=None, lossD=None, lossDadd=None,
+                          scoreD_real=None, scoreD_fake=None,
+                          real=None, fake=None, noise=None):
+        raise NotImplemented("use subclass")
+
+    def train_generator(self):
+        self._phase = "trainG"
+        niterG = self._get_niterG(self.current_iter, self.iters)
+        for j in range(niterG):
+            self.generator.zero_grad()
+            self._before_iterG()
+
+            noise = next(self.dataG)
+            if not q.issequence(noise):
+                noise = [noise]
+            noise = [q.var(noise_e).cuda(self.usecuda).v
+                     if not isinstance(noise_e, Variable) else noise_e
+                     for noise_e in noise]
+
+            fake = self.generator(*noise)
+            if not q.issequence(fake):
+                fake = [fake]
+
+            fake4D = self._get_fake4D(fake)
+
+            scoreD_fake = self.discriminator(*fake4D)
+
+            lossGadd = 0
+            lossG = self._get_lossG(scoreD_fake, fake=fake, noise=noise)
+            if len(lossG) == 2:
+                lossG, lossGadd = lossG
+            costG = lossG + lossGadd
+            costG.backward()
+            self.optG.step()
+            self._log_trainG(costG=costG, lossG=lossG, lossGadd=lossGadd,
+                             scoreD_fake=scoreD_fake, fake=fake, noise=noise)
+            self._after_iterG()
+
+    def _get_fake4D(self, fake):
+        """ override this to only feed a selection of G's output to D """
+        return fake
+
+    def _log_trainG(self, costG=None, lossG=None, lossGadd=None,
+                          scoreD_fake=None, fake=None, noise=None):
+        raise NotImplemented("use subclass")
+
+    def run_valid(self):
+        raise NotImplemented("use subclass")
+
+    def _get_lossD(self, score_real, score_fake, real=None, fake=None, noise=None):
+        raise NotImplemented("use subclass")
+
+    def _get_lossG(self, score_fake, fake=None, noise=None):
+        raise NotImplemented("use subclass")
+
+    # "hooks"
+    def _before_iterD(self):    pass
+    def _after_iterD(self):     pass
+    def _before_iterG(self):    pass
+    def _after_iterG(self):     pass
+
+
+class OriginalGANTrainer(GANTrainer):
+    def _get_lossD(self, score_real, score_fake, **kw):
+        ret = -torch.log(score_real).mean() - torch.log(1 - score_fake).mean()
+        return ret
+
+    def _get_lossG(self, score_fake, **kw):
+        ret = torch.log(1.0 - score_fake).mean()
+        return ret
+
+
+class WGANTrainer(GANTrainer):
+    def __init__(self, d, g, noisedim=100, clamp_weights=(-0.01, +0.01), **kw):
+        super(WGANTrainer, self).__init__(d, g, noisedim=noisedim, **kw)
+        self.clamp_weights_rng = clamp_weights
+
+    def _get_lossD(self, score_real, score_fake, **kw):
+        ret = score_real.mean() - score_fake.mean()
+        return ret
+
+    def _get_lossG(self, score_fake, **kw):
+        ret = -score_fake.mean()
+        return ret
+
+    def _before_iterD(self):
+        for p in q.params_of(self.discriminator):
+            p.data.clamp_(*self.clamp_weights_rng)
+
+
+class IWGANTrainer(GANTrainer):
+    def __init__(self, d, g, noisedim=100, grad_penalty=1, **kw):
+        super(IWGANTrainer, self).__init__(d, g, noisedim=noisedim, **kw)
+        self.grad_penalty_weight = grad_penalty
+
+    def _get_lossD(self, score_real, score_fake, real=None, fake=None, noise=None):
+        real, fake, noise = real[0], fake[0], noise[0]
+        core = score_real.mean() - score_fake.mean()
+        batsize = real.size(0)
+        interp_alpha = real.data.new(batsize, 1)
+        interp_alpha.uniform_(0, 1)
+        interp_points = interp_alpha * real.data + (1 - interp_alpha) * fake.data
+        interp_points = Variable(interp_points, requires_grad=True)
+        scoreD_interp = self.discriminator(interp_points)
+        scoreD_interp_grad = torch.autograd.grad(scoreD_interp.sum(),
+                                                 interp_points,
+                                                 create_graph=True)
+        lip_grad_norm = scoreD_interp_grad.view(batsize, -1).norm(2, 1)
+        lip_loss = self.grad_penalty_weight * ((lip_grad_norm - 1) ** 2).mean()
+        return core, lip_loss
+
+    def _get_lossG(self, score_fake, **kw):
+        ret = -score_fake.mean()
+        return ret
+
+
+class DRAGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+class ACGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+class DiscoGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+class InfoGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+class fGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+class LSGANTrainer(GANTrainer):
+    pass        # TODO
+
+
+# TODO: more GANS
+
+
+class OldGANTrainer(object):
     def __init__(self,  mode="DRAGAN",      # WGAN, WGAN-GP, DRAGAN, DRAGAN-G, DRAGAN-LG, PAGAN
                         modeD="critic",  # disc or critic
                         one_sided=False,

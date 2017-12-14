@@ -674,17 +674,28 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
 
         ha_tm1, hf_tm1 = self.read_states_from_cells(batsize)
         ance_states = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
-        ance_symbols = list(torch.split(y_tm1, 1, 0))
+        ance_symbols = list(torch.split(y_tm1, 1, 0))     # must be overwritten with symbols from stack
         frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
-        frat_symbols = list(torch.split(y_tm1, 1, 0))
+        frat_symbols = list(torch.split(y_tm1, 1, 0))  # when y_tm1 is root, initial frat symbols must be <START>
         # !!: overriding frat line can be more efficient
 
         if not self.initialized:
-            self.init_all(batsize)
-            # initial parent state is set because first symbol is a root*LS
-            # --> ha_tm1 (initial ancestral part of rec states) is pushed onto stack
+            self.init_all(batsize)          # initial parent state will be set because first symbol is a root*LS --> ha_tm1 (initial ancestral part of rec states) is pushed onto stack
+            # initialize first ever fraternal state according to frat init mode
             if self.frat_init_mode == "initial":    # save initial frat states
                 self._init_frat_states = frat_states + []
+            elif self.frat_init_mode == "zero":
+                hf_tm1 = [q.var(torch.zeros(hf_tm1_e.size())).cuda(hf_tm1_e).v
+                            for hf_tm1_e in hf_tm1]
+                frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
+            elif self.frat_init_mode == "ancestor":
+                frat_states = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
+            elif self.frat_init_mode == "value":
+                frat_states = [self.frat_init_value for _ in frat_states]
+
+            # set previous frat symbols to init frat symbols
+            frat_symbols = [self.y_f_0 for _ in frat_symbols]
+
 
         # region update stacks
         for i in range(ctrl_tm1.size(0)):
@@ -853,7 +864,7 @@ class DynamicOracleRunner(q.DecoderRunner):
             for i, eid in enumerate(eids_np):
                 avalidnext = None
                 validnext = self.tracker.get_valid_next(eid)   # set of ids
-                if len(validnext) == 2:
+                if isinstance(validnext, tuple) and len(validnext) == 2:
                     validnext, avalidnext = validnext
                 ymask_np[i, list(validnext)] = 1.
                 if avalidnext is not None:

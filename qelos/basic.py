@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import math
 
 import qelos as q
 
@@ -660,5 +661,38 @@ class LayerNormalization(nn.Module):
         ln_out = ln_out * self.a_2.expand_as(ln_out) + self.b_2.expand_as(ln_out)
 
         return ln_out
+
+
+class PhasingLinear(nn.Module):
+    def __init__(self, indim, outdim, use_bias=True):
+        super(PhasingLinear, self).__init__()
+        self.W_r = nn.Parameter(torch.zeros(indim, outdim))
+        self.W_i = nn.Parameter(torch.zeros(indim, outdim))
+        self.mb_r = nn.Parameter(torch.zeros(outdim,))
+        self.mb_i = nn.Parameter(torch.zeros(outdim,))
+        if use_bias:
+            self.b = nn.Parameter(torch.zeros(outdim,))
+        else:
+            self.b = None
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        self.W_r.data.uniform_(-stdv, stdv)
+        self.W_i.data.uniform_(-stdv, stdv)
+        self.mb_r.data.uniform(-stdv, stdv)
+        self.mb_i.data.uniform(-stdv, stdv)
+        if self.b is not None:
+            self.b.data.uniform_(-stdv, stdv)
+
+    def forward(self, x):
+        reals = torch.matmul(x, self.W_r)
+        imags = torch.matmul(x, self.W_i)
+        ret = self.mb_r.unsqueeze(0) * reals - self.mb_i.unsqueeze(0) * imags
+        # _imags = self.mb_i * reals + self.mb_r * imags
+        if self.b:
+            ret = ret + self.b
+        return ret
+
 
 
