@@ -649,7 +649,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         treestring = tree.pp(arbitrary=True)
         treestring_in = treestring      #.replace("*LS", "").replace("*NC", "")
         if removeannotation:
-            tt.msg("removing annotation")
+            # tt.msg("removing annotation")
             treestring_in = treestring_in.replace("*LS", "").replace("*NC", "")
         osm.add(treestring_in)
         psm.add(treestring)
