@@ -152,7 +152,7 @@ class Node(Trackable):
         if mode == "dfpar":     # depth-first with parentheses
             children = [child.pp(mode=mode, arbitrary=arbitrary) for child in children]
             ret = self.symbol(with_label=True, with_annotation=False) \
-                  + ("" if len(children) == 0 else " ( {} )".format(", ".join(children)))
+                  + ("" if len(children) == 0 else " ( {} )".format(" , ".join(children)))
         if mode == "dfann":
             _is_last = True if _rec_arg is None else _rec_arg
             children = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=_is_last_child)

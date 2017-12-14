@@ -28,7 +28,7 @@ OPT_ENCDIM = 100
 OPT_DECDIM = 100
 OPT_USEATTENTION = False
 OPT_INPLINMODE = "bf"       # "df" or "bf" or "dfpar"
-OPT_REMOVE_ANNOTATION = True
+OPT_REMOVE_ANNOTATION = False
 # endregion
 
 _opt_test = True
@@ -649,6 +649,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         treestring = tree.pp(arbitrary=True)
         treestring_in = treestring      #.replace("*LS", "").replace("*NC", "")
         if removeannotation:
+            tt.msg("removing annotation")
             treestring_in = treestring_in.replace("*LS", "").replace("*NC", "")
         osm.add(treestring_in)
         psm.add(treestring)
@@ -726,9 +727,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
 
         test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
-
         ttt.tock("tested whole dryrun")
-        # TODO loss and gradients
+
         golds = q.var(osm.matrix[:3, 1:]).v
         loss = q.SeqCrossEntropyLoss(ignore_index=0)
         lossvalue = loss(test_encdec_output, golds)
@@ -740,7 +740,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         for param in params:
             assert (param.grad is not None)
             assert (param.grad.norm().data[0] > 0)
-            print(tuple(param.size()), param.grad.norm().data[0])
+            # print(tuple(param.size()), param.grad.norm().data[0])
         ttt.tock("all gradients non-zero")
 
     # print(encdec)
@@ -794,6 +794,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
                        linoutjoinmode=OPT_JOINT_LINOUT_MODE,
                        oraclemode=OPT_ORACLE_MODE,
                        inplinmode=OPT_INPLINMODE,
+                       removeannotation=OPT_REMOVE_ANNOTATION,
                        cuda=False,
                        gpu=1):
     if cuda:
@@ -817,13 +818,24 @@ def run_seq2seq_oracle(lr=OPT_LR,
     else:
         linoutdim = decdim
 
-    linout, symbols2cores, symbols_is_last_sibling \
+    linout, symbols2cores, symbols2ctrl \
         = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
-    oracle = make_oracle(tracker, symbols2cores, symbols_is_last_sibling, explore, cuda, mode=oraclemode,
+    oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda, mode=oraclemode,
                          ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
     original_inparggetter = oracle.inparggetter
-    oracle.inparggetter = lambda x: original_inparggetter(x)[0]
+
+    if removeannotation:
+        oracle.inparggetter = lambda x: original_inparggetter(x)[0]
+    else:
+        outemb = q.WordEmb(outembdim, worddic=tracker.D)
+
+        def new_inparggetter(_a):
+            # reattach annotation: map core id and ctrl id to original output id
+            cores, ctrl = original_inparggetter(_a)
+            raise NotImplemented("TODO: implement")     # TODO
+
+        oracle.inparggetter = new_inparggetter
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
@@ -888,8 +900,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
         out = out[:, :-1, :]
         # test if gold tree linearization produces gold tree
         for i in range(len(out)):
-            goldtree = Tree.parse(tracker.pp(golds[i].cpu().data.numpy()))
-            predtree = Tree.parse(tracker.pp(seqs[i].cpu().data.numpy()))
+            goldtree = Node.parse(tracker.pp(golds[i].cpu().data.numpy()))
+            predtree = Node.parse(tracker.pp(seqs[i].cpu().data.numpy()))
             exptree = trees[i]
             assert (exptree == goldtree)
             assert (exptree == predtree)
@@ -905,10 +917,10 @@ def run_seq2seq_oracle(lr=OPT_LR,
         for param in params:
             assert (param.grad is not None)
             assert (param.grad.norm().data[0] > 0)
-            print(tuple(param.size()), param.grad.norm().data[0])
+            # print(tuple(param.size()), param.grad.norm().data[0])
         ttt.tock("all gradients non-zero")
 
-        loss = TreeAccuracy(treeparser=lambda x: Tree.parse(tracker.pp(x)))
+        loss = TreeAccuracy(treeparser=lambda x: Node.parse(tracker.pp(x)))
         lossvalue = loss(out, golds)
         ttt.msg("value of predicted Tree Accuracy: {}".format(lossvalue))
         dummyout = q.var(torch.zeros(out.size())).cuda(cuda).v
@@ -931,7 +943,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
     # training
     eids = np.arange(0, len(ism.matrix), dtype="int64")
-    startid = outemb.D["<START>"]
+    startid = outemb.D["<ROOT>"]
     tt.msg("using startid {} from outemb".format(startid))
     starts = np.ones((len(ism.matrix,)), dtype="int64") * startid
 
@@ -946,7 +958,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqElemAccuracy(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Tree.parse(tracker.pp(x))))
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
