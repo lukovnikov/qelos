@@ -621,6 +621,50 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
         .run()
 
 
+def make_embedder(dim=None, worddic=None):  # makes structured embedder
+    symbols_core_dic = OrderedDict()
+    symbols_is_last = np.zeros((len(worddic),), dtype="int64")
+    symbols_is_leaf = np.zeros((len(worddic),), dtype="int64")
+    for k, v in worddic.items():
+        ksplits = k.split("*")
+        if not ksplits[0] in symbols_core_dic:
+            symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
+        symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
+        symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
+
+    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf
+
+    # corectrl2symbols = np.zeros((len(symbols_core_dic), 4), dtype="int64")
+    # for specialsym in "<MASK> <STOP> <START> <NONE> <ROOT>".split():
+    #     corectrl2symbols[symbols_core_dic[specialsym], :] = symbols_core_dic[specialsym]
+    # for k, v in outD.items():
+    #     _a = symbols_core_dic[k.split("*")[0]]
+    #     _b = symbols2ctrl[v]
+    #     corectrl2symbols[_a, _b] = v
+
+    symbols2cores = np.zeros((len(worddic),), dtype="int64")
+    for symbol in worddic:
+        symbols2cores[worddic[symbol]] = symbols_core_dic[symbol.split("*")[0]]
+
+    class StructEmbComputer(torch.nn.Module):
+        def __init__(self, dim, **kw):
+            super(StructEmbComputer, self).__init__(**kw)
+            self.dim = dim
+            self.coreemb = q.WordEmb(self.dim, worddic=symbols_core_dic)
+            self.annemb = q.WordEmb(self.dim, worddic={"NOLS": 0, "LS": 1, "NC": 2, "NCLS": 3})
+
+        def forward(self, data):
+            coreembs = self.coreemb(data[:, 0])
+            annembs = self.annemb(data[:, 1])
+            embs = coreembs + annembs
+            return embs
+
+    computer = StructEmbComputer(dim=dim)
+    computer_data = np.stack([symbols2cores, symbols2ctrl], axis=1)
+    wordemb = q.ComputedWordEmb(data=computer_data, computer=computer, worddic=worddic)
+    return wordemb
+
+
 def run_seq2seq_teacher_forced_structured_output_tokens(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
@@ -639,6 +683,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
                cuda=False,
                gpu=1):
     print("SEQ2SEQ + TF + Structured tokens")
+    if removeannotation:    print("decoder input does NOT contain structure annotation")
+    else:                   print("decoder input DOES contain structure annotation")
     if cuda:
         torch.cuda.set_device(gpu)
     decdim = decdim * 2     # more equivalent to twostackcell ?
@@ -675,13 +721,15 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     else:
         linoutdim = decdim
 
-    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-    outemb = q.WordEmb(outembdim, worddic=osm.D)
-
     # linout = q.WordLinout(linoutdim, worddic=psm.D)
     assert(psm.D == trackerDbackup)
     linout, symbols2cores, symbols2ctrl \
         = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
+
+    # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
+    outemb = make_embedder(dim=outembdim, worddic=osm.D)
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+    # outemb = q.WordEmb(outembdim, worddic=osm.D)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
@@ -818,12 +866,11 @@ def run_seq2seq_oracle(lr=OPT_LR,
         tt.msg("using attention!!!")
     else:
         tt.msg("NOT using attention!!!")
+    if removeannotation:    print("decoder input does NOT contain structure annotation")
+    else:                   print("decoder input DOES contain structure annotation")
     ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
     print(ism[0])
-
-    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-    outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
 
     ctxdim = encdim * 2
     if useattention:
@@ -833,6 +880,11 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
     linout, symbols2cores, symbols2ctrl \
         = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
+
+    # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
+    outemb = make_embedder(dim=outembdim, worddic=tracker.D_in)
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+    # outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
 
     oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda, mode=oraclemode,
                          ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
