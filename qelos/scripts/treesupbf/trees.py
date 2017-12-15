@@ -486,7 +486,11 @@ class NodeTracker(Tracker):
         if len(self.possible_paths) == 0:
             return None
         else:
-            assert(inpx in self._nvt)
+            try:
+                assert(inpx in self._nvt)
+            except AssertionError as e:
+                print(inpx, self._nvt)
+                return self._nvt
             allnewpossiblepaths = []
             xsplits = inpx.split("*")
             x, x_isleaf, x_islast = inpx, False, False
