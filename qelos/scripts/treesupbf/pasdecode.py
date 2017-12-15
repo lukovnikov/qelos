@@ -144,14 +144,15 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
     symbols_core_dic = OrderedDict()
     symbols_is_last = np.zeros((len(outD),), dtype="int64")
     symbols_is_leaf = np.zeros((len(outD),), dtype="int64")
-    for k, v in sorted(outD.items(), key=lambda (x,y): y):
+    for k, v in sorted(outD.items(), key=lambda (x, y): y):
         ksplits = k.split("*")
         if not ksplits[0] in symbols_core_dic:
             symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
         symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
         symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
 
-    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf
+    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf + 1
+    symbols2ctrl[outD["<MASK>"]] = 0
 
     # corectrl2symbols = np.zeros((len(symbols_core_dic), 4), dtype="int64")
     # for specialsym in "<MASK> <STOP> <START> <NONE> <ROOT>".split():
@@ -194,7 +195,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
             super(JointLinoutComputer, self).__init__(**kw)
             self.coreemb, self.mode = coreemb, mode
             lsembdim = linoutdim if mode != "cat" else linoutdim // 10
-            self.lsemb = q.WordEmb(lsembdim, worddic={"NOLS": 0, "LS": 1, "NC": 2, "NCLS": 3})
+            self.lsemb = q.WordEmb(lsembdim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
             if mode in "muladd".split():
                 self.lsemb_aux = q.WordEmb(lsembdim, worddic=self.lsemb.D)
             elif mode in "gate".split():
@@ -257,8 +258,8 @@ def make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda=False, mode=
                 ttt=None, linout=None, outemb=None, trees=None, linoutdim=None):
     if ttt is None:
         ttt = q.ticktock("oraclemaker")
-    symbols2ctrl += 1
-    symbols2ctrl[tracker.D["<MASK>"]] = 0
+    # symbols2ctrl += 1
+    # symbols2ctrl[tracker.D["<MASK>"]] = 0
 
     symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
     symbols2ctrl_pt = q.var(symbols2ctrl).cuda(cuda).v
@@ -625,22 +626,15 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
     symbols_core_dic = OrderedDict()
     symbols_is_last = np.zeros((len(worddic),), dtype="int64")
     symbols_is_leaf = np.zeros((len(worddic),), dtype="int64")
-    for k, v in worddic.items():
+    for k, v in sorted(worddic.items(), key=lambda (x, y): y):
         ksplits = k.split("*")
         if not ksplits[0] in symbols_core_dic:
             symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
         symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
         symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
 
-    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf
-
-    # corectrl2symbols = np.zeros((len(symbols_core_dic), 4), dtype="int64")
-    # for specialsym in "<MASK> <STOP> <START> <NONE> <ROOT>".split():
-    #     corectrl2symbols[symbols_core_dic[specialsym], :] = symbols_core_dic[specialsym]
-    # for k, v in outD.items():
-    #     _a = symbols_core_dic[k.split("*")[0]]
-    #     _b = symbols2ctrl[v]
-    #     corectrl2symbols[_a, _b] = v
+    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf + 1
+    symbols2ctrl[worddic["<MASK>"]] = 0
 
     symbols2cores = np.zeros((len(worddic),), dtype="int64")
     for symbol in worddic:
@@ -651,7 +645,8 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
             super(StructEmbComputer, self).__init__(**kw)
             self.dim = dim
             self.coreemb = q.WordEmb(self.dim, worddic=symbols_core_dic)
-            self.annemb = q.WordEmb(self.dim, worddic={"NOLS": 0, "LS": 1, "NC": 2, "NCLS": 3})
+            self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
+            self.annemb.embedding.weight.data.fill_(0)
 
         def forward(self, data):
             coreembs, mask = self.coreemb(data[:, 0])
@@ -663,6 +658,7 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
     computer_data = np.stack([symbols2cores, symbols2ctrl], axis=1)
     wordemb = q.ComputedWordEmb(data=computer_data, computer=computer, worddic=worddic)
     return wordemb
+
 
 def run_seq2seq_teacher_forced_structured_output_tokens(
         lr=OPT_LR,
@@ -846,7 +842,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         .run()
 
 
-# TODO: validate with oracle too
+# TODO: validate with freerunner
 def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
@@ -1001,60 +997,55 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
-    eids = np.arange(0, len(ism.matrix), dtype="int64")
-    startid = outemb.D["<ROOT>"]
-    tt.msg("using startid {} from outemb".format(startid))
-    starts = np.ones((len(ism.matrix, )), dtype="int64") * startid
+    # starts = np.ones((len(ism.matrix, )), dtype="int64") * startid
 
-    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix, eids, starts], random=1234)
+    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
     traindata, validdata = q.split(traindata, random=1234)
 
-    train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2]], batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*[validdata[i] for i in [0, 4, 3, 3]], batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*[testdata[i] for i in [0, 4, 3, 3]], batch_size=batsize, shuffle=False)
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
 
-    # region make validation network with oracle
-    oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, False, cuda, mode="argmax",
-                     ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
-    original_inparggetter = oracle.inparggetter
-
+    # region make validation network with freerunner
+    inparggetter = lambda x: x
     if removeannotation:
-        oracle.inparggetter = lambda x: original_inparggetter(x)[0]
-    else:
-        oracle.inparggetter = lambda x: x
+        symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
+        inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
+
+    freerunner = q.FreeRunner(inparggetter=inparggetter)
 
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    valid_decoder_cell.set_runner(oracle)
+    valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
-
-    class ValidEncDec(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(ValidEncDec, self).__init__(**kw)
-            self.encoder = encoder
-            self.decoder = decoder
-
-        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            # self.decoder.block.decoder_top.set_ctx(final_encoding)
-            decoding = self.decoder(decstarts, ctx=final_encoding, eids=eids, maxtime=maxtime)
-            return decoding
-
-    class ValidEncDecAtt(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(ValidEncDecAtt, self).__init__(**kw)
-            self.encoder, self.decoder = encoder, decoder
-
-        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            decoding = self.decoder(decstarts,
-                                    ctx=all_encoding, ctx_0=final_encoding, ctxmask=mask,
-                                    eids=eids, maxtime=maxtime)
-            return decoding
+    #
+    # class ValidEncDec(torch.nn.Module):
+    #     def __init__(self, encoder, decoder, **kw):
+    #         super(ValidEncDec, self).__init__(**kw)
+    #         self.encoder = encoder
+    #         self.decoder = decoder
+    #
+    #     def forward(self, inpseq, decstarts, eids=None, maxtime=None):
+    #         final_encoding, all_encoding, mask = self.encoder(inpseq)
+    #         # self.decoder.block.decoder_top.set_ctx(final_encoding)
+    #         decoding = self.decoder(decstarts, ctx=final_encoding, eids=eids, maxtime=maxtime)
+    #         return decoding
+    #
+    # class ValidEncDecAtt(torch.nn.Module):
+    #     def __init__(self, encoder, decoder, **kw):
+    #         super(ValidEncDecAtt, self).__init__(**kw)
+    #         self.encoder, self.decoder = encoder, decoder
+    #
+    #     def forward(self, inpseq, decstarts, eids=None, maxtime=None):
+    #         final_encoding, all_encoding, mask = self.encoder(inpseq)
+    #         decoding = self.decoder(decstarts,
+    #                                 ctx=all_encoding, ctx_0=final_encoding, ctxmask=mask,
+    #                                 eids=eids, maxtime=maxtime)
+    #         return decoding
 
     if useattention:
-        valid_encdec = ValidEncDecAtt(encoder, valid_decoder)
+        valid_encdec = EncDecAtt(encoder, valid_decoder)
     else:
-        valid_encdec = ValidEncDec(encoder, valid_decoder)
+        valid_encdec = EncDec(encoder, valid_decoder)
     # endregion
 
     q.train(encdec)\
@@ -1064,10 +1055,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
         .set_batch_transformer(
             lambda inpseq, outseq, predseq:
                 (inpseq, outseq[:, :-1], predseq))\
-        .valid_with(valid_encdec).set_valid_batch_transformer(
-                                              lambda a, b, c, d: (a, b, c, d),
-                                              lambda _out: _out[:, :-1, :],
-                                              lambda _: torch.stack(oracle.goldacc, 1)) \
+        .valid_with(valid_encdec) \
         .valid_on(valid_loader, losses)\
         .cuda(cuda)\
         .train(epochs)
@@ -1080,6 +1068,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
         .run()
 
 
+# TODO: validate with freerunner
 def run_seq2seq_oracle(lr=OPT_LR,
                        batsize=OPT_BATSIZE,
                        epochs=OPT_EPOCHS,
@@ -1311,8 +1300,8 @@ def test_make_oracle(n=100):
 if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)

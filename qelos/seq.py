@@ -876,22 +876,38 @@ class TeacherForcer(DecoderRunner):
 
 class FreeRunner(DecoderRunner):
     """ Basic free runner with argmax """
-    def __init__(self, scores2probs=lambda x: x, **kw):
+    def __init__(self, scores2probs=Softmax(), inparggetter=lambda x: (x, {}), **kw):
         super(FreeRunner, self).__init__(**kw)
         self.scores2probs = scores2probs
+        self.outsym2insym = inparggetter
 
     def forward(self, t=None, x=None, xkw=None, y_t=None):
         outkwargs = {"t": t}
         if y_t is None:     # first time step
             assert(t == 0)
+            if len(x) == 1:
+                x = x[0]
+                if x.dim() == 2:
+                    x = x[:, 0]
             x_t = x
         else:
             if "outmask" in xkw:
                 raise NotImplemented("outmask not supported in free running mode yet")
+            if issequence(y_t):
+                assert(len(y_t) == 1)
+                y_t = y_t[0]
             _y_t = self.scores2probs(y_t)
             _, x_t = torch.max(_y_t, 1)
-        outargs = (x_t,)
-        return outargs, outkwargs
+
+        # return
+        r = self.outsym2insym(x_t)
+        if isinstance(r, tuple) and len(r) == 2 and isinstance(r[1], dict):
+            inpargs, kwupd = r
+            outkwargs.update(kwupd)
+        else:
+            inpargs = r
+        # outargs = (x_t,)
+        return inpargs, outkwargs
 
 
 # DECODER MODULES #################
