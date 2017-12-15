@@ -1018,8 +1018,8 @@ def test_make_oracle(n=100):
 if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    # q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)
