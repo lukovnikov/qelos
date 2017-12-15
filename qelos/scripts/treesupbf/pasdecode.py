@@ -727,9 +727,11 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
-    outemb = make_embedder(dim=outembdim, worddic=osm.D)
+    if removeannotation:
+        outemb = q.WordEmb(outembdim, worddic=osm.D)
+    else:
+        outemb = make_embedder(dim=outembdim, worddic=osm.D)
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-    # outemb = q.WordEmb(outembdim, worddic=osm.D)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
@@ -882,9 +884,9 @@ def run_seq2seq_oracle(lr=OPT_LR,
         = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
-    outemb = make_embedder(dim=outembdim, worddic=tracker.D_in)
+    # outemb = make_embedder(dim=outembdim, worddic=tracker.D_in)
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-    # outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
+    outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
 
     oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda, mode=oraclemode,
                          ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
@@ -893,7 +895,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     if removeannotation:
         oracle.inparggetter = lambda x: original_inparggetter(x)[0]
     else:
-        outemb = q.WordEmb(outembdim, worddic=tracker.D)
+        outemb = make_embedder(dim=outembdim, worddic=tracker.D)
         oracle.inparggetter = lambda x: x
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
