@@ -893,8 +893,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
     original_inparggetter = oracle.inparggetter
 
     if removeannotation:
-        print("removing annotations in oracle")
-        q.embed()
         oracle.inparggetter = lambda x: original_inparggetter(x)[0]
     else:
         outemb = make_embedder(dim=outembdim, worddic=tracker.D)
