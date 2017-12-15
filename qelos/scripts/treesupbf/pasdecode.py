@@ -664,9 +664,190 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
     wordemb = q.ComputedWordEmb(data=computer_data, computer=computer, worddic=worddic)
     return wordemb
 
+def run_seq2seq_teacher_forced_structured_output_tokens(
+        lr=OPT_LR,
+        batsize=OPT_BATSIZE,
+        epochs=OPT_EPOCHS,
+        numex=OPT_NUMEX,
+        gradnorm=OPT_GRADNORM,
+        useattention=OPT_USEATTENTION,
+        inpembdim=OPT_INPEMBDIM,
+        outembdim=OPT_OUTEMBDIM,
+        encdim=OPT_ENCDIM,
+        decdim=OPT_DECDIM,
+        linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+        dropout=OPT_DROPOUT,
+        inplinmode=OPT_INPLINMODE,
+        removeannotation=OPT_REMOVE_ANNOTATION,  # remove annotation from teacher forced decoder input
+        cuda=False,
+        gpu=1):
+
+    print("SEQ2SEQ + TF + Structured tokens backup")
+    if removeannotation:
+        print("decoder input does NOT contain structure annotation")
+    else:
+        print("decoder input DOES contain structure annotation")
+    if cuda:
+        torch.cuda.set_device(gpu)
+    decdim = decdim * 2  # more equivalent to twostackcell ?
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+    ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
+    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+    # print(ism[0])
+    osm = q.StringMatrix(indicate_start=True)
+    osm.tokenize = lambda x: x.split()
+    psm = q.StringMatrix()
+    psm.set_dictionary(tracker.D)
+    psm.tokenize = lambda x: x.split()
+    trackerDbackup = {k: v for k, v in tracker.D.items()}
+    # psm.protectedwords = "<MASK> <RARE> <START> <STOP>".split()
+    for tree in trees:
+        treestring = tree.pp(arbitrary=True)
+        treestring_in = treestring  # .replace("*LS", "").replace("*NC", "")
+        if removeannotation:
+            # tt.msg("removing annotation")
+            treestring_in = treestring_in.replace("*LS", "").replace("*NC", "")
+        osm.add(treestring_in)
+        psm.add(treestring)
+    assert (psm.D == trackerDbackup)
+    osm.finalize()
+    psm.finalize()
+    print(ism[0])
+    print(osm[0])
+    print(psm[0])
+
+    ctxdim = encdim * 2
+    if useattention:
+        linoutdim = ctxdim + decdim
+    else:
+        linoutdim = decdim
+
+    # linout = q.WordLinout(linoutdim, worddic=psm.D)
+    assert (psm.D == trackerDbackup)
+    linout, symbols2cores, symbols2ctrl \
+        = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
+
+    # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
+    if removeannotation:
+        outemb = q.WordEmb(outembdim, worddic=osm.D)
+    else:
+        outemb = make_embedder(dim=outembdim, worddic=osm.D)
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+
+    encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
+
+    # region make decoder and put in enc/dec
+    layers = (q.GRUCell(outembdim + ctxdim, decdim),
+              q.GRUCell(decdim, decdim),)
+
+    if useattention:
+        tt.msg("USING ATTENTION !!!")
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   linout, ctx2out=True)
+    else:
+        tt.msg("NOT using attention !!!")
+        decoder_top = q.StaticContextDecoderTop(linout)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+
+    # wrap in encdec
+    class EncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(outinpseq, ctx=final_encoding)
+            return decoding
+
+
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDecAtt, self).__init__(**kw)
+            self.encoder, self.decoder = encoder, decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            decoding = self.decoder(outinpseq,
+                                    ctx=all_encoding,
+                                    ctx_0=final_encoding,
+                                    ctxmask=mask)
+            return decoding
+
+
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
+
+    if _opt_test:
+        ttt.tick("testing whole thing dry run")
+        test_inpseqs = q.var(ism.matrix[:3]).v
+        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
+
+        test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
+        ttt.tock("tested whole dryrun")
+
+        golds = q.var(osm.matrix[:3, 1:]).v
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        lossvalue = loss(test_encdec_output, golds)
+        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
+        encdec.zero_grad()
+        lossvalue.backward()
+        ttt.msg("backward done")
+        params = q.params_of(encdec)
+        for param in params:
+            assert (param.grad is not None)
+            assert (param.grad.norm().data[0] > 0)
+            # print(tuple(param.size()), param.grad.norm().data[0])
+        ttt.tock("all gradients non-zero")
+
+    # print(encdec)
+
+    # training
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqElemAccuracy(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+
+    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
+
+    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
+    traindata, validdata = q.split(traindata, random=1234)
+
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+
+    q.train(encdec) \
+        .train_on(train_loader, losses) \
+        .optimizer(optimizer) \
+        .clip_grad_norm(gradnorm) \
+        .set_batch_transformer(
+        lambda inpseq, outseq, predseq:
+        (inpseq, outseq[:, :-1], predseq)) \
+        .valid_on(valid_loader, losses) \
+        .cuda(cuda) \
+        .train(epochs)
+
+    results = q.test(encdec).on(test_loader, losses) \
+        .set_batch_transformer(
+        lambda inpseq, outseq, predseq:
+        (inpseq, outseq[:, :-1], predseq)) \
+        .cuda(cuda) \
+        .run()
+
 
 # TODO: validate with oracle too
-def run_seq2seq_teacher_forced_structured_output_tokens(
+def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
                epochs=OPT_EPOCHS,
@@ -1131,6 +1312,7 @@ if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
     q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
