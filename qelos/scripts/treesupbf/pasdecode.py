@@ -654,8 +654,8 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
             self.annemb = q.WordEmb(self.dim, worddic={"NOLS": 0, "LS": 1, "NC": 2, "NCLS": 3})
 
         def forward(self, data):
-            coreembs = self.coreemb(data[:, 0])
-            annembs = self.annemb(data[:, 1])
+            coreembs, mask = self.coreemb(data[:, 0])
+            annembs, _ = self.annemb(data[:, 1])
             embs = coreembs + annembs
             return embs
 
