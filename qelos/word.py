@@ -243,7 +243,7 @@ class ComputedWordEmb(WordEmbBase):
         if self.maskid is not None:
             mask = x != self.maskid
         xshape = x.size()
-        x = x.view(-1)
+        x = x.contiguous().view(-1)
         data = self.data.index_select(0, x)
         emb = self.computer(data)
         emb = emb.contiguous()

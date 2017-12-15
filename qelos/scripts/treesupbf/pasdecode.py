@@ -144,7 +144,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
     symbols_core_dic = OrderedDict()
     symbols_is_last = np.zeros((len(outD),), dtype="int64")
     symbols_is_leaf = np.zeros((len(outD),), dtype="int64")
-    for k, v in outD.items():
+    for k, v in sorted(outD.items(), key=lambda (x,y): y):
         ksplits = k.split("*")
         if not ksplits[0] in symbols_core_dic:
             symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
@@ -665,6 +665,7 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
     return wordemb
 
 
+# TODO: validate with oracle too
 def run_seq2seq_teacher_forced_structured_output_tokens(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
@@ -695,6 +696,10 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     # print(ism[0])
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
+    if removeannotation:
+        osm.set_dictionary(tracker.D_in)
+    else:
+        osm.set_dictionary(tracker.D)
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
     psm.tokenize = lambda x: x.split()
@@ -786,7 +791,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     if _opt_test:
         ttt.tick("testing whole thing dry run")
         test_inpseqs = q.var(ism.matrix[:3]).v
-        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
+        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v.contiguous()
 
         test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
         ttt.tock("tested whole dryrun")
@@ -815,12 +820,61 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
-    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
+    eids = np.arange(0, len(ism.matrix), dtype="int64")
+    startid = outemb.D["<ROOT>"]
+    tt.msg("using startid {} from outemb".format(startid))
+    starts = np.ones((len(ism.matrix, )), dtype="int64") * startid
+
+    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix, eids, starts], random=1234)
     traindata, validdata = q.split(traindata, random=1234)
 
-    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2]], batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*[validdata[i] for i in [0, 4, 3, 3]], batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*[testdata[i] for i in [0, 4, 3, 3]], batch_size=batsize, shuffle=False)
+
+    # region make validation network with oracle
+    oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, False, cuda, mode="argmax",
+                     ttt=ttt, linout=linout, outemb=outemb, linoutdim=linoutdim, trees=trees)
+    original_inparggetter = oracle.inparggetter
+
+    if removeannotation:
+        oracle.inparggetter = lambda x: original_inparggetter(x)[0]
+    else:
+        oracle.inparggetter = lambda x: x
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(oracle)
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    class ValidEncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(ValidEncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(decstarts, ctx=final_encoding, eids=eids, maxtime=maxtime)
+            return decoding
+
+    class ValidEncDecAtt(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(ValidEncDecAtt, self).__init__(**kw)
+            self.encoder, self.decoder = encoder, decoder
+
+        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            decoding = self.decoder(decstarts,
+                                    ctx=all_encoding, ctx_0=final_encoding, ctxmask=mask,
+                                    eids=eids, maxtime=maxtime)
+            return decoding
+
+    if useattention:
+        valid_encdec = ValidEncDecAtt(encoder, valid_decoder)
+    else:
+        valid_encdec = ValidEncDec(encoder, valid_decoder)
+    # endregion
 
     q.train(encdec)\
         .train_on(train_loader, losses)\
@@ -829,6 +883,10 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
         .set_batch_transformer(
             lambda inpseq, outseq, predseq:
                 (inpseq, outseq[:, :-1], predseq))\
+        .valid_with(valid_encdec).set_valid_batch_transformer(
+                                              lambda a, b, c, d: (a, b, c, d),
+                                              lambda _out: _out[:, :-1, :],
+                                              lambda _: torch.stack(oracle.goldacc, 1)) \
         .valid_on(valid_loader, losses)\
         .cuda(cuda)\
         .train(epochs)
@@ -1072,8 +1130,8 @@ def test_make_oracle(n=100):
 if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
-    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)

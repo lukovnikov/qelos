@@ -478,6 +478,7 @@ class train(object):
     def __init__(self, model):
         super(train, self).__init__()
         self.model = model
+        self.valid_model = None
         self.epochs = None
         self.current_epoch = 0
         self.trainlosses = None
@@ -488,6 +489,9 @@ class train(object):
         self.transform_batch_inp = None
         self.transform_batch_out = None
         self.transform_batch_gold = None
+        self.valid_transform_batch_inp = None
+        self.valid_transform_batch_out = None
+        self.valid_transform_batch_gold = None
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
@@ -561,6 +565,19 @@ class train(object):
     def valid_on(self, dataloader, losses):
         self.validdataloader = dataloader
         self.validlosses = losses
+        return self
+
+    def valid_with(self, model):
+        self.valid_model = model
+        return self
+
+    def set_valid_batch_transformer(self, input_transform = None, output_transform=None, gold_transform=None):
+        if input_transform is not None:
+            self.valid_transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.valid_transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.valid_transform_batch_gold = gold_transform
         return self
 
     def optimizer(self, optimizer):
@@ -642,20 +659,24 @@ class train(object):
             train_epoch_losses = self.trainlosses.get_agg_errors()
             valid_epoch_losses = []
             if self.validlosses is not None:
-                self.model.eval()
+                model = self.valid_model if self.valid_model is not None else self.model
+                model.eval()
                 self.validlosses.push_and_reset()
                 totalvalidbats = len(self.validdataloader)
                 for i, batch in enumerate(self.validdataloader):
                     batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
-                    if self.transform_batch_inp is not None:
-                        batch = self.transform_batch_inp(*batch)
-                    modelouts = self.model(*batch[:-1])
+                    _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not None else self.transform_batch_inp
+                    _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not None else self.transform_batch_out
+                    _tbg = self.valid_transform_batch_gold if self.valid_transform_batch_gold is not None else self.transform_batch_gold
+                    if _tbi is not None:
+                        batch = _tbi(*batch)
+                    modelouts = model(*batch[:-1])
                     modelout2loss = modelouts
-                    if self.transform_batch_out is not None:
-                        modelout2loss = self.transform_batch_out(modelouts)
+                    if _tbo is not None:
+                        modelout2loss = _tbo(modelouts)
                     gold = batch[-1]
-                    if self.transform_batch_gold:
-                        gold = self.transform_batch_gold(gold)
+                    if _tbg is not None:
+                        gold = _tbg(gold)
                     validlosses = self.validlosses(modelout2loss, gold, inputs=batch[:-1])
                     tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
                             .format(
