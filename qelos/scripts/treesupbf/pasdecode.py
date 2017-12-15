@@ -153,6 +153,14 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
 
     symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf
 
+    # corectrl2symbols = np.zeros((len(symbols_core_dic), 4), dtype="int64")
+    # for specialsym in "<MASK> <STOP> <START> <NONE> <ROOT>".split():
+    #     corectrl2symbols[symbols_core_dic[specialsym], :] = symbols_core_dic[specialsym]
+    # for k, v in outD.items():
+    #     _a = symbols_core_dic[k.split("*")[0]]
+    #     _b = symbols2ctrl[v]
+    #     corectrl2symbols[_a, _b] = v
+
     symbols2cores = np.zeros((len(outD),), dtype="int64")
     for symbol in outD:
         symbols2cores[outD[symbol]] = symbols_core_dic[symbol.split("*")[0]]
@@ -638,6 +646,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     ttt = q.ticktock("test")
     ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+    # print(ism[0])
     osm = q.StringMatrix(indicate_start=True)
     osm.tokenize = lambda x: x.split()
     psm = q.StringMatrix()
@@ -656,6 +665,9 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
     assert(psm.D == trackerDbackup)
     osm.finalize()
     psm.finalize()
+    print(ism[0])
+    print(osm[0])
+    print(psm[0])
 
     ctxdim = encdim * 2
     if useattention:
@@ -668,7 +680,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
 
     # linout = q.WordLinout(linoutdim, worddic=psm.D)
     assert(psm.D == trackerDbackup)
-    linout, symbols2cores, symbols2ctrl\
+    linout, symbols2cores, symbols2ctrl \
         = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
@@ -808,6 +820,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         tt.msg("NOT using attention!!!")
     ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+    print(ism[0])
 
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
@@ -829,13 +842,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         oracle.inparggetter = lambda x: original_inparggetter(x)[0]
     else:
         outemb = q.WordEmb(outembdim, worddic=tracker.D)
-
-        def new_inparggetter(_a):
-            # reattach annotation: map core id and ctrl id to original output id
-            cores, ctrl = original_inparggetter(_a)
-            raise NotImplemented("TODO: implement")     # TODO
-
-        oracle.inparggetter = new_inparggetter
+        oracle.inparggetter = lambda x: x
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
@@ -992,7 +999,7 @@ def test_load_synth_trees(n=100):
 
 def test_make_computed_linout(n=100):
     ism, tracker, eids, trees = load_synth_trees(n=n, inplin="df")
-    linout, symbols2cores, symbols_is_last_sibling = make_computed_linout(tracker.D, OPT_LINOUTDIM, OPT_JOINT_LINOUT_MODE)
+    linout, symbols2cores, symbols2cores = make_computed_linout(tracker.D, OPT_LINOUTDIM, OPT_JOINT_LINOUT_MODE)
 
 
 def test_make_oracle(n=100):
