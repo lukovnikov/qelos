@@ -75,9 +75,14 @@ class SeqLoss(nn.Module):
         self.time_agg = time_agg
 
     def _forward(self, probs, gold, mask=None):     # (batsize, seqlen, dim), idx^(batsize, seqlen)
+        if probs.size(1) > gold.size(1):
+            probs = probs[:, :gold.size(1)]
         batsize, seqlen, vocsize = probs.size()
         x = probs.contiguous().view(batsize * seqlen, vocsize)
-        y = gold.contiguous().view(batsize * seqlen)
+        try:
+            y = gold.contiguous().view(batsize * seqlen)
+        except Exception as e:
+            print(batsize, seqlen, gold.size())
         if mask is not None:
             mask = mask.contiguous().view(batsize * seqlen, -1)
 
@@ -291,6 +296,8 @@ class SeqAccuracy(SeqLoss, Accuracy):
 
 class SeqElemAccuracy(DiscreteLoss):
     def forward(self, x, gold, mask=None):
+        if x.size(1) > gold.size(1):
+            x = x[:, :gold.size(1)]
         if mask is not None and mask.data[0, 0, 1] > 1:     # batchable sparse
             mask = q.batchablesparse2densemask(mask)
         if mask is not None:

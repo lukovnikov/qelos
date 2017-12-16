@@ -489,9 +489,9 @@ class train(object):
         self.transform_batch_inp = None
         self.transform_batch_out = None
         self.transform_batch_gold = None
-        self.valid_transform_batch_inp = None
-        self.valid_transform_batch_out = None
-        self.valid_transform_batch_gold = None
+        self.valid_transform_batch_inp = False
+        self.valid_transform_batch_out = False
+        self.valid_transform_batch_gold = False
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
@@ -665,9 +665,9 @@ class train(object):
                 totalvalidbats = len(self.validdataloader)
                 for i, batch in enumerate(self.validdataloader):
                     batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
-                    _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not None else self.transform_batch_inp
-                    _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not None else self.transform_batch_out
-                    _tbg = self.valid_transform_batch_gold if self.valid_transform_batch_gold is not None else self.transform_batch_gold
+                    _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not False else self.transform_batch_inp
+                    _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not False else self.transform_batch_out
+                    _tbg = self.valid_transform_batch_gold if self.valid_transform_batch_gold is not False else self.transform_batch_gold
                     if _tbi is not None:
                         batch = _tbi(*batch)
                     modelouts = model(*batch[:-1])

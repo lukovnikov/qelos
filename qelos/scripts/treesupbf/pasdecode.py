@@ -1101,7 +1101,15 @@ def run_seq2seq_oracle(lr=OPT_LR,
     else:                   print("decoder input DOES contain structure annotation")
     ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+    psm = q.StringMatrix()
+    psm.set_dictionary(tracker.D)
+    psm.tokenize = lambda x: x.split()
+    for tree in trees:
+        treestring = tree.pp(arbitrary=True)
+        psm.add(treestring)
+    psm.finalize()
     print(ism[0])
+    print(psm[0])
 
     ctxdim = encdim * 2
     if useattention:
@@ -1146,24 +1154,28 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
     # wrap in encdec
     class EncDec(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
+        def __init__(self, encoder, decoder, maxtime=None, **kw):
             super(EncDec, self).__init__(**kw)
             self.encoder = encoder
             self.decoder = decoder
+            self.maxtime = maxtime
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            maxtime = self.maxtime if maxtime is None else maxtime
             decoding = self.decoder(decstarts, ctx=final_encoding, eids=eids, maxtime=maxtime)
             return decoding
 
     class EncDecAtt(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
+        def __init__(self, encoder, decoder, maxtime=None, **kw):
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
+            self.maxtime = maxtime
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
+            maxtime = self.maxtime if maxtime is None else maxtime
             decoding = self.decoder(decstarts,
                                     ctx=all_encoding, ctx_0=final_encoding, ctxmask=mask,
                                     eids=eids, maxtime=maxtime)
@@ -1237,12 +1249,12 @@ def run_seq2seq_oracle(lr=OPT_LR,
     tt.msg("using startid {} from outemb".format(startid))
     starts = np.ones((len(ism.matrix,)), dtype="int64") * startid
 
-    alldata = [ism.matrix, starts, eids, eids]
+    alldata = [ism.matrix, starts, eids, psm.matrix, eids]
     traindata, testdata = q.split(alldata, random=1234)
     traindata, validdata = q.split(traindata, random=1234)
 
-    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2, 4]], batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*[validdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
 
     # region make validation network with freerunner
@@ -1258,9 +1270,9 @@ def run_seq2seq_oracle(lr=OPT_LR,
     valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
     if useattention:
-        valid_encdec = EncDecAtt(encoder, valid_decoder)
+        valid_encdec = EncDecAtt(encoder, valid_decoder, maxtime=50)
     else:
-        valid_encdec = EncDec(encoder, valid_decoder)
+        valid_encdec = EncDec(encoder, valid_decoder, maxtime=50)
     # endregion
 
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
@@ -1272,6 +1284,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
     out_btf = lambda _out: _out[:, :-1, :]
     gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
+    valid_gold_btf = lambda x: x
 
     q.train(encdec) \
         .train_on(train_loader, losses) \
@@ -1279,6 +1292,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(None, out_btf, gold_btf) \
         .valid_with(valid_encdec)\
+        .set_valid_batch_transformer(None, out_btf, valid_gold_btf)\
         .valid_on(valid_loader, losses) \
         .cuda(cuda) \
         .train(epochs)
