@@ -1009,6 +1009,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
     # region make validation network with freerunner
     inparggetter = lambda x: x
     if removeannotation:
+        # TODO using symbols2cores is wrong because the decoder embedder might have its different voc
         symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
         inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
 
@@ -1244,6 +1245,24 @@ def run_seq2seq_oracle(lr=OPT_LR,
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
 
+    # region make validation network with freerunner
+    inparggetter = lambda x: x
+    if removeannotation:
+        # TODO using symbols2cores is wrong because the decoder embedder might have its different voc
+        symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
+        inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
+
+    freerunner = q.FreeRunner(inparggetter=inparggetter)
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(freerunner)
+    valid_decoder = valid_decoder_cell.to_decoder()
+    if useattention:
+        valid_encdec = EncDecAtt(encoder, valid_decoder)
+    else:
+        valid_encdec = EncDec(encoder, valid_decoder)
+    # endregion
+
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqElemAccuracy(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
@@ -1259,6 +1278,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         .optimizer(optimizer) \
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(None, out_btf, gold_btf) \
+        .valid_with(valid_encdec)\
         .valid_on(valid_loader, losses) \
         .cuda(cuda) \
         .train(epochs)
@@ -1301,8 +1321,8 @@ if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid)
-    # q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)
