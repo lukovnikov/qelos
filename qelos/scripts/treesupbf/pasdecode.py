@@ -995,6 +995,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
                          q.SeqAccuracy(ignore_index=0),
                          TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
+    validlosses = q.lossarray(TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
     # starts = np.ones((len(ism.matrix, )), dtype="int64") * startid
@@ -1009,7 +1011,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
     # region make validation network with freerunner
     inparggetter = lambda x: x
     if removeannotation:
-        # TODO using symbols2cores is wrong because the decoder embedder might have its different voc
+        # TODO using symbols2cores is wrong because the decoder embedder (made from tracker.D_in) might have different D
         symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
         inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
 
@@ -1057,11 +1059,11 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
             lambda inpseq, outseq, predseq:
                 (inpseq, outseq[:, :-1], predseq))\
         .valid_with(valid_encdec) \
-        .valid_on(valid_loader, losses)\
+        .valid_on(valid_loader, validlosses)\
         .cuda(cuda)\
         .train(epochs)
 
-    results = q.test(encdec).on(test_loader, losses)\
+    results = q.test(valid_encdec).on(test_loader, validlosses)\
         .set_batch_transformer(
             lambda inpseq, outseq, predseq:
                 (inpseq, outseq[:, :-1], predseq))\
@@ -1255,12 +1257,12 @@ def run_seq2seq_oracle(lr=OPT_LR,
 
     train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2, 4]], batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*[validdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*[testdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
 
     # region make validation network with freerunner
     inparggetter = lambda x: x
     if removeannotation:
-        # TODO using symbols2cores is wrong because the decoder embedder might have its different voc
+        # TODO using symbols2cores (from linout) is wrong because the decoder embedder might have its different voc
         symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
         inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
 
@@ -1280,6 +1282,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
                          q.SeqAccuracy(ignore_index=0),
                          TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
+    validlosses = q.lossarray(TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
     out_btf = lambda _out: _out[:, :-1, :]
@@ -1293,14 +1297,14 @@ def run_seq2seq_oracle(lr=OPT_LR,
         .set_batch_transformer(None, out_btf, gold_btf) \
         .valid_with(valid_encdec)\
         .set_valid_batch_transformer(None, out_btf, valid_gold_btf)\
-        .valid_on(valid_loader, losses) \
+        .valid_on(valid_loader, validlosses) \
         .cuda(cuda) \
         .train(epochs)
 
     q.embed()
 
-    results = q.test(encdec).on(test_loader, losses)\
-        .set_batch_transformer(None, out_btf, gold_btf)\
+    results = q.test(valid_encdec).on(test_loader, validlosses)\
+        .set_batch_transformer(None, out_btf, valid_gold_btf)\
         .cuda(cuda)\
         .run()
 
