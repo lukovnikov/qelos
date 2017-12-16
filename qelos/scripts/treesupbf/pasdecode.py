@@ -137,17 +137,15 @@ class TreeAccuracy(q.DiscreteLoss):
         return acc
 
 
-def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
+def make_computed_linout(outD, inpD, linoutdim, linoutjoinmode, ttt=None):
     ttt = q.ticktock("linout test") if ttt is None else ttt
     # computed wordlinout for output symbols with topology annotations
     # dictionaries
-    symbols_core_dic = OrderedDict()
     symbols_is_last = np.zeros((len(outD),), dtype="int64")
     symbols_is_leaf = np.zeros((len(outD),), dtype="int64")
     for k, v in sorted(outD.items(), key=lambda (x, y): y):
         ksplits = k.split("*")
-        if not ksplits[0] in symbols_core_dic:
-            symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
+        assert(ksplits[0] in inpD)
         symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
         symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
 
@@ -164,7 +162,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
 
     symbols2cores = np.zeros((len(outD),), dtype="int64")
     for symbol in outD:
-        symbols2cores[outD[symbol]] = symbols_core_dic[symbol.split("*")[0]]
+        symbols2cores[outD[symbol]] = inpD[symbol.split("*")[0]]
 
     if _opt_test:
         ttt.tick("testing dictionaries")
@@ -172,7 +170,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
         testidxs = np.asarray([outD[xe] for xe in testtokens])
         testcoreidxs = symbols2cores[testidxs]
         expcoretokens = "<MASK> <START> <ROOT> <NONE> <RARE> <RARE> <RARE> N0 N0 N0 N0 N85 N85 N85 N85".split()
-        rcoredic = {v: k for k, v in symbols_core_dic.items()}
+        rcoredic = {v: k for k, v in inpD.items()}
         testcoretokens = [rcoredic[xe] for xe in testcoreidxs]
         assert (testcoretokens == expcoretokens)
         exp_is_last = [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1]
@@ -188,7 +186,7 @@ def make_computed_linout(outD, linoutdim, linoutjoinmode, ttt=None):
 
     if linoutjoinmode == "cat":
         linoutdim_core = linoutdim // 10 * 9
-    symbols_core_emb = q.WordEmb(linoutdim_core, worddic=symbols_core_dic, no_maskzero=True)
+    symbols_core_emb = q.WordEmb(linoutdim_core, worddic=inpD, no_maskzero=True)
 
     class JointLinoutComputer(torch.nn.Module):
         def __init__(self, coreemb, linoutdim, mode="sum", **kw):
@@ -468,6 +466,7 @@ def run(lr=OPT_LR,
     # endregion
 
 
+# DELETE
 def run_seq2seq_teacher_forced(lr=OPT_LR,
                                batsize=OPT_BATSIZE,
                                epochs=OPT_EPOCHS,
@@ -622,14 +621,12 @@ def run_seq2seq_teacher_forced(lr=OPT_LR,
         .run()
 
 
-def make_embedder(dim=None, worddic=None):  # makes structured embedder
-    symbols_core_dic = OrderedDict()
+def make_embedder(dim=None, worddic=None, inpD=None):  # makes structured embedder
     symbols_is_last = np.zeros((len(worddic),), dtype="int64")
     symbols_is_leaf = np.zeros((len(worddic),), dtype="int64")
     for k, v in sorted(worddic.items(), key=lambda (x, y): y):
         ksplits = k.split("*")
-        if not ksplits[0] in symbols_core_dic:
-            symbols_core_dic[ksplits[0]] = len(symbols_core_dic)
+        assert(ksplits[0] in inpD)
         symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
         symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
 
@@ -638,13 +635,13 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
 
     symbols2cores = np.zeros((len(worddic),), dtype="int64")
     for symbol in worddic:
-        symbols2cores[worddic[symbol]] = symbols_core_dic[symbol.split("*")[0]]
+        symbols2cores[worddic[symbol]] = inpD[symbol.split("*")[0]]
 
     class StructEmbComputer(torch.nn.Module):
         def __init__(self, dim, **kw):
             super(StructEmbComputer, self).__init__(**kw)
             self.dim = dim
-            self.coreemb = q.WordEmb(self.dim, worddic=symbols_core_dic)
+            self.coreemb = q.WordEmb(self.dim, worddic=inpD)
             self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
             self.annemb.embedding.weight.data.fill_(0)
 
@@ -660,6 +657,7 @@ def make_embedder(dim=None, worddic=None):  # makes structured embedder
     return wordemb
 
 
+# DELETE
 def run_seq2seq_teacher_forced_structured_output_tokens(
         lr=OPT_LR,
         batsize=OPT_BATSIZE,
@@ -843,7 +841,7 @@ def run_seq2seq_teacher_forced_structured_output_tokens(
 
 
 # TODO: validate with freerunner
-def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
+def run_seq2seq_teacher_forced_structured_output_tokens_and_freerun_valid(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
                epochs=OPT_EPOCHS,
@@ -906,13 +904,13 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
     # linout = q.WordLinout(linoutdim, worddic=psm.D)
     assert(psm.D == trackerDbackup)
     linout, symbols2cores, symbols2ctrl \
-        = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
+        = make_computed_linout(tracker.D, tracker.D_in, linoutdim, linoutjoinmode, ttt=ttt)
 
     # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
     if removeannotation:
-        outemb = q.WordEmb(outembdim, worddic=osm.D)
+        outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     else:
-        outemb = make_embedder(dim=outembdim, worddic=osm.D)
+        outemb = make_embedder(dim=outembdim, worddic=tracker.D, inpD=tracker.D_in)
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
@@ -1011,7 +1009,6 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_oracle_valid(
     # region make validation network with freerunner
     inparggetter = lambda x: x
     if removeannotation:
-        # TODO using symbols2cores is wrong because the decoder embedder (made from tracker.D_in) might have different D
         symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
         inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
 
@@ -1120,7 +1117,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
         linoutdim = decdim
 
     linout, symbols2cores, symbols2ctrl \
-        = make_computed_linout(tracker.D, linoutdim, linoutjoinmode, ttt=ttt)
+        = make_computed_linout(tracker.D, tracker.D_in, linoutdim, linoutjoinmode, ttt=ttt)
 
     # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
     # outemb = make_embedder(dim=outembdim, worddic=tracker.D_in)
@@ -1134,7 +1131,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     if removeannotation:
         oracle.inparggetter = lambda x: original_inparggetter(x)[0]
     else:
-        outemb = make_embedder(dim=outembdim, worddic=tracker.D)
+        outemb = make_embedder(dim=outembdim, worddic=tracker.D, inpD=tracker.D_in)
         oracle.inparggetter = lambda x: x
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
@@ -1262,7 +1259,6 @@ def run_seq2seq_oracle(lr=OPT_LR,
     # region make validation network with freerunner
     inparggetter = lambda x: x
     if removeannotation:
-        # TODO using symbols2cores (from linout) is wrong because the decoder embedder might have its different voc
         symbols2cores_pt = q.var(symbols2cores).cuda(cuda).v
         inparggetter = lambda x: torch.index_select(symbols2cores_pt, 0, x)
 
