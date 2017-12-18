@@ -27,7 +27,7 @@ OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
-OPT_USEATTENTION = True
+OPT_USEATTENTION = False
 OPT_INPLINMODE = "bf"       # "df" or "bf" or "dfpar"
 OPT_REMOVE_ANNOTATION = False
 # endregion
