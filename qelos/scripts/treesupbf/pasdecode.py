@@ -27,7 +27,7 @@ OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
-OPT_USEATTENTION = False
+OPT_USEATTENTION = True
 OPT_INPLINMODE = "bf"       # "df" or "bf" or "dfpar"
 OPT_REMOVE_ANNOTATION = False
 # endregion
@@ -785,13 +785,13 @@ def run_seq2tree_teacher_forced(
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     ctxdim = encdim * 2
-    linoutdim = decdim + (ctxdim if useattention else 0)
+    linoutdim = decdim*2 + (ctxdim if useattention else 0)
     linout, symbols2cores, symbols2ctrl = make_computed_linout(tracker.D, tracker.D_in, linoutdim, linoutjoinmode, ttt=ttt)
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
-    layers = (q.GRUCell(outembdim + ctxdim, decdim//2),
-              q.GRUCell(outembdim + ctxdim, decdim//2))
+    layers = (q.GRUCell(outembdim + ctxdim, decdim),
+              q.GRUCell(outembdim + ctxdim, decdim))
 
     if useattention:
         tt.msg("attention: YES !!!")
