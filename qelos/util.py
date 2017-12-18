@@ -236,8 +236,13 @@ class StringMatrix():
         self._max_allowable_length = maxlen
         self._rarefreq = freqcutoff
         self._topnwords = topnwords
-        self._indic_s = indicate_start_end or indicate_start
-        self._indic_e = indicate_start_end or indicate_end
+        self._indic_e, self._indic_s = False, False
+        if indicate_start_end:
+            self._indic_s, self._indic_e = True, True
+        if indicate_start:
+            self._indic_s = indicate_start
+        if indicate_end:
+            self._indic_e = indicate_end
         self._rarewords = set()
         self.tokenize = tokenize
         self._cache_p = None
@@ -316,10 +321,12 @@ class StringMatrix():
     def add(self, x):
         tokens = self.tokenize(x)
         tokens = tokens[:self._max_allowable_length]
-        if self._indic_s:
-            tokens = ["<START>"] + tokens
-        if self._indic_e:
-            tokens = tokens + ["<END>"]
+        if self._indic_s is not False and self._indic_s is not None:
+            indic_s_sym = "<START>" if not isstring(self._indic_s) else self._indic_s
+            tokens = [indic_s_sym] + tokens
+        if self._indic_e is not False and self._indic_e is not None:
+            indic_e_sym = "<END>" if not isstring(self._indic_e) else self._indic_e
+            tokens = tokens + [indic_e_sym]
         self._maxlen = max(self._maxlen, len(tokens))
         tokenidxs = []
         for token in tokens:

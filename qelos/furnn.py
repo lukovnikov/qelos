@@ -701,7 +701,7 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
             ctrl = ctrl_tm1.data[i]
             state_stack = self.state_stacks[i]
             symbol_stack = self.symbol_stacks[i]
-            if ctrl == 0:       # masked
+            if ctrl == 0 or len(state_stack) == 0:       # masked
                 continue
             else:
                 pass
@@ -725,6 +725,8 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
                         del symbol_stack[-2]
                 # pop or push last stack
                 if len(state_stack) < 2 or len(state_stack[-2]) == 0:
+                    if len(state_stack) == 0:
+                        print("empty stack")
                     if len(state_stack[-1]) == 0:   # no next depth level needed -> terminate
                         del state_stack[-1]
                         del symbol_stack[-1]

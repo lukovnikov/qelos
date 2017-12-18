@@ -759,9 +759,9 @@ def run_seq2tree_teacher_forced(
     ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
     tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
 
-    osm = q.StringMatrix(indicate_start=True)
+    osm = q.StringMatrix(indicate_start="<ROOT>")
     osm.tokenize = lambda x: x.split()
-    osm.set_dictionary(tracker.D_in)
+    osm.set_dictionary(tracker.D)
 
     psm = q.StringMatrix()
     psm.tokenize = lambda x: x.split()
@@ -790,8 +790,8 @@ def run_seq2tree_teacher_forced(
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
-    layers = (q.GRUCell(outembdim + ctxdim, decdim),
-              q.GRUCell(outembdim + ctxdim, decdim))
+    layers = (q.GRUCell(outembdim + ctxdim, decdim//2),
+              q.GRUCell(outembdim + ctxdim, decdim//2))
 
     if useattention:
         tt.msg("attention: YES !!!")
@@ -847,7 +847,7 @@ def run_seq2tree_teacher_forced(
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
-    optimizer = torch.optim.Adadelta(q.params_of(encdec, lr=lr))
+    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
     traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
     traindata, validdata = q.split(traindata, random=1234)
@@ -860,12 +860,14 @@ def run_seq2tree_teacher_forced(
     symbols2ctrl = q.var(symbols2ctrl).cuda(cuda).v
 
     def symbol2corenctrl(s):
-        _cores = torch.index_select(symbols2cores, 0, s[:, -1])
-        _ctrl = torch.index_select(symbols2ctrl, 0, s[:, :-1])
+        _cores = torch.index_select(symbols2cores, 0, s)
+        _ctrl = torch.index_select(symbols2ctrl, 0, s)
         return _cores, _ctrl
 
     def inbtf(a, b, g):
-        _cores, _ctrl = symbol2corenctrl(b)
+        bflat = b.view(-1)
+        _cores, _ctrl = symbol2corenctrl(bflat)
+        _cores, _ctrl = _cores.view(b.size()), _ctrl.view(b.size())
         return a, _cores, _ctrl, g
 
     # validation with freerunner
@@ -1160,7 +1162,8 @@ if __name__ == "__main__":
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
     # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2tree_teacher_forced)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)

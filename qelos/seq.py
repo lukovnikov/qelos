@@ -885,11 +885,13 @@ class FreeRunner(DecoderRunner):
         outkwargs = {"t": t}
         if y_t is None:     # first time step
             assert(t == 0)
-            if len(x) == 1:
-                x = x[0]
-                if x.dim() == 2:
-                    x = x[:, 0]
-            x_t = x
+            x = [xe[:, 0] if xe.dim() == 2 else xe for xe in x]
+            # if len(x) == 1:
+            #     x = x[0]
+            #     if x.dim() == 2:
+            #         x = x[:, 0]
+            x_t = tuple(x)
+            r = (x_t, {})
         else:
             if "outmask" in xkw:
                 raise NotImplemented("outmask not supported in free running mode yet")
@@ -899,8 +901,9 @@ class FreeRunner(DecoderRunner):
             _y_t = self.scores2probs(y_t)
             _, x_t = torch.max(_y_t, 1)
 
+            r = self.outsym2insym(x_t)
         # return
-        r = self.outsym2insym(x_t)
+
         if isinstance(r, tuple) and len(r) == 2 and isinstance(r[1], dict):
             inpargs, kwupd = r
             outkwargs.update(kwupd)
