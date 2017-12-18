@@ -993,7 +993,8 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_freerun_valid(
                          q.SeqAccuracy(ignore_index=0),
                          TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
-    validlosses = q.lossarray(TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+    validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
@@ -1278,7 +1279,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
                          q.SeqAccuracy(ignore_index=0),
                          TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
-    validlosses = q.lossarray(TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+    validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
 
