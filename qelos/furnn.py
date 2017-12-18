@@ -811,7 +811,7 @@ class DynamicOracleRunner(q.DecoderRunner):
     def __init__(self, tracker=None,
                  inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),
-                 mode="sample",  # "sample" or "argmax"
+                 mode="sample",  # "sample" or "argmax" or "uniform"
                  explore=0.,
                  **kw):
         super(DynamicOracleRunner, self).__init__(**kw)
@@ -880,6 +880,9 @@ class DynamicOracleRunner(q.DecoderRunner):
                 if mode == "sample":
                     x_t = torch.distributions.Categorical(unmaskedprobs).sample()
                     # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
+                elif mode == "uniform":
+                    expl_probs = ymask_expl if ymask_expl is not None else q.var(torch.ones(y_t.size())).cuda(y_t).v
+                    x_t = torch.distributions.Categorical(expl_probs).sample()
                 elif mode == "argmax":
                     _, x_t = torch.max(unmaskedprobs, 1)
                 else:
@@ -893,6 +896,8 @@ class DynamicOracleRunner(q.DecoderRunner):
             if mode == "sample":
                 gold_t = torch.distributions.Categorical(goldprobs).sample()
                 # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
+            elif mode == "uniform":
+                gold_t = torch.distributions.Categorical(ymask).sample()
             elif mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
