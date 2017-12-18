@@ -696,7 +696,6 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
             # set previous frat symbols to init frat symbols
             frat_symbols = [self.y_f_0 for _ in frat_symbols]
 
-
         # region update stacks
         for i in range(ctrl_tm1.size(0)):
             ctrl = ctrl_tm1.data[i]

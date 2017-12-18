@@ -9,6 +9,7 @@ import qelos as q
 from qelos.scripts.treesupbf.trees import GroupTracker, generate_random_trees, Node
 import numpy as np
 from collections import OrderedDict
+from qelos.furnn import ParentStackCell
 import re
 
 # region defaults
@@ -252,6 +253,42 @@ def make_computed_linout(outD, inpD, linoutdim, linoutjoinmode, ttt=None):
     return linout, symbols2cores, symbols2ctrl
 
 
+def make_embedder(dim=None, worddic=None, inpD=None):  # makes structured embedder
+    symbols_is_last = np.zeros((len(worddic),), dtype="int64")
+    symbols_is_leaf = np.zeros((len(worddic),), dtype="int64")
+    for k, v in sorted(worddic.items(), key=lambda (x, y): y):
+        ksplits = k.split("*")
+        assert(ksplits[0] in inpD)
+        symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
+        symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
+
+    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf + 1
+    symbols2ctrl[worddic["<MASK>"]] = 0
+
+    symbols2cores = np.zeros((len(worddic),), dtype="int64")
+    for symbol in worddic:
+        symbols2cores[worddic[symbol]] = inpD[symbol.split("*")[0]]
+
+    class StructEmbComputer(torch.nn.Module):
+        def __init__(self, dim, **kw):
+            super(StructEmbComputer, self).__init__(**kw)
+            self.dim = dim
+            self.coreemb = q.WordEmb(self.dim, worddic=inpD)
+            self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
+            self.annemb.embedding.weight.data.fill_(0)
+
+        def forward(self, data):
+            coreembs, mask = self.coreemb(data[:, 0])
+            annembs, _ = self.annemb(data[:, 1])
+            embs = coreembs + annembs
+            return embs
+
+    computer = StructEmbComputer(dim=dim)
+    computer_data = np.stack([symbols2cores, symbols2ctrl], axis=1)
+    wordemb = q.ComputedWordEmb(data=computer_data, computer=computer, worddic=worddic)
+    return wordemb
+
+
 def make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda=False, mode=OPT_ORACLE_MODE,
                 ttt=None, linout=None, outemb=None, trees=None, linoutdim=None):
     if ttt is None:
@@ -466,382 +503,7 @@ def run(lr=OPT_LR,
     # endregion
 
 
-# DELETE
-def run_seq2seq_teacher_forced(lr=OPT_LR,
-                               batsize=OPT_BATSIZE,
-                               epochs=OPT_EPOCHS,
-                               numex=OPT_NUMEX,
-                               gradnorm=OPT_GRADNORM,
-                               useattention=OPT_USEATTENTION,
-                               inpembdim=OPT_INPEMBDIM,
-                               outembdim=OPT_OUTEMBDIM,
-                               encdim=OPT_ENCDIM,
-                               decdim=OPT_DECDIM,
-                               dropout=OPT_DROPOUT,
-                               cuda=False,
-                               gpu=1):
-    if cuda:
-        torch.cuda.set_device(gpu)
-    decdim = decdim * 2     # more equivalent to twostackcell ?
-    tt = q.ticktock("script")
-    ttt = q.ticktock("test")
-    ism, tracker, eids, trees = load_synth_trees(n=numex)
-    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
-    osm = q.StringMatrix(indicate_start=True)
-    osm.tokenize = lambda x: x.split()
-    for tree in trees:
-        treestring = tree.pp(with_parentheses=False, arbitrary=True)
-        osm.add(treestring)
-    osm.finalize()
-    if _opt_test:
-        allsame = True
-        for i in range(len(osm.matrix)):
-            itree = Tree.parse(ism[i])
-            otree = Tree.parse(osm[i, 1:])
-            assert(itree == otree)
-            allsame &= ism[i] == osm[i]
-        assert(not allsame)
-        ttt.msg("trees at output are differently structured from trees at input but are the same trees")
-
-    ctxdim = encdim * 2
-    if useattention:
-        linoutdim = ctxdim + decdim
-    else:
-        linoutdim = decdim
-
-    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-    outemb = q.WordEmb(outembdim, worddic=osm.D)
-    linout = q.WordLinout(linoutdim, worddic=osm.D)
-
-    encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
-
-    # region make decoder and put in enc/dec
-    layers = (q.GRUCell(outembdim + ctxdim, decdim),
-              q.GRUCell(decdim, decdim),)
-
-    if useattention:
-        tt.msg("USING ATTENTION!!!")
-        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                                   linout, ctx2out=True)
-    else:
-        tt.msg("NOT using attention !!!")
-        decoder_top = q.StaticContextDecoderTop(linout)
-
-    decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(q.TeacherForcer())
-    decoder = decoder_cell.to_decoder()
-
-    # wrap in encdec
-    class EncDec(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(EncDec, self).__init__(**kw)
-            self.encoder = encoder
-            self.decoder = decoder
-
-        def forward(self, inpseq, outinpseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            # self.decoder.block.decoder_top.set_ctx(final_encoding)
-            decoding = self.decoder(outinpseq, ctx=final_encoding)
-            return decoding
-
-    class EncDecAtt(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(EncDecAtt, self).__init__(**kw)
-            self.encoder, self.decoder = encoder, decoder
-
-        def forward(self, inpseq, outinpseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            decoding = self.decoder(outinpseq,
-                                    ctx=all_encoding,
-                                    ctx_0=final_encoding,
-                                    ctxmask=mask)
-            return decoding
-
-    if useattention:
-        encdec = EncDecAtt(encoder, decoder)
-    else:
-        encdec = EncDec(encoder, decoder)
-
-    if _opt_test:
-        ttt.tick("testing whole thing dry run")
-        test_inpseqs = q.var(ism.matrix[:3]).v
-        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
-
-        test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
-
-        ttt.tock("tested whole dryrun")
-        # TODO loss and gradients
-        golds = q.var(osm.matrix[:3, 1:]).v
-        loss = q.SeqCrossEntropyLoss(ignore_index=0)
-        lossvalue = loss(test_encdec_output, golds)
-        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
-        encdec.zero_grad()
-        lossvalue.backward()
-        ttt.msg("backward done")
-        params = q.params_of(encdec)
-        for param in params:
-            assert (param.grad is not None)
-            assert (param.grad.norm().data[0] > 0)
-            print(tuple(param.size()), param.grad.norm().data[0])
-        ttt.tock("all gradients non-zero")
-
-    # print(encdec)
-
-    # training
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                         q.SeqElemAccuracy(ignore_index=0),
-                         q.SeqAccuracy(ignore_index=0),)
-
-    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
-
-    traindata, testdata = q.split([ism.matrix, osm.matrix], random=1234)
-    traindata, validdata = q.split(traindata, random=1234)
-
-    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
-
-    q.train(encdec)\
-        .train_on(train_loader, losses)\
-        .optimizer(optimizer)\
-        .clip_grad_norm(gradnorm)\
-        .set_batch_transformer(
-            lambda inpseq, outseq:
-                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
-        .valid_on(valid_loader, losses)\
-        .cuda(cuda)\
-        .train(epochs)
-
-    results = q.test(encdec).on(test_loader, losses)\
-        .set_batch_transformer(
-            lambda inpseq, outseq:
-                (inpseq, outseq[:, :-1], outseq[:, 1:]))\
-        .cuda(cuda)\
-        .run()
-
-
-def make_embedder(dim=None, worddic=None, inpD=None):  # makes structured embedder
-    symbols_is_last = np.zeros((len(worddic),), dtype="int64")
-    symbols_is_leaf = np.zeros((len(worddic),), dtype="int64")
-    for k, v in sorted(worddic.items(), key=lambda (x, y): y):
-        ksplits = k.split("*")
-        assert(ksplits[0] in inpD)
-        symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
-        symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
-
-    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf + 1
-    symbols2ctrl[worddic["<MASK>"]] = 0
-
-    symbols2cores = np.zeros((len(worddic),), dtype="int64")
-    for symbol in worddic:
-        symbols2cores[worddic[symbol]] = inpD[symbol.split("*")[0]]
-
-    class StructEmbComputer(torch.nn.Module):
-        def __init__(self, dim, **kw):
-            super(StructEmbComputer, self).__init__(**kw)
-            self.dim = dim
-            self.coreemb = q.WordEmb(self.dim, worddic=inpD)
-            self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
-            self.annemb.embedding.weight.data.fill_(0)
-
-        def forward(self, data):
-            coreembs, mask = self.coreemb(data[:, 0])
-            annembs, _ = self.annemb(data[:, 1])
-            embs = coreembs + annembs
-            return embs
-
-    computer = StructEmbComputer(dim=dim)
-    computer_data = np.stack([symbols2cores, symbols2ctrl], axis=1)
-    wordemb = q.ComputedWordEmb(data=computer_data, computer=computer, worddic=worddic)
-    return wordemb
-
-
-# DELETE
-def run_seq2seq_teacher_forced_structured_output_tokens(
-        lr=OPT_LR,
-        batsize=OPT_BATSIZE,
-        epochs=OPT_EPOCHS,
-        numex=OPT_NUMEX,
-        gradnorm=OPT_GRADNORM,
-        useattention=OPT_USEATTENTION,
-        inpembdim=OPT_INPEMBDIM,
-        outembdim=OPT_OUTEMBDIM,
-        encdim=OPT_ENCDIM,
-        decdim=OPT_DECDIM,
-        linoutjoinmode=OPT_JOINT_LINOUT_MODE,
-        dropout=OPT_DROPOUT,
-        inplinmode=OPT_INPLINMODE,
-        removeannotation=OPT_REMOVE_ANNOTATION,  # remove annotation from teacher forced decoder input
-        cuda=False,
-        gpu=1):
-
-    print("SEQ2SEQ + TF + Structured tokens backup")
-    if removeannotation:
-        print("decoder input does NOT contain structure annotation")
-    else:
-        print("decoder input DOES contain structure annotation")
-    if cuda:
-        torch.cuda.set_device(gpu)
-    decdim = decdim * 2  # more equivalent to twostackcell ?
-    tt = q.ticktock("script")
-    ttt = q.ticktock("test")
-    ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
-    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
-    # print(ism[0])
-    osm = q.StringMatrix(indicate_start=True)
-    osm.tokenize = lambda x: x.split()
-    psm = q.StringMatrix()
-    psm.set_dictionary(tracker.D)
-    psm.tokenize = lambda x: x.split()
-    trackerDbackup = {k: v for k, v in tracker.D.items()}
-    # psm.protectedwords = "<MASK> <RARE> <START> <STOP>".split()
-    for tree in trees:
-        treestring = tree.pp(arbitrary=True)
-        treestring_in = treestring  # .replace("*LS", "").replace("*NC", "")
-        if removeannotation:
-            # tt.msg("removing annotation")
-            treestring_in = treestring_in.replace("*LS", "").replace("*NC", "")
-        osm.add(treestring_in)
-        psm.add(treestring)
-    assert (psm.D == trackerDbackup)
-    osm.finalize()
-    psm.finalize()
-    print(ism[0])
-    print(osm[0])
-    print(psm[0])
-
-    ctxdim = encdim * 2
-    if useattention:
-        linoutdim = ctxdim + decdim
-    else:
-        linoutdim = decdim
-
-    # linout = q.WordLinout(linoutdim, worddic=psm.D)
-    assert (psm.D == trackerDbackup)
-    linout, symbols2cores, symbols2ctrl \
-        = make_computed_linout(psm.D, linoutdim, linoutjoinmode, ttt=ttt)
-
-    # inpemb = make_embedder(dim=inpembdim, worddic=ism.D)
-    if removeannotation:
-        outemb = q.WordEmb(outembdim, worddic=osm.D)
-    else:
-        outemb = make_embedder(dim=outembdim, worddic=osm.D)
-    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
-
-    encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
-
-    # region make decoder and put in enc/dec
-    layers = (q.GRUCell(outembdim + ctxdim, decdim),
-              q.GRUCell(decdim, decdim),)
-
-    if useattention:
-        tt.msg("USING ATTENTION !!!")
-        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                                   linout, ctx2out=True)
-    else:
-        tt.msg("NOT using attention !!!")
-        decoder_top = q.StaticContextDecoderTop(linout)
-
-    decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(q.TeacherForcer())
-    decoder = decoder_cell.to_decoder()
-
-
-    # wrap in encdec
-    class EncDec(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(EncDec, self).__init__(**kw)
-            self.encoder = encoder
-            self.decoder = decoder
-
-        def forward(self, inpseq, outinpseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            # self.decoder.block.decoder_top.set_ctx(final_encoding)
-            decoding = self.decoder(outinpseq, ctx=final_encoding)
-            return decoding
-
-
-    class EncDecAtt(torch.nn.Module):
-        def __init__(self, encoder, decoder, **kw):
-            super(EncDecAtt, self).__init__(**kw)
-            self.encoder, self.decoder = encoder, decoder
-
-        def forward(self, inpseq, outinpseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
-            decoding = self.decoder(outinpseq,
-                                    ctx=all_encoding,
-                                    ctx_0=final_encoding,
-                                    ctxmask=mask)
-            return decoding
-
-
-    if useattention:
-        encdec = EncDecAtt(encoder, decoder)
-    else:
-        encdec = EncDec(encoder, decoder)
-
-    if _opt_test:
-        ttt.tick("testing whole thing dry run")
-        test_inpseqs = q.var(ism.matrix[:3]).v
-        test_outinpseqs = q.var(osm.matrix[:3, :-1]).v
-
-        test_encdec_output = encdec(test_inpseqs, test_outinpseqs)
-        ttt.tock("tested whole dryrun")
-
-        golds = q.var(osm.matrix[:3, 1:]).v
-        loss = q.SeqCrossEntropyLoss(ignore_index=0)
-        lossvalue = loss(test_encdec_output, golds)
-        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
-        encdec.zero_grad()
-        lossvalue.backward()
-        ttt.msg("backward done")
-        params = q.params_of(encdec)
-        for param in params:
-            assert (param.grad is not None)
-            assert (param.grad.norm().data[0] > 0)
-            # print(tuple(param.size()), param.grad.norm().data[0])
-        ttt.tock("all gradients non-zero")
-
-    # print(encdec)
-
-    # training
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                         q.SeqElemAccuracy(ignore_index=0),
-                         q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
-
-    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
-
-    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
-    traindata, validdata = q.split(traindata, random=1234)
-
-    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
-
-    q.train(encdec) \
-        .train_on(train_loader, losses) \
-        .optimizer(optimizer) \
-        .clip_grad_norm(gradnorm) \
-        .set_batch_transformer(
-        lambda inpseq, outseq, predseq:
-        (inpseq, outseq[:, :-1], predseq)) \
-        .valid_on(valid_loader, losses) \
-        .cuda(cuda) \
-        .train(epochs)
-
-    results = q.test(encdec).on(test_loader, losses) \
-        .set_batch_transformer(
-        lambda inpseq, outseq, predseq:
-        (inpseq, outseq[:, :-1], predseq)) \
-        .cuda(cuda) \
-        .run()
-
-
-# TODO: validate with freerunner
-def run_seq2seq_teacher_forced_structured_output_tokens_and_freerun_valid(
+def run_seq2seq_teacher_forced(
                lr=OPT_LR,
                batsize=OPT_BATSIZE,
                epochs=OPT_EPOCHS,
@@ -1069,7 +731,117 @@ def run_seq2seq_teacher_forced_structured_output_tokens_and_freerun_valid(
         .run()
 
 
-# TODO: validate with freerunner
+def run_seq2tree_teacher_forced(
+               lr=OPT_LR,
+               batsize=OPT_BATSIZE,
+               epochs=OPT_EPOCHS,
+               numex=OPT_NUMEX,
+               gradnorm=OPT_GRADNORM,
+               useattention=OPT_USEATTENTION,
+               inpembdim=OPT_INPEMBDIM,
+               outembdim=OPT_OUTEMBDIM,
+               encdim=OPT_ENCDIM,
+               decdim=OPT_DECDIM,
+               linoutjoinmode=OPT_JOINT_LINOUT_MODE,
+               dropout=OPT_DROPOUT,
+               inplinmode=OPT_INPLINMODE,
+               cuda=False,
+               gpu=1):
+    print("SEQ2TREE + TF")
+    if cuda:
+        torch.cuda.set_device(gpu)
+
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+
+    # region loading data
+    tt.tick("loading data")
+    ism, tracker, eids, trees = load_synth_trees(n=numex, inplin=inplinmode)
+    tt.msg("generated {} synthetic trees".format(ism.matrix.shape[0]))
+
+    osm = q.StringMatrix(indicate_start=True)
+    osm.tokenize = lambda x: x.split()
+    osm.set_dictionary(tracker.D_in)
+
+    psm = q.StringMatrix()
+    psm.tokenize = lambda x: x.split()
+    psm.set_dictionary(tracker.D)
+
+    for tree in trees:
+        treestring = tree.pp(arbitrary=True)
+        treestring_in = treestring.replace("*LS", "").replace("*NC", "")
+        osm.add(treestring_in)
+        psm.add(treestring)
+
+    osm.finalize()
+    psm.finalize()
+    print(ism[0])
+    print(osm[0])
+    print(psm[0])
+    tt.tock("loaded data")
+    # endregion
+
+    # region make model
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)
+    outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
+    ctxdim = encdim * 2
+    linoutdim = decdim + (ctxdim if useattention else 0)
+    linout, symbols2cores, symbols2ctrl = make_computed_linout(tracker.D, tracker.D_in, linoutdim, linoutjoinmode, ttt=ttt)
+
+    encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
+
+    layers = (q.GRUCell(outembdim + ctxdim, decdim),
+              q.GRUCell(outembdim + ctxdim, decdim))
+
+    if useattention:
+        tt.msg("attention: YES !!!")
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   linout, ctx2out=True)
+    else:
+        tt.msg("attention: NO")
+        decoder_top = q.StaticContextDecoderTop(linout)
+
+    decoder_core = ParentStackCell(outemb, layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    # wrap in encdec
+    class EncDec(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDec, self).__init__(**kw)
+            self.encoder = encoder
+            self.decoder = decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            decoding = self.decoder(outinpseq, ctx=final_encoding)
+            return decoding
+
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, encoder, decoder, **kw):
+            super(EncDecAtt, self).__init__(**kw)
+            self.encoder, self.decoder = encoder, decoder
+
+        def forward(self, inpseq, outinpseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            decoding = self.decoder(outinpseq,
+                                    ctx=all_encoding,
+                                    ctx_0=final_encoding,
+                                    ctxmask=mask)
+            return decoding
+
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
+    # endregion
+
+
+
+
+
 def run_seq2seq_oracle(lr=OPT_LR,
                        batsize=OPT_BATSIZE,
                        epochs=OPT_EPOCHS,
@@ -1337,7 +1109,7 @@ if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_teacher_forced_structured_output_tokens_and_freerun_valid)
+    q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
