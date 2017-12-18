@@ -769,8 +769,8 @@ def run_seq2tree_teacher_forced(
 
     for tree in trees:
         treestring = tree.pp(arbitrary=True)
-        treestring_in = treestring.replace("*LS", "").replace("*NC", "")
-        osm.add(treestring_in)
+        # treestring_in = treestring.replace("*LS", "").replace("*NC", "")
+        osm.add(treestring)
         psm.add(treestring)
 
     osm.finalize()
@@ -813,10 +813,10 @@ def run_seq2tree_teacher_forced(
             self.encoder = encoder
             self.decoder = decoder
 
-        def forward(self, inpseq, outinpseq):
+        def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
-            decoding = self.decoder(outinpseq, ctx=final_encoding)
+            decoding = self.decoder(outinpseq, ctrlseq, ctx=final_encoding)
             return decoding
 
     class EncDecAtt(torch.nn.Module):
@@ -824,9 +824,9 @@ def run_seq2tree_teacher_forced(
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
 
-        def forward(self, inpseq, outinpseq):
+        def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
-            decoding = self.decoder(outinpseq,
+            decoding = self.decoder(outinpseq, ctrlseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
                                     ctxmask=mask)
@@ -838,8 +838,58 @@ def run_seq2tree_teacher_forced(
         encdec = EncDec(encoder, decoder)
     # endregion
 
+    # region training
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqElemAccuracy(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
+    validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
+    optimizer = torch.optim.Adadelta(q.params_of(encdec, lr=lr))
+
+    traindata, testdata = q.split([ism.matrix, osm.matrix, psm.matrix], random=1234)
+    traindata, validdata = q.split(traindata, random=1234)
+
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=True)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=True)
+
+    symbols2cores = q.var(symbols2cores).cuda(cuda).v
+    symbols2ctrl = q.var(symbols2ctrl).cuda(cuda).v
+
+    def symbol2corenctrl(s):
+        _cores = torch.index_select(symbols2cores, 0, s[:, -1])
+        _ctrl = torch.index_select(symbols2ctrl, 0, s[:, :-1])
+        return _cores, _ctrl
+
+    def inbtf(a, b, g):
+        _cores, _ctrl = symbol2corenctrl(b)
+        return a, _cores, _ctrl, g
+
+    # validation with freerunner
+    inparggetter = symbol2corenctrl
+
+    freerunner = q.FreeRunner(inparggetter=inparggetter)
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(freerunner)
+    valid_decoder = valid_decoder_cell.to_decoder()
+    if useattention:
+        valid_encdec = EncDecAtt(encoder, valid_decoder)
+    else:
+        valid_encdec = EncDec(encoder, valid_decoder)
+    # endregion
+
+    q.train(encdec)\
+        .train_on(train_loader, losses).optimizer(optimizer).clip_grad_norm(gradnorm)\
+        .set_batch_transformer(inbtf)\
+        .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
+        .cuda(cuda).train(epochs)
+
+    results = q.test(valid_encdec).on(test_loader, validlosses)\
+        .set_batch_transformer(inbtf).cuda(cuda).run()
 
 
 def run_seq2seq_oracle(lr=OPT_LR,
@@ -1109,8 +1159,8 @@ if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    q.argprun(run_seq2seq_teacher_forced)
-    # q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_teacher_forced)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)
