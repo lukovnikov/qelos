@@ -22,7 +22,7 @@ OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
 OPT_JOINT_LINOUT_MODE = "sum"
-OPT_ORACLE_MODE = "sample"
+OPT_ORACLE_MODE = "esample"
 OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
@@ -1170,8 +1170,8 @@ if __name__ == "__main__":
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
     # q.argprun(run_seq2seq_teacher_forced)
-    # q.argprun(run_seq2seq_oracle)
-    q.argprun(run_seq2tree_teacher_forced)
+    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2tree_teacher_forced)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)

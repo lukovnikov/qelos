@@ -812,13 +812,15 @@ class DynamicOracleRunner(q.DecoderRunner):
     def __init__(self, tracker=None,
                  inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),
-                 mode="sample",  # "sample" or "argmax" or "uniform"
+                 mode="sample",  # "sample" or "argmax" or "uniform" or "esample"
+                 eps=0.05,
                  explore=0.,
                  **kw):
         super(DynamicOracleRunner, self).__init__(**kw)
         self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs
         self.mode = mode
+        self.eps = eps
         self.explore = explore
         #
         self.tracker = tracker
@@ -899,6 +901,11 @@ class DynamicOracleRunner(q.DecoderRunner):
                 # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
             elif mode == "uniform":
                 gold_t = torch.distributions.Categorical(ymask).sample()
+            elif mode == "esample":
+                gold_t = torch.distributions.Categorical(goldprobs).sample()
+                alt_gold_t = torch.distributions.Categorical(ymask).sample()
+                _epsprobs = (q.var(torch.rand(gold_t.size())).cuda(gold_t).v < self.eps).long()
+                gold_t = torch.gather(torch.stack([gold_t, alt_gold_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
             elif mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
