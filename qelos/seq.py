@@ -930,6 +930,9 @@ class DecoderCore(RecStateful):
         o_t = self.block(i_t)
         return o_t, {"mask": outmask_t, "t":t, "x_t_emb": emb, "ctx_t": ctx_t}
 
+    def set_init_states(self, *states):
+        self.block.set_init_states(*states)
+
     def reset_state(self):
         self.block.reset_state()
 
@@ -1028,6 +1031,8 @@ class AttentionContextDecoderTop(ContextDecoderTop):
         self.set_ctx(ctx, ctx_0, ctxmask)
 
     def get_top2core_0(self):
+        if not self.ctx2out:
+            return None
         ctx_0 = self.stored_ctx[0][1]
         if self.split:
             ctx_0 = ctx_0[:, ctx_0.size(1) // 2:]
@@ -1068,8 +1073,10 @@ class AttentionContextDecoderTop(ContextDecoderTop):
             ret += (y_t,)
         if self.return_att:
             ret += (att_weights_t,)
-
-        return ret, ctx_t
+        if self.ctx2out is False:
+            return ret, None
+        else:
+            return ret, ctx_t
 
 
 

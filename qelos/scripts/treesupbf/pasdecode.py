@@ -1,8 +1,3 @@
-# TODO: port script from DF pasdecode.py
-# can be copied with small changes and some cleaning
-#
-#
-
 import torch
 import sys
 import qelos as q
