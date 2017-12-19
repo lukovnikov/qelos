@@ -793,9 +793,9 @@ def run_seq2tree_teacher_forced(
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
     if decodermode == "double":
-        layers = (q.RecStack(q.GRUCell(outembdim + ctxdim, decdim),
+        layers = (q.RecStack(q.GRUCell(outembdim, decdim),
                              q.GRUCell(decdim, decdim)),
-                  q.RecStack(q.GRUCell(outembdim + ctxdim, decdim),
+                  q.RecStack(q.GRUCell(outembdim, decdim),
                              q.GRUCell(decdim, decdim)))
     elif decodermode == "single":
         layers = q.RecStack(q.GRUCell(outembdim * 2 + ctxdim, decdim * 2),
@@ -807,7 +807,8 @@ def run_seq2tree_teacher_forced(
                                                    linout, ctx2out=True)
     else:
         tt.msg("attention: NO")
-        decoder_top = q.StaticContextDecoderTop(linout)
+        # decoder_top = q.StaticContextDecoderTop(linout)
+        decoder_top = q.DecoderTop(q.wire((0, 0)), linout)
 
     decoder_core = ParentStackCell(outemb, layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -824,7 +825,15 @@ def run_seq2tree_teacher_forced(
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
-            decoding = self.decoder(outinpseq, ctrlseq, ctx=final_encoding)
+            if decodermode == "double":
+                self.decoder.set_init_states(None,
+                                             final_encoding[:, :final_encoding.size(1)//2],
+                                             None,
+                                             final_encoding[:, final_encoding.size(1)//2:])
+            elif decodermode == "single":
+                self.decoder.set_init_states(None, final_encoding)
+            self.decoder.set_init_states(None)
+            decoding = self.decoder(outinpseq, ctrlseq)
             return decoding
 
     class EncDecAtt(torch.nn.Module):
@@ -1170,8 +1179,8 @@ if __name__ == "__main__":
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
     # q.argprun(run_seq2seq_teacher_forced)
-    q.argprun(run_seq2seq_oracle)
-    # q.argprun(run_seq2tree_teacher_forced)
+    # q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2tree_teacher_forced)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)
