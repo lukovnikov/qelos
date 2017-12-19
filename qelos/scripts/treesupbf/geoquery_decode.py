@@ -112,8 +112,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
-                             valid_on_test=False):
-    if valid_on_test:
+                             validontest=False):
+    if validontest:
         print("VALIDATING ON TEST: WONG !!!")
     print("SEQSEQ REPRODUCTION")
     if cuda:    torch.cuda.set_device(gpu)
@@ -156,7 +156,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     encdec = EncDecAtt(encoder, decoder)
 
-    if valid_on_test:
+    if validontest:
+        traindata = trainmats
         validdata = testmats
     else:
         traindata, validdata = q.split(trainmats, random=True)
