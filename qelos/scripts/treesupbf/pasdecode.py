@@ -798,7 +798,7 @@ def run_seq2tree_teacher_forced(
                   q.RecStack(q.GRUCell(outembdim + ctxdim, decdim),
                              q.GRUCell(decdim, decdim)))
     elif decodermode == "single":
-        layers = q.RecStack(q.GRUCell(outembdim + ctxdim, decdim * 2),
+        layers = q.RecStack(q.GRUCell(outembdim * 2 + ctxdim, decdim * 2),
                             q.GRUCell(decdim * 2, decdim * 2))
 
     if useattention:
