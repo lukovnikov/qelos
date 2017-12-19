@@ -127,7 +127,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)
 
-    layers = (torch.nn.Dropout(dropout),
+    layers = (torch.nn.Dropout(0),
               q.GRUCell(outembdim, innerdim),
               q.GRUCell(innerdim, innerdim))
 
