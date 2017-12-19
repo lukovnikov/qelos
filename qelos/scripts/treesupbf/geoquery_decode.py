@@ -111,7 +111,10 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
 def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                             cuda=False, gpu=0):
+                             cuda=False, gpu=0,
+                             valid_on_test=False):
+    if valid_on_test:
+        print("VALIDATING ON TEST: WONG !!!")
     print("SEQSEQ REPRODUCTION")
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
@@ -153,7 +156,10 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     encdec = EncDecAtt(encoder, decoder)
 
-    traindata, validdata = q.split(trainmats, random=True)
+    if valid_on_test:
+        validdata = testmats
+    else:
+        traindata, validdata = q.split(trainmats, random=True)
     train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
