@@ -30,6 +30,7 @@ OPT_DECDIM = 100
 OPT_USEATTENTION = False
 OPT_INPLINMODE = "bf"       # "df" or "bf" or "dfpar"
 OPT_REMOVE_ANNOTATION = False
+OPT_TREEDECODER_MODE = "double"     # double or single
 # endregion
 
 _opt_test = True
@@ -745,6 +746,7 @@ def run_seq2tree_teacher_forced(
                linoutjoinmode=OPT_JOINT_LINOUT_MODE,
                dropout=OPT_DROPOUT,
                inplinmode=OPT_INPLINMODE,
+               decodermode=OPT_TREEDECODER_MODE,
                cuda=False,
                gpu=1):
     print("SEQ2TREE + TF")
@@ -790,8 +792,14 @@ def run_seq2tree_teacher_forced(
 
     encoder = make_encoder(inpemb, inpembdim, encdim, dropout, ttt=ttt)
 
-    layers = (q.GRUCell(outembdim + ctxdim, decdim),
-              q.GRUCell(outembdim + ctxdim, decdim))
+    if decodermode == "double":
+        layers = (q.RecStack(q.GRUCell(outembdim + ctxdim, decdim),
+                             q.GRUCell(decdim, decdim)),
+                  q.RecStack(q.GRUCell(outembdim + ctxdim, decdim),
+                             q.GRUCell(decdim, decdim)))
+    elif decodermode == "single":
+        layers = q.RecStack(q.GRUCell(outembdim + ctxdim, decdim * 2),
+                            q.GRUCell(decdim * 2, decdim * 2))
 
     if useattention:
         tt.msg("attention: YES !!!")
