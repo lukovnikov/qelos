@@ -180,7 +180,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .cuda(cuda).run()
 
-    print(encdec)
+    # print(encdec)
 
 
 if __name__ == "__main__":
