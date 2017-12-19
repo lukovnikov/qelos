@@ -210,15 +210,16 @@ class RNUBase(RecStateful):
         :return:
         """
         assert(len(states) <= self.numstates)
-        self._init_states = []
+        _init_states = []
         i = 0
         for statespec in self.state_spec:
             if i < len(states):
                 assert(states[i] is None or statespec == states[i].size(-1))
-                self._init_states.append(states[i])
+                _init_states.append(states[i])
             else:
-                self._init_states.append(None)
+                _init_states.append(None)
             i += 1
+        self._init_states = _init_states
 
     def forward(self, x_t, t=None, mask_t=None, **kw):
         batsize = x_t.size(0)
