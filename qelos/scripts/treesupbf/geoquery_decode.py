@@ -245,7 +245,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         return tree
 
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                              q.SeqElemAccuracy(ignore_index=0)
+                              q.SeqElemAccuracy(ignore_index=0),
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
