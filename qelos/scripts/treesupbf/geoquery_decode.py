@@ -273,22 +273,22 @@ def run_noisy_parse():
     tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) )")
     print(tree.pp())
     print(treen.pp())
-    sys.exit()
+    # sys.exit()
 
-if __name__ == "__main__":
-    q.argprun(run_seq2seq_reproduction)
-    #
-    q.embed()
 
-    # run_noisy_parse()
+def run_some_tests():
     #
     # q.embed()
 
-    tree = parse_query_tree("lambda $0 e ( and ( state:t $0 ) ( next_to:t $0 s0 ) )")
-    secondtree = parse_query_tree("lambda $0 e ( and ( next_to:t $0 s0 ) ( state:t $0 ) )")
+    run_noisy_parse()
+    #
+    # q.embed()
+
+    tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( next_to:t $0 s0 ) ) )")
+    secondtree = parse_query_tree("( lambda $0 e ( and ( next_to:t $0 s0 ) ( state:t $0 ) ) )")
     print("different orderings equal: {}".format(tree == secondtree))
     print(tree.pptree())
-    tree = "argmax $0 ( and ( river:t $0 ) ( exists $1 ( and ( state:t $1 ) ( next_to:t $1 ( argmax $2 ( state:t $2 ) ( count $3 ( and ( state:t $3 ) ( next_to:t $2 $3 ) ) ) ) ) ) ) ) ( len:i $0 )"
+    tree = "( argmax $0 ( and ( river:t $0 ) ( exists $1 ( and ( state:t $1 ) ( next_to:t $1 ( argmax $2 ( state:t $2 ) ( count $3 ( and ( state:t $3 ) ( next_to:t $2 $3 ) ) ) ) ) ) ) ) ( len:i $0 ) )"
     print(tree)
     tree = parse_query_tree(tree, redro=True)
     # print(tree.pptree())
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     import random
     tracker = tree.track()
     uniquelins = set()
-    numsam = 30000
+    numsam = 5000
     for i in range(numsam):
         tracker.reset()
         nvt = tracker._nvt
@@ -310,9 +310,14 @@ if __name__ == "__main__":
             nvt = tracker.nxt(x)
         lin = " ".join(tokens)
         recons = Node.parse(lin)
-        assert(recons == tree)
+        assert (recons == tree)
         if numsam < 11:
             print(recons.pp())
             print(recons.pptree())
         uniquelins.add(lin)
     print("{} unique lins for tree".format(len(uniquelins)))
+
+
+if __name__ == "__main__":
+    # run_some_tests()
+    q.argprun(run_seq2seq_reproduction)
