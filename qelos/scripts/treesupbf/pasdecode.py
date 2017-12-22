@@ -123,6 +123,8 @@ class TreeAccuracy(q.DiscreteLoss):
             except Exception as e:
                 best_tree = None
             gold_tree = self.treeparser(gold[i].cpu().data.numpy())
+            if isinstance(best_tree, tuple):
+                print(best_tree)
             same[i] = best_tree is not None and best_tree == gold_tree
         same = q.var(same).cuda(x).v
         acc = torch.sum(same.float())

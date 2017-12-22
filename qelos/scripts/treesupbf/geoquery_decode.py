@@ -155,10 +155,14 @@ def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( st
                 child.label = str(j + 1)
             else:
                 child.order = j + 1
-    if i == len(x):
+    if _toprec:
         return head
     else:
         return head, x[i:]
+    # if i == len(x):
+    #     return head
+    # else:
+    #     return head, x[i:]
 
 
 
