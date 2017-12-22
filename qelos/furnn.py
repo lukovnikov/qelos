@@ -88,21 +88,23 @@ class SimpleDGTN(nn.Module):
     def __init__(self, tensor, indim, **kw):
         super(SimpleDGTN, self).__init__(**kw)
         self.tensor = q.val(tensor).v
-        self.outdim = self.tensor.size(0)
-        self.numents = self.tensor.size(1)
+        self.outdim = self.tensor.size(0)       # number of relations
+        self.numents = self.tensor.size(1)      # number of entities
         self.linout = nn.Linear(indim, self.outdim, bias=False)
         self.softmax = q.Softmax()
 
-    def forward(self, ids, travvec):  # (batsize, dim)
+    def forward(self, ids, travvec):  # (batsize, dim) - start entity id
         # select by id
-        tensorslice = self.tensor.index_select(1, ids)
+        tensorslice = self.tensor.index_select(1, ids)  # select tensor slice for starting entity
         tensorslice = tensorslice.transpose(1, 0)
-        mask = tensorslice.sum(2) > 0
+        mask = tensorslice.sum(2) > 0       # mask out relation that are applicable for the entity
+        # compute weights for tensor summarization (by rel dim) from given vector
         y = self.linout(travvec)
         y, _ = self.softmax(y, mask=mask)
         # y = self.softmax(y)
-        z = tensorslice.float() * y.unsqueeze(2)
-        z, _ = z.max(1)
+        #
+        z = tensorslice.float() * y.unsqueeze(2)        # multiply each relation fibre by its weight for each example
+        z, _ = z.max(1)                                 # do a max across entity fibres instead of sum
         # z = maxfwd_sumbwd(1)(z)
         return z
         # q.embed()

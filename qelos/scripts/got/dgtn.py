@@ -306,8 +306,6 @@ class DataLoader(object):
                    traingold, validgold, testgold
 
 
-
-
 def load_simple_questions(graphtensor,
                   p="../../../datasets/got/questions.simple.tsv",
                   simple=False):
@@ -675,7 +673,7 @@ def run_trainfind(lr=0.1,
 from qelos.furnn import SimpleDGTN, maxfwd_sumbwd, SimpleDGTNSparse, SimpleDGTNDenseStart
 
 
-def test_simple_dgtn():
+def test_simple_dgtn(x=0):
     graphtensor = loadtensor()
     # dl = DataLoader(graphtensor)
     # dl.add_simple_questions(hop_only=True)
@@ -938,5 +936,6 @@ if __name__ == "__main__":
     #
     # q.embed()
     # q.argprun(run)
-    q.argprun(run_simple_training)
+    # q.argprun(run_simple_training)
+    q.argprun(test_simple_dgtn)
 

@@ -39,11 +39,33 @@ class Node(Trackable):
     none_symbol = "<NONE>"
     root_symbol = "<ROOT>"
 
-    def __init__(self, name, label=None, children=tuple(), **kw):
+    suffix_sep = "*"
+    label_sep = "/"
+    order_sep = "#"
+
+    def __init__(self, name, label=None, order=None, children=tuple(), **kw):
         super(Node, self).__init__(**kw)
         self.name = name    # name must be unique in a tree
-        self.label = label
-        self.children = tuple(children)
+        self._label = label
+        self._order = order
+        self.children = tuple(sorted(children, key=lambda x: x.order if x.order is not None else np.infty))
+        self._ordered_children = len(self.children) > 0 and self.children[0].order is not None
+
+    @property
+    def label(self):
+        return self._label
+
+    @label.setter
+    def label(self, value):
+        self._label = value
+
+    @property
+    def order(self):
+        return self._order
+
+    @order.setter
+    def order(self, value):
+        self._order = value
 
     def track(self):
         return NodeTracker(self)
@@ -61,15 +83,18 @@ class Node(Trackable):
 
         while True:
             head, tokens = tokens[0], tokens[1:]
-            xsplits = head.split("*")
+            xsplits = head.split(cls.suffix_sep)
             isleaf, islast = cls.leaf_suffix in xsplits, cls.last_suffix in xsplits
             isleaf, islast = isleaf or head == cls.none_symbol, islast or head == cls.none_symbol
             x = xsplits[0]
             headname, headlabel = x, None
-            if len(x.split("/")) == 2:
-                headname, headlabel = x.split("/")
+            if len(x.split(cls.label_sep)) == 2:
+                headname, headlabel = x.split(cls.label_sep)
+            headname, headorder = headname, None
+            if len(headname.split(cls.order_sep)) == 2:
+                headname, headorder = headname.split(cls.order_sep)
 
-            newnode = Node(headname, label=headlabel)
+            newnode = Node(headname, label=headlabel, order=headorder)
             if not isleaf:
                 level.append(newnode)
             siblings.append(newnode)
@@ -96,7 +121,7 @@ class Node(Trackable):
                 ret.delete_nones()
                 return ret
             else:
-                raise Exception("sublings is a list")
+                raise Exception("siblings is a list")
                 return siblings
 
     def delete_nodes(self, *nodes):
@@ -126,15 +151,17 @@ class Node(Trackable):
         return len(self.children)
 
     def __str__(self):  return self.pp()
-    def __repr__(self): return self.symbol(with_label=True, with_annotation=True)
+    def __repr__(self): return self.symbol(with_label=True, with_annotation=True, with_order=True)
 
-    def symbol(self, with_label=True, with_annotation=True):
+    def symbol(self, with_label=True, with_annotation=True, with_order=True):
         ret = self.name
+        if with_order:
+            ret += "{}{}".format(self.order_sep, self.order) if self.order is not None else ""
         if with_label:
-            ret += "/"+self.label if self.label is not None else ""
+            ret += self.label_sep + self.label if self.label is not None else ""
         if with_annotation:
             if self.is_leaf and not self.name in [self.none_symbol, self.root_symbol]:
-                ret += "*"+self.leaf_suffix
+                ret += self.suffix_sep + self.leaf_suffix
         return ret
 
     def pptree(self, arbitrary=False, _rec_arg=False, _top_rec=True):
@@ -149,21 +176,24 @@ class Node(Trackable):
         children = list(self.children)
         if arbitrary:
             random.shuffle(children)
+
+        # children = sorted(children, key=lambda x: x.order if x.order is not None else np.infty)
         if mode == "dfpar":     # depth-first with parentheses
             children = [child.pp(mode=mode, arbitrary=arbitrary) for child in children]
-            ret = self.symbol(with_label=True, with_annotation=False) \
+            ret = self.symbol(with_label=True, with_annotation=False, with_order=True) \
                   + ("" if len(children) == 0 else " ( {} )".format(" , ".join(children)))
         if mode == "dfann":
             _is_last = True if _rec_arg is None else _rec_arg
             children = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=_is_last_child)
                         for child, _is_last_child
                         in zip(children, [False] * (len(children)-1) + [True])]
-            ret = self.symbol(with_label=True, with_annotation=False) \
-                  + ("*NC" if len(children) == 0 else "") + ("*LS" if _is_last else "")
+            ret = self.symbol(with_label=True, with_annotation=False, with_order=True) \
+                  + (self.suffix_sep + "NC" if len(children) == 0 else "") + (self.suffix_sep + "LS" if _is_last else "")
             ret += "" if len(children) == 0 else " " + " ".join(children)
         if mode == "ann":
             _rec_arg = True if _rec_arg is None else _rec_arg
-            stacks = [self.symbol(with_annotation=True, with_label=True) + (("*" + self.last_suffix) if (_rec_arg is True and not self.name in [self.root_symbol, self.none_symbol]) else "")]
+            stacks = [self.symbol(with_annotation=True, with_label=True, with_order=True)
+                      + ((self.suffix_sep + self.last_suffix) if (_rec_arg is True and not self.name in [self.root_symbol, self.none_symbol]) else "")]
             if len(children) > 0:
                 last_child = [False] * (len(children) - 1) + [True]
                 children_stacks = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=recarg, _top_rec=False)
@@ -190,7 +220,7 @@ class Node(Trackable):
                         _lines += elemlines
                     return _lines
 
-                parent = self.symbol(with_label=True, with_annotation=False)
+                parent = self.symbol(with_label=True, with_annotation=False, with_order=True)
                 up_children, down_children = children[:len(children)//2], children[len(children)//2:]
                 up_lines = print_children(up_children, "up")
                 down_lines = print_children(down_children, "down")
@@ -202,7 +232,7 @@ class Node(Trackable):
                 lines += [downlineprefix + " " * len(parent) + down_line for down_line in down_lines]
             else:
                 connector = '┌' if direction == "up" else '└' if direction == "down" else '├' if direction == "middle" else ""
-                lines = [connector + self.symbol(with_annotation=False, with_label=True)]
+                lines = [connector + self.symbol(with_annotation=False, with_label=True, with_order=True)]
             if not _top_rec:
                 return lines
             ret = "\n".join(lines)
@@ -212,7 +242,8 @@ class Node(Trackable):
     def build_dict_from(cls, trees):
         allnames = set()
         alllabels = set()
-        suffixes = ["*" + cls.leaf_suffix, "*" + cls.last_suffix, "*{}*{}".format(cls.leaf_suffix, cls.last_suffix)]
+        suffixes = [cls.suffix_sep + cls.leaf_suffix, cls.suffix_sep + cls.last_suffix,
+                    "{}{}{}{}".format(cls.suffix_sep, cls.leaf_suffix, cls.suffix_sep, cls.last_suffix)]
         for tree in trees:
             treenames, treelabels = tree._all_names_and_labels()
             allnames.update(treenames)
@@ -254,19 +285,32 @@ class Node(Trackable):
         return names, labels
 
     def __eq__(self, other):
+        return self._eq_rec(other)
+
+    def _eq_rec(self, other, _self_pos_in_list=None, _other_pos_in_list=None):
         if isinstance(other, list):
             print("other is list")
         same = self.name == other.name
         same &= self.label == other.label
+        # same &= self.order == other.order
+        same &= _self_pos_in_list == _other_pos_in_list
         ownchildren = self.children + tuple()
         otherchildren = other.children + tuple()
         j = 0
         while j < len(ownchildren):
             child = ownchildren[j]
+            order_matters = False
+            if child.order is not None:
+                order_matters = True
             found = False
             i = 0
             while i < len(otherchildren):
-                if child == otherchildren[i]:
+                otherchild = otherchildren[i]
+                if otherchild.order is not None:
+                    order_matters = True
+                equality = child._eq_rec(otherchild, _self_pos_in_list=j, _other_pos_in_list=i) \
+                    if order_matters else child._eq_rec(otherchild)
+                if equality:
                     found = True
                     break
                 i += 1
@@ -336,13 +380,13 @@ class UniqueNodeTracker(Tracker):
 
         # region process input symbol
         x, x_isleaf, x_islast = inpx + "", False, False
-        inpxsplits = inpx.split("*")
+        inpxsplits = inpx.split(self.root.suffix_sep)
         if len(inpxsplits) > 1:
             x, x_isleaf, x_islast = inpxsplits[0], self.root.leaf_suffix in inpxsplits, self.root.last_suffix in inpxsplits
         x_isnone = x == self.none_symbol
         x_islast, x_isleaf = x_islast or x_isnone, x_isleaf or x_isnone
         x_name, x_label = x, None
-        xsplits = x.split("/")  # get label
+        xsplits = x.split(self.root.label_sep)  # get label
         if len(xsplits) > 1:
             x_name, x_label = xsplits[0], xsplits[1]
         # endregion
@@ -404,7 +448,7 @@ class UniqueNodeTracker(Tracker):
                                                child.children))
 
                     token = child.name
-                    token += ("/" + child.label) if child.label is not None else ""
+                    token += (child.label_sep + child.label) if child.label is not None else ""
 
                     can_be_last = len(parent_children) < 2
                     must_be_last = len(possible_children) == 1
@@ -417,11 +461,11 @@ class UniqueNodeTracker(Tracker):
                             and number_tokens_left - 1 >= number_non_term_parents + 1:
                         nvt.add(token)
                     if can_be_last and not must_be_leaf and not must_be_lastleaf :
-                        nvt.add(token+"*"+child.last_suffix)
+                        nvt.add(token+child.suffix_sep+child.last_suffix)
                     if can_be_leaf and not must_be_last and not must_be_lastleaf :
-                        nvt.add(token+"*"+child.leaf_suffix)
+                        nvt.add(token+child.suffix_sep+child.leaf_suffix)
                     if can_be_last and can_be_leaf and can_be_lastleaf:
-                        nvt.add(token+"*"+child.leaf_suffix+"*"+child.last_suffix)
+                        nvt.add(token+child.suffix_sep+child.leaf_suffix+child.suffix_sep+child.last_suffix)
             if len(possible_children) == 0 and not (number_tokens_left > 1 and number_non_term_parents == 1):
                 nvt.add(self.none_symbol)
             self._nvt = nvt
@@ -429,22 +473,22 @@ class UniqueNodeTracker(Tracker):
             if self._possible_labels is None:
                 possible_symbols = available_names
             else:
-                possible_symbols = sum([[_name + "/" + _label for _label in self._possible_labels]
+                possible_symbols = sum([[_name + self.root.label_sep + _label for _label in self._possible_labels]
                                         for _name in available_names])
 
             for possible_symbol in possible_symbols:
                 if isroot:
-                    anvt.add(possible_symbol + "*" + self.root.last_suffix)
+                    anvt.add(possible_symbol + self.root.suffix_sep + self.root.last_suffix)
                     continue
                 # if number_tokens_left - 1 >= number_non_term_parents + 1:   # losing at least two potential terminators (will need one child and one sibling)
                 if number_tokens_left > 2 and number_non_term_parents > 0:
                     anvt.add(possible_symbol)
                 # if number_tokens_left - 1 >= number_non_term_parents:   # losing at least on potential terminator in any of the below scenarios
                 if number_tokens_left > 1 and number_non_term_parents > 0:
-                    anvt.add(possible_symbol + "*" + self.root.last_suffix)
-                    anvt.add(possible_symbol + "*" + self.root.leaf_suffix)
+                    anvt.add(possible_symbol + self.root.suffix_sep + self.root.last_suffix)
+                    anvt.add(possible_symbol + self.root.suffix_sep + self.root.leaf_suffix)
                 if (number_non_term_parents > 0 or number_tokens_left == 1) and not (number_tokens_left > 1 and number_non_term_parents == 1):     # must be last one left or the rest can be sent up
-                    anvt.add(possible_symbol + "*" + self.root.leaf_suffix + "*" + self.root.last_suffix)
+                    anvt.add(possible_symbol + self.root.suffix_sep + self.root.leaf_suffix + self.root.suffix_sep + self.root.last_suffix)
             if not (number_tokens_left > 1 and number_non_term_parents == 1):
                 anvt.add(self.none_symbol)
             # if len(possible_symbols) == 0:
@@ -492,7 +536,7 @@ class NodeTracker(Tracker):
                 print(inpx, self._nvt)
                 return self._nvt
             allnewpossiblepaths = []
-            xsplits = inpx.split("*")
+            xsplits = inpx.split(self.root.suffix_sep)
             x, x_isleaf, x_islast = inpx, False, False
             if len(xsplits) > 1:
                 x, x_isleaf, x_islast = xsplits[0], self.root.leaf_suffix in xsplits, self.root.last_suffix in xsplits
@@ -504,7 +548,7 @@ class NodeTracker(Tracker):
                 while i < len(possible_path[-2][0]):
                     node = possible_path[-2][0][i]
                     node_islast = len(possible_path[-2][0]) == 1
-                    if x == node.symbol(with_label=True, with_annotation=False) \
+                    if x == node.symbol(with_label=True, with_annotation=False, with_order=False) \
                             and node_islast == x_islast and node.is_leaf == x_isleaf:
                         new_possible_path = [[possible_path_level_group + []
                                               for possible_path_level_group in possible_path_level]
@@ -540,10 +584,16 @@ class NodeTracker(Tracker):
         for possible_path in self.possible_paths:
             if len(possible_path[-2][0]) == 1:
                 topnode = possible_path[-2][0][0]
-                allnvts.add(topnode.symbol(with_label=True, with_annotation=True) + "*" + self.root.last_suffix)
+                allnvts.add(topnode.symbol(with_label=True, with_annotation=True, with_order=False) + self.root.suffix_sep + self.root.last_suffix)
             else:
+                order_used = False
                 for topnode in possible_path[-2][0]:
-                    allnvts.add(topnode.symbol(with_label=True, with_annotation=True))
+                    if not order_used:
+                        order_used = topnode.order is not None
+                    else:
+                        if topnode.order is not None:
+                            continue
+                    allnvts.add(topnode.symbol(with_label=True, with_annotation=True, with_order=False))
         return allnvts
 
 
@@ -1141,7 +1191,7 @@ def run_sentence(num_samples=100000):
 
 
 def run_node(x=0):
-    treestr = "A/a*LS B/b C/c*NC X*LS D/d*NC E/e*LS Y*NC Z*NC*LS F/f*NC*LS"
+    treestr = "A/a*LS B#1/b C#2/c*NC X#3*LS D/d*NC E/e*LS Y*NC Z*NC*LS F/f*NC*LS"
     tree = Node.parse(treestr)
     print(treestr)
     print(tree.pp())
@@ -1196,6 +1246,7 @@ def test_treegen():
 
 
 if __name__ == "__main__":
-    test_treegen()
+    run_node()
+    # test_treegen()
     # test_overcomplete_trees()
     # q.argprun(run_unique_node)
