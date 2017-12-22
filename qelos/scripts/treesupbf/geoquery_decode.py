@@ -72,6 +72,7 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
             inp, out = line.split("\t")
             if reverse_input:
                 inp = " ".join(inp.split()[::-1])
+            out = "( {} )".format(out)
             ism.add(inp)
             osm.add(out)
             numtrain += 1
@@ -81,6 +82,7 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
             inp, out = line.split("\t")
             if reverse_input:
                 inp = " ".join(inp.split()[::-1])
+            out = "( {} )".format(out)
             ism.add(inp)
             osm.add(out)
 
@@ -111,8 +113,8 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
 
 def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( state:t $0 ) ( next_to:t $0 s0 ) )"
     if _toprec:
-        x = "( {} )".format(x)
-        x = x.split()
+        x = x.strip().split()
+    assert(x[0] == "(")
     parlevel = 0
     head = None
     children = []
@@ -266,10 +268,21 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # print(encdec)
 
 
+def run_noisy_parse():
+    treen = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) ) ( ) ) ) ) ) )")
+    tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) )")
+    print(tree.pp())
+    print(treen.pp())
+    sys.exit()
+
 if __name__ == "__main__":
     q.argprun(run_seq2seq_reproduction)
-
+    #
     q.embed()
+
+    # run_noisy_parse()
+    #
+    # q.embed()
 
     tree = parse_query_tree("lambda $0 e ( and ( state:t $0 ) ( next_to:t $0 s0 ) )")
     secondtree = parse_query_tree("lambda $0 e ( and ( next_to:t $0 s0 ) ( state:t $0 ) )")
