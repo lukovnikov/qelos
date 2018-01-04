@@ -241,6 +241,14 @@ class GANTrainer(object):
                     lip_loss = self.penalty_weight * (self.clip_fn(lip_loss - 1)).mean()
                     errD = errD + lip_loss
                     grad_points = None
+                elif self.mode == "OTGAN":
+                    errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
+                    lip_loss = (scoreD_real_vec - scoreD_fake_vec).squeeze()
+                    lip_loss_p = self.pagandist(real, fake) ** self.paganP
+                    lip_loss = lip_loss - lip_loss_p
+                    lip_loss = self.penalty_weight * self.clip_fn(lip_loss).mean()
+                    errD = errD + lip_loss
+                    grad_points = None
                 elif self.mode == "WGAN-GP":
                     errD = scoreD_fake_vec.mean() - scoreD_real_vec.mean()
                     interp_alpha = real.data.new(num_examples, *([1]*(real.dim()-1)))
