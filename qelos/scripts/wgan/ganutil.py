@@ -117,6 +117,7 @@ class ImageGenerator:
         if self.frames2pdf:
             self.figs4pdf.append(ret)
 
+        self.frame_index += 1
         return ret      # return saved
 
     except KeyError as e:
