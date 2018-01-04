@@ -93,6 +93,8 @@ class ImageGenerator:
                 axes = pyplot.gca()
                 axes.yaxis.set_visible(False)
                 axes.xaxis.set_visible(False)
+                axes.set_xlim([-2, 2])
+                axes.set_ylim([-2, 2])
 
                 x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
                 disc_map = disc_map.reshape((len(x), len(y))).T
