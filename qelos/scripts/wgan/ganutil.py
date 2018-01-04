@@ -102,7 +102,8 @@ class ImageGenerator:
 
                 # plot scatter
                 if perturbed is not None:
-                    pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='orange', marker='+')
+                    pass
+                    #pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='orange', marker='+')
                 pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='#cc0000', marker='+')
                 pyplot.scatter(samples[:, 0], samples[:, 1], c='#0000cc', marker='*')
                 pyplot.savefig('{}/frame_{}.png'.format(this.save_frameses_where, this.frame_index), format="png")
