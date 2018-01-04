@@ -113,7 +113,7 @@ class ImageGenerator:
 
         return ret      # return saved
 
-    except Exception as e:
+    except KeyError as e:
         print("some exception occurred while plotting")
 
   def finalize(self, savedir="experiments/", savename=None, settings=None):
