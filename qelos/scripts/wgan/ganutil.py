@@ -5,6 +5,7 @@ import torch
 from torch.autograd import Variable
 import IPython
 import qelos as q
+import os
 from IPython.display import clear_output, display
 from datetime import datetime as dt
 
@@ -22,6 +23,8 @@ class ImageGenerator:
     self.figs4pdf = []
     self.save_frameses = save_frameses
     self.save_frameses_where = save_frameses_where
+    if not os.path.exists(self.save_frameses_where):
+        os.makedirs(self.save_frameses_where)
 
   def __call__(self, true_dist, perturbed, losses):
     try:
@@ -95,7 +98,6 @@ class ImageGenerator:
                 pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='#cc0000', marker='+')
                 #pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
                 pyplot.scatter(samples[:, 0], samples[:, 1], c='#0000cc', marker='*')
-
                 pyplot.savefig('{}/frame_{}.png'.format(this.save_frameses_where, this.frame_index), format="png")
 
         ret = {"true_dist": true_dist,
