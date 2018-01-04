@@ -12,7 +12,7 @@ from datetime import datetime as dt
 # critic.
 # largely form Improved Training of Wasserstein GAN code (see link above)
 class ImageGenerator:
-  def __init__(self, netG, netD, prefix='frame', noise_dim=2, save_frames_to_pdf=False):
+  def __init__(self, netG, netD, prefix='frame', noise_dim=2, save_frames_to_pdf=False, save_frameses=[1,5,10,100], save_frameses_where=None):
     self.prefix = None
     self.frame_index = 1
     self.noise_dim = noise_dim
@@ -20,6 +20,8 @@ class ImageGenerator:
     self.netD = netD
     self.frames2pdf = save_frames_to_pdf
     self.figs4pdf = []
+    self.save_frameses = save_frameses
+    self.save_frameses_where = save_frameses_where
 
   def __call__(self, true_dist, perturbed, losses):
     try:
@@ -46,6 +48,8 @@ class ImageGenerator:
         # disc_map = (disc_map - numpy.min(disc_map)) / numpy.max(disc_map) * 8
         # disc_map = numpy.log(disc_map + 0.25)
 
+        this = self
+
         def plotfig_fn(plotdic):
             true_dist, perturbed, samples, disc_map, RANGE, N_POINTS, losses = \
                 [plotdic[x] for x in "true_dist perturbed samples disc_map RANGE N_POINTS losses".split()]
@@ -66,16 +70,33 @@ class ImageGenerator:
                 perturbed = perturbed.cpu().numpy()
 
             # plot scatter
-            pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='orange',marker='+')
+            pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='#cc0000',marker='+')
             if perturbed is not None:
-                pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
-            pyplot.scatter(samples[:, 0],   samples[:, 1],   c='green', marker='*')
+                pass
+                pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='orange', marker='+')
+            pyplot.scatter(samples[:, 0],   samples[:, 1],   c='#0000cc', marker='*')
 
             pyplot.subplot(gs[1])
             pyplot.plot(losses)
 
             clear_output(wait=True)
             display(pyplot.gcf())
+
+            if this.save_frameses_where is not None and (this.frame_index in this.save_frameses or this.save_frameses is None):
+                pyplot.clf()
+                fig = pyplot.figure(num=2, figsize=(10, 10))
+
+                pyplot.clf()
+                x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
+                disc_map = disc_map.reshape((len(x), len(y))).T
+                pyplot.contour(x, y, disc_map)
+
+                # plot scatter
+                pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='#cc0000', marker='+')
+                #pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
+                pyplot.scatter(samples[:, 0], samples[:, 1], c='#0000cc', marker='*')
+
+                pyplot.savefig('{}/frame_{}.png'.format(this.save_frameses_where, this.frame_index), format="png")
 
         ret = {"true_dist": true_dist,
                "perturbed": perturbed,
