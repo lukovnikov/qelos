@@ -777,6 +777,25 @@ class PWPointerLoss(torch.nn.Module):
         return ret
 
 
+class OptimisticPointerLoss(torch.nn.Module):
+    def __init__(self, size_average=True, **kw):
+        super(OptimisticPointerLoss, self).__init__(**kw)
+        self.size_average = size_average
+
+    def forward(self, pred, gold):
+        bces_pos = torch.log(pred.clamp(min=1e-7))
+        bces = gold * bces_pos
+        # bces = pred * gold
+        ret = torch.sum(bces, 1)
+        # ret = torch.log(ret)
+        ret = -ret
+        if self.size_average:
+            ret = ret.sum() / ret.size(0)
+        else:
+            ret = ret.sum()
+        return ret
+
+
 class PointerRecall(nn.Module):
     EPS = 1e-6
 
@@ -850,6 +869,10 @@ def run_simple_training(lr=0.1,
     dl.finalize()
     (trainq, trainstarts), (validq, validstarts), (testq, teststarts), traingold, validgold, testgold = dl.get()
 
+    trainq, trainstarts, traingold = trainq[:500], trainstarts[:500], traingold[:500]
+
+    print("{}/{}/{} examples in one hop".format(len(trainq), len(validq), len(testq)))
+
     trainloader = q.dataload(trainq, trainstarts, traingold, batch_size=batsize, shuffle=True)
     validloader = q.dataload(validq, validstarts, validgold, batch_size=batsize, shuffle=False)
     testloader = q.dataload(testq, teststarts, testgold, batch_size=batsize, shuffle=False)
@@ -887,6 +910,8 @@ def run_simple_training(lr=0.1,
         q.GRULayer(dim, dim).return_final("only"),
     )
 
+    print(graphtensor.tensor.shape)
+
     dgtn = SimpleDGTNSparse(graphtensor.tensor, dim)
 
     # finder
@@ -900,20 +925,22 @@ def run_simple_training(lr=0.1,
     m = SimpleModel(encoder, dgtn, findencoder=findencoder, finder=None, findersup=False)
     m2 = TwohopModel(encoder, dgtn, encoder2)
 
-    losses = q.lossarray(PWPointerLoss(size_average=True, balanced=False),
+    losses = q.lossarray(OptimisticPointerLoss(size_average=True),
                          PointerPrecision(), PointerRecall(), PointerFscore())
     optim = torch.optim.Adagrad(q.params_of(m), lr=lr)
 
     q.train(m).train_on(trainloader, losses).cuda(cuda)\
         .optimizer(optim)\
         .valid_on(validloader, losses)\
-        .train(3)
+        .train(20)
 
     dl = DataLoader(graphtensor)
     # dl.add_simple_questions(hop_only=True, trainportion=1.)
     dl.add_chains(length=2, withstart=True)
     dl.finalize()
     (trainq, trainstarts), (validq, validstarts), (testq, teststarts), traingold, validgold, testgold = dl.get()
+
+    print("{}/{}/{} examples in two-hop data".format(len(trainq), len(validq), len(testq)))
 
     trainloader = q.dataload(trainq, trainstarts, traingold, batch_size=batsize, shuffle=True)
     validloader = q.dataload(validq, validstarts, validgold, batch_size=batsize, shuffle=False)
@@ -936,6 +963,6 @@ if __name__ == "__main__":
     #
     # q.embed()
     # q.argprun(run)
-    # q.argprun(run_simple_training)
-    q.argprun(test_simple_dgtn)
+    q.argprun(run_simple_training)
+    # q.argprun(test_simple_dgtn)
 
