@@ -90,6 +90,10 @@ class ImageGenerator:
                 fig = pyplot.figure(num=2, figsize=(10, 10))
 
                 pyplot.clf()
+                axes = pyplot.gca()
+                axes.yaxis.set_visible(False)
+                axes.xaxis.set_visible(False)
+
                 x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
                 disc_map = disc_map.reshape((len(x), len(y))).T
                 pyplot.contour(x, y, disc_map)
