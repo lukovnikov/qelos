@@ -87,7 +87,7 @@ class ImageGenerator:
 
             if this.save_frameses_where is not None and (this.frame_index in this.save_frameses or this.save_frameses is None):
                 pyplot.clf()
-                fig = pyplot.figure(num=3, figsize=(15, 15))
+                fig = pyplot.figure(num=3, figsize=(8, 8))
 
                 pyplot.clf()
                 axes = pyplot.gca()
