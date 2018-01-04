@@ -13,7 +13,7 @@ from datetime import datetime as dt
 # critic.
 # largely form Improved Training of Wasserstein GAN code (see link above)
 class ImageGenerator:
-  def __init__(self, netG, netD, prefix='frame', noise_dim=2, save_frames_to_pdf=False, save_frameses=[1,5,10,100], save_frameses_where=None):
+  def __init__(self, netG, netD, prefix='frame', noise_dim=2, save_frames_to_pdf=False, save_frameses=[1,5,10,50,100], save_frameses_where=None):
     self.prefix = None
     self.frame_index = 1
     self.noise_dim = noise_dim
@@ -101,8 +101,9 @@ class ImageGenerator:
                 pyplot.contour(x, y, disc_map)
 
                 # plot scatter
+                if perturbed is not None:
+                    pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='orange', marker='+')
                 pyplot.scatter(true_dist[:, 0], true_dist[:, 1], c='#cc0000', marker='+')
-                #pyplot.scatter(perturbed[:, 0], perturbed[:, 1], c='red', marker='+')
                 pyplot.scatter(samples[:, 0], samples[:, 1], c='#0000cc', marker='*')
                 pyplot.savefig('{}/frame_{}.png'.format(this.save_frameses_where, this.frame_index), format="png")
 
