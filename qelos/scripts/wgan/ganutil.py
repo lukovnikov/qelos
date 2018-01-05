@@ -97,7 +97,7 @@ class ImageGenerator:
                 axes.set_ylim([-2, 2])
 
                 x = y = numpy.linspace(-RANGE, RANGE, N_POINTS)
-                disc_map = disc_map.reshape((len(x), len(y))).T
+                #disc_map = disc_map.reshape((len(x), len(y))).T
                 pyplot.contour(x, y, disc_map)
 
                 # plot scatter
