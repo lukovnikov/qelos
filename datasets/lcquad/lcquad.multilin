@@ -1,4 +1,5 @@
-﻿Q1: Which comic characters are painted by Bill Finger?
+﻿
+Q1: Which comic characters are painted by Bill Finger?
 Q1.P1: <http://dbpedia.org/resource/Bill_Finger> :-<http://dbpedia.org/ontology/creator> <<BRANCH>> :<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://dbpedia.org/ontology/ComicsCharacter> <<JOIN>> <<RETURN>>
 
 Q2: Was winston churchill the prime minister of Selwyn Lloyd?

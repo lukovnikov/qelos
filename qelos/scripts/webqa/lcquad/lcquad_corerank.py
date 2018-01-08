@@ -5,6 +5,10 @@ import numpy as np
 import random
 import re
 import ujson
+from collections import OrderedDict
+import os
+import dill
+import pickle
 
 
 class RankModel(nn.Module):
@@ -48,8 +52,8 @@ class InpFeeder(object):
             lid = self.eid2lid[eid]
             rids = self.eid2rids[eid]
             if self.eid2rid_gold is not None:   # gold mode
-                pos_rid = self.eid2rid_gold[eid]
-                neg_rid = random.sample(rids - {pos_rid,}, 1)
+                pos_rid = random.sample(self.eid2rid_gold[eid], 1)[0]
+                neg_rid = random.sample(rids - {pos_rid,}, 1)[0]
                 goldsep = 1
             else:
                 pos_rid = random.sample(rids, 1)
@@ -84,6 +88,7 @@ def load_data(p="../../../../datasets/lcquad/lcquad.multilin",
     goldchains = {}
     with open(p) as f:
         for line in f:
+            line = line.strip()
             m = re.match("(Q\d+):(.+)", line)
             if m:
                 qid = m.group(1)
@@ -154,7 +159,9 @@ def run_preload(d=0):
     ujson.dump(tosave, open("lcquad.multilin.chains.preload", "w"))
 
 
-def load_preloaded(p="lcquad.multilin.chains.preload"):
+def load_preloaded(p="lcquad.multilin.chains.preload", allparses=True, cachep="lcquad.multilin.chains.cache"):
+    if os.path.exists(cachep):
+        return dill.load(open(cachep))
     # load
     preload = ujson.load(open(p))
     questions = preload["questions"]
@@ -169,19 +176,125 @@ def load_preloaded(p="lcquad.multilin.chains.preload"):
         qids.append(qid)
         qsm.add(question)
     qsm.finalize()
+    qidsD = dict(zip(qids, range(len(qids))))
 
     # process chains
     # get all unique relations and chains
+    relD = {"<MASK>": 0, "<RARE>": 1}
+    relD = OrderedDict(relD)
     goldchains = sorted(goldchains.items(), key=lambda (x, y): x)
     qpids = []
     eids2goldchains = {}
     set_unique_goldchains = set()
     unique_goldchains = []
     eid = 0
-    for qpid, goldchain in goldchains:
-        qpids.append(qpid)
 
-        eid += 1
+    MAXCHAINLEN = 2
+
+    # get all relations
+    # relD: maps from relation string to relation id
+    chainsD = {}        # maps from tuple of relation ids to id in all_chains
+    qpid2goldchainid = {}   # maps from qpid string to gold chain id in all_chains
+    qpid2negchainids = {}   # maps from qpid string to set of chain ids in all_chains
+    all_chains = []
+
+    for qpid, goldchain in goldchains:
+        goldchainids = []
+        for goldchainrel in goldchain:
+            if not goldchainrel in relD:
+                relD[goldchainrel] = len(relD)
+            goldchainids.append(relD[goldchainrel])
+        goldchainids = goldchainids + [0]*(MAXCHAINLEN-len(goldchainids))     # pad with zeros
+        _goldchainids = tuple(goldchainids)
+        if _goldchainids not in chainsD:
+            chainsD[_goldchainids] = len(chainsD)
+            all_chains.append(goldchainids)
+            assert(len(all_chains) == len(chainsD))
+        qpid2goldchainid[qpid] = chainsD[_goldchainids]
+    for qpid, chainses in chains.items():
+        for chain in chainses:
+            chainids = []
+            for rel in chain:
+                if not rel in relD:
+                    relD[rel] = len(relD)
+                chainids.append(relD[rel])
+            chainids = chainids + [0]*(MAXCHAINLEN-len(chainids))
+            _chainids = tuple(chainids)
+            if _chainids not in chainsD:
+                chainsD[_chainids] = len(chainsD)
+                all_chains.append(chainids)
+                assert(len(all_chains) == len(chainsD))
+            if qpid not in qpid2negchainids:
+                qpid2negchainids[qpid] = set()
+            qpid2negchainids[qpid].add(chainsD[_chainids])
+
+    rev_relD = {v: k for k, v in relD.items()}
+    # TEST
+    for qpid, goldchain in goldchains:
+        # get gold chain from indexes
+        _goldchainids = all_chains[qpid2goldchainid[qpid]]
+        # convert to list of strings of rel names
+        _goldchain = [rev_relD[e] for e in _goldchainids if e != 0]
+        assert(_goldchain == goldchain)
+    print("TEST: goldchain reconstruction worked")
+    for qpid, chainses in chains.items():
+        chainses = set([" ".join(e) for e in chainses])
+        _chainses = set()
+        for _chainid in qpid2negchainids[qpid]:
+            _chainids = all_chains[_chainid]
+            _chainses.add(" ".join([rev_relD[e] for e in _chainids if e != 0]))
+        assert(chainses & _chainses == chainses)
+    print("TEST: negchain reconstruction worked")
+
+    # do example ids mappings
+    eids = range(len(qidsD))
+    eid2qid = dict(zip(eids, ["Q{}".format(eid+1) for eid in eids]))
+    # q.embed()
+    assert(set(eid2qid.values()) & set(qidsD.keys()) == set(qidsD.keys()))  # all Qids covered
+
+    eid2lid = dict(zip(eids, [qidsD[eid2qid[e]] for e in eids]))
+
+    qids2qpids = {}
+    for qid in qidsD:
+        if qid not in qids2qpids:
+            qids2qpids[qid] = set()
+        for i in range(3):
+            qpid = qid + ".P{}".format(i)
+            if qpid in preload["goldchains"]:
+                qids2qpids[qid].add(qpid)
+
+    eid2rid_gold = {}
+    eid2rid_neg = {}
+
+    for eid in eids:
+        if eid not in eid2rid_gold:
+            eid2rid_gold[eid] = set()
+        qid = eid2qid[eid]
+        qpids = qids2qpids[qid]
+        if allparses:
+            for qpid in qpids:      # core chain of every parse is positive
+                eid2rid_gold[eid].add(qpid2goldchainid[qpid])
+        else:
+            qpid = list(qpids)[0]
+            eid2rid_gold[eid].add(qpid2goldchainid[qpid])
+
+        if eid not in eid2rid_neg:
+            eid2rid_neg[eid] = set()
+        for qpid in qpids:
+            eid2rid_neg[eid].update(qpid2negchainids[qpid])
+        eid2rid_neg[eid] = eid2rid_neg[eid] - eid2rid_gold[eid]
+
+    chainsm = q.StringMatrix()
+    chainsm._dictionary = relD
+    chainsm._rd = rev_relD
+    chainsm._matrix = np.asarray(all_chains)
+
+    if cachep is not None:
+        dill.dump((qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg), open(cachep, "w"))
+
+    return qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg
+
+    q.embed()
 
 
 def run(lr=0.1,
@@ -191,26 +304,28 @@ def run(lr=0.1,
         epochs=100,
         batsize=50,
         ):
-    left_model = None       # model takes something, produces vector
-    right_model = None      # model takes something, produces vector
+    left_model = q.Forward(5, 5)       # TODO model takes something, produces vector
+    right_model = q.Forward(5, 5)      # TODO model takes something, produces vector
     similarity = q.DotDistance()    # computes score
 
-    load_preloaded()
+    qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
 
-    ldata = None            # should be tensor
-    rdata = None            # should be tensor
+    # q.embed()
+
+    ldata = qsm.matrix            # should be tensor
+    rdata = chainsm.matrix            # should be tensor
     rscores = None          # should be vector of scores for each rdata 0-axis slice
 
-    eid2lid = {}            # mapping from example ids to ldata ids
-    eid2rid_gold = {}       # mapping from example ids to rdata ids for gold
-    eid2rids = {}           # maps from example ids to sets of rdata ids
+    eid2lid = eid2lid            # mapping from example ids to ldata ids
+    eid2rid_gold = eid2rid_gold       # mapping from example ids to rdata ids for gold
+    eid2rids = eid2rid_neg           # maps from example ids to sets of rdata ids
 
     numex = len(ldata)
 
     #################
     rankmodel = RankModel(left_model, right_model, similarity)
 
-    eids = np.arange(0, len(numex))
+    eids = np.arange(0, numex)
     eidsloader = q.dataload(eids, batch_size=batsize, shuffle=True)
 
     inptransform = InpFeeder(ldata, rdata, eid2lid, eid2rids,
@@ -229,5 +344,5 @@ def run(lr=0.1,
 
 
 if __name__ == "__main__":
-    # q.argprun(run)
-    q.argprun(run_preload)
+    # q.argprun(run_preload)
+    q.argprun(run)
