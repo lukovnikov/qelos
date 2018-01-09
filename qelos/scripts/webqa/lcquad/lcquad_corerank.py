@@ -304,9 +304,6 @@ def run(lr=0.1,
         epochs=100,
         batsize=50,
         ):
-    left_model = q.Forward(5, 5)       # TODO model takes something, produces vector
-    right_model = q.Forward(5, 5)      # TODO model takes something, produces vector
-    similarity = q.DotDistance()    # computes score
 
     qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
 
@@ -323,7 +320,13 @@ def run(lr=0.1,
     numex = len(ldata)
 
     #################
+
+    left_model = q.Forward(5, 5)       # TODO model takes something, produces vector
+    right_model = q.Forward(5, 5)      # TODO model takes something, produces vector
+    similarity = q.DotDistance()    # computes score
     rankmodel = RankModel(left_model, right_model, similarity)
+
+    #################
 
     eids = np.arange(0, numex)
     eidsloader = q.dataload(eids, batch_size=batsize, shuffle=True)
