@@ -31,7 +31,7 @@ class TensorDataset(Dataset):      # TODO
 
 
 class HistoryAggregator(object):
-    """ Keeps history """
+    """ Keeps history. Defines aggregator interface, keeps history """
     def __init__(self):
         super(HistoryAggregator, self).__init__()
         self.agg_history = []
@@ -79,7 +79,9 @@ class Aggregator(HistoryAggregator):
 
 
 class LossWithAgg(HistoryAggregator):
+    """ must implement the loss interface and the aggregator interface """
     callwithinputs = False
+    callwithoriginalinputs = False
 
     def __call__(self, pred, gold, **kw):
         raise NotImplemented()
@@ -95,9 +97,12 @@ class LossWithAgg(HistoryAggregator):
 
 
 class LossAndAgg(LossWithAgg):
+    """ wraps a loss with aggregator, implements aggregator interface """
     def __init__(self, loss, agg):
         super(LossAndAgg, self).__init__()
         self.loss = loss
+        self.callwithinputs = hasattr(loss, "callwithinputs") and loss.callwithinputs
+        self.callwithoriginalinputs = hasattr(loss, "callwithoriginalinputs") and loss.callwithoriginalinputs
         self.agg = agg
 
     def __call__(self, pred, gold, **kw):
@@ -168,14 +173,15 @@ class lossarray(object):
             else:
                 self.losses.append(LossAndAgg(loss, Aggregator(mode="mean")))
 
-    def __call__(self, prediction, gold, inputs=None):
+    def __call__(self, prediction, gold, inputs=None, original_inputs=None):
+        """ prediction from gold, gold from model, inputs to model, original (untransformed) inputs """
         outl = []
         for loss, loss_transf in zip(self.losses, self.loss_transformers):
             kw = {}
             pred = prediction
             if loss_transf is not None:
                 if isinstance(loss_transf, loss_input_transform):
-                    loss_transf_out = loss_transf(prediction, gold, inputs=None)
+                    loss_transf_out = loss_transf(prediction, gold, inputs=inputs)
                 else:
                     loss_transf_out = loss_transf(prediction)
                 if len(loss_transf_out) == 2:
@@ -184,6 +190,8 @@ class lossarray(object):
                     pred, gold, kw = loss_transf_out
             if loss.callwithinputs:
                 kw["inputs"] = inputs
+            if loss.callwithoriginalinputs:
+                kw["original_inputs"] = original_inputs
             l = loss(pred, gold, **kw)
             outl.append(l)
         return outl
@@ -608,12 +616,14 @@ class train(object):
             self.trainlosses.push_and_reset()
             tt.tick()
             self.model.train()
-            for i, batch in enumerate(self.traindataloader):
+            for i, _batch in enumerate(self.traindataloader):
                 self.optim.zero_grad()
                 params = q.params_of(self.model)
-                batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
+                _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
                 if self.transform_batch_inp is not None:
-                    batch = self.transform_batch_inp(*batch)
+                    batch = self.transform_batch_inp(*_batch)
+                else:
+                    batch = _batch
                 modelouts = self.model(*batch[:-1])
                 modelout2loss = modelouts
                 if self.transform_batch_out is not None:
@@ -621,7 +631,7 @@ class train(object):
                 gold = batch[-1]
                 if self.transform_batch_gold is not None:
                     gold = self.transform_batch_gold(gold)
-                trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1])
+                trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
                 trainlosses[0].backward()
                 # grad total norm
                 tgn0 = None
@@ -663,13 +673,15 @@ class train(object):
                 model.eval()
                 self.validlosses.push_and_reset()
                 totalvalidbats = len(self.validdataloader)
-                for i, batch in enumerate(self.validdataloader):
-                    batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in batch]
+                for i, _batch in enumerate(self.validdataloader):
+                    _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
                     _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not False else self.transform_batch_inp
                     _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not False else self.transform_batch_out
                     _tbg = self.valid_transform_batch_gold if self.valid_transform_batch_gold is not False else self.transform_batch_gold
                     if _tbi is not None:
-                        batch = _tbi(*batch)
+                        batch = _tbi(*_batch)
+                    else:
+                        batch = _batch
                     modelouts = model(*batch[:-1])
                     modelout2loss = modelouts
                     if _tbo is not None:
@@ -677,7 +689,7 @@ class train(object):
                     gold = batch[-1]
                     if _tbg is not None:
                         gold = _tbg(gold)
-                    validlosses = self.validlosses(modelout2loss, gold, inputs=batch[:-1])
+                    validlosses = self.validlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
                     tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
                             .format(
                                 self.current_epoch+1,

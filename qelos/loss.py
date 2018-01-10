@@ -11,8 +11,8 @@ class Loss(nn.Module):
         self.size_average = size_average
         self._size_avg_ignore_mask = _size_avg_ignore_mask
 
-    def forward(self, x, gold, mask=None, _noagg=False):
-        y, ignoremask = self._forward(x, gold, mask=mask)
+    def forward(self, x, gold, mask=None, _noagg=False, **kw):
+        y, ignoremask = self._forward(x, gold, mask=mask, **kw)
         y = y.float()
         if _noagg:
             return y, ignoremask
@@ -31,20 +31,29 @@ class Loss(nn.Module):
 
 
 class PairRankingLoss(Loss):
-    def __init__(self, size_average=True, margin=None, scale=1, **kw):
+    def __init__(self, size_average=True, margin=None, scale=1., **kw):
         super(PairRankingLoss, self).__init__(size_average=size_average, **kw)
         self.margin = margin
         self.scale = scale
 
-    def _forward(self, x, gold):
-        """ x is the difference in scores. optionally, gold is margin """
+    def _forward(self, x, gold, **kw):
+        """ x is the difference in scores. optionally, gold is margin
+            if x.dim() == 1, assuming margin loss
+            if x.dim() == 2, assuming hinge loss of the two separately
+        """
         if self.margin is None:     # use gold as margins
             margin = gold
         else:
             margin = self.margin
 
-        zeros = q.var(torch.zeros(x.size())).cuda(x).v
-        loss = torch.max(zeros, margin * self.scale - x)
+        zeros = q.var(torch.zeros(x.size(0))).cuda(x).v
+        if x.dim() == 1:
+            loss = torch.max(zeros, margin * self.scale - x)
+        elif x.dim() == 2:
+            assert(x.size(1) == 2)
+            lossA = torch.max(zeros, margin * self.scale - x[:, 0])
+            lossB = torch.max(zeros, margin * self.scale + x[:, 1])
+            loss = lossA + lossB
         return loss, None
 
 

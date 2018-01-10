@@ -184,14 +184,14 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     ttt = q.ticktock("test")
     trainmats, testmats, inpD, outD = load_data(reverse_input=True)
 
-    inpemb = q.WordEmb(inpembdim, worddic=inpD)
+    inpemb = q.WordEmb(inpembdim, worddic=inpD)     # TODO glove embeddings
     outemb = q.WordEmb(outembdim, worddic=outD)
     linout = q.WordLinout(innerdim + innerdim, worddic=outD)
 
     encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)
 
     layers = (torch.nn.Dropout(0),
-              q.GRUCell(outembdim, innerdim),
+              q.GRUCell(outembdim, innerdim),       # TODO: LSTM cell
               q.GRUCell(innerdim, innerdim))
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),

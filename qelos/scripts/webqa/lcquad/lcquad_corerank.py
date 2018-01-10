@@ -12,11 +12,12 @@ import pickle
 
 
 class RankModel(nn.Module):
-    def __init__(self, lmodel, rmodel, similarity, **kw):
+    def __init__(self, lmodel, rmodel, similarity, catscores=False, **kw):
         super(RankModel, self).__init__(**kw)
         self.lmodel = lmodel
         self.rmodel = rmodel
         self.sim = similarity
+        self.catscores = catscores
 
     def forward(self, ldata, posrdata, negrdata):
         ldata = ldata if q.issequence(ldata) else (ldata,)
@@ -27,7 +28,26 @@ class RankModel(nn.Module):
         nrvecs = self.rmodel(*negrdata)
         psim = self.sim(lvecs, rvecs)    # 1D:(batsize,)
         nsim = self.sim(lvecs, nrvecs)
-        return psim - nsim
+        if not self.catscores:
+            return psim - nsim
+        else:
+            return torch.stack([psim, nsim], 1)
+
+
+class ScoreModel(nn.Module):
+    def __init__(self, lmodel, rmodel, similarity, **kw):
+        super(ScoreModel, self).__init__(**kw)
+        self.lmodel = lmodel
+        self.rmodel = rmodel
+        self.sim = similarity
+
+    def forward(self, ldata, rdata):
+        ldata = ldata if q.issequence(ldata) else (ldata,)
+        rdata = rdata if q.issequence(rdata) else (rdata,)
+        lvecs = self.lmodel(*ldata)      # 2D
+        rvecs = self.rmodel(*rdata)      # 2D
+        psim = self.sim(lvecs, rvecs)    # 1D:(batsize,)
+        return psim
 
 
 class InpFeeder(object):
@@ -297,6 +317,200 @@ def load_preloaded(p="lcquad.multilin.chains.preload", allparses=True, cachep="l
     q.embed()
 
 
+class RankingComputer(object):
+    """ computes rankings based on ranking model for full validation/test ranking
+        provides separate loss objects to put into lossarray
+    """
+
+    def __init__(self, scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rid_neg):
+        self.scoremodel = scoremodel
+        self.ldata = ldata if q.issequence(ldata) else (ldata,)
+        self.rdata = rdata if q.issequence(rdata) else (rdata,)
+        self.eid2lid = eid2lid
+        self.eid2rid_neg = eid2rid_neg
+        self.eid2rid_gold = eid2rid_gold
+        self.current_batch = None
+        self.current_batch_input = None
+
+    def get_rankings(self, eids):
+        _eids = eids[0].data.numpy()
+        if self.current_batch_input is None or not np.all(_eids == self.current_batch_input):
+            self.compute_rankings(_eids)
+            self.current_batch_input = _eids
+        return self.current_batch
+
+    def compute_rankings(self, eids):
+        # get all pairs to score
+        self.current_batch = []
+        for eid in eids:
+            ldata = []
+            rdata = []
+            lid = self.eid2lid[eid]
+            rids = list(self.eid2rid_gold[eid]) + list(self.eid2rid_neg[eid] - self.eid2rid_gold[eid])
+            trueornot = [1]*len(self.eid2rid_gold[eid]) + [0]*len(self.eid2rid_neg[eid] - self.eid2rid_gold[eid])
+            for rid in rids:
+                left_data = tuple([ldat[lid] for ldat in self.ldata])
+                ldata.append(left_data)
+                right_data = tuple([rdat[rid] for rdat in self.rdata])
+                rdata.append(right_data)
+            ldata = zip(*ldata)
+            ldata = [q.var(np.stack(ldata_e), volatile=True).cuda(eids).v for ldata_e in ldata]
+            rdata = zip(*rdata)
+            rdata = [q.var(np.stack(posdata_e), volatile=True).cuda(eids).v for posdata_e in rdata]
+            scores = self.scoremodel(ldata, rdata)
+            _scores = list(scores.data.numpy())
+            ranking = sorted(zip(_scores, rids, trueornot), key=lambda x: x[0], reverse=True)
+            self.current_batch.append((eid, lid, ranking))
+
+
+class RecallAt(q.Loss):
+    callwithoriginalinputs = True
+    def __init__(self, k, rankcomp=None, **kw):
+        super(RecallAt, self).__init__(**kw)
+        self.k = k
+        self.bind(rankcomp)
+
+    def bind(self, x):
+        self.ranking_computer = x
+
+    def _forward(self, _w, _z, original_inputs=None, **kw):
+        rankings = self.ranking_computer.get_rankings(original_inputs)
+        # list or (eid, lid, ranking)
+        # ranking is a list of triples (_scores, rids, trueornot)
+        ys = []
+        for _, _, ranking in rankings:
+            topktrue = 0.
+            totaltrue = 0.
+            for i in range(len(ranking)):
+                score, rid, trueornot = ranking[i]
+                if i <= self.k:
+                    topktrue += trueornot
+                if trueornot == 1:
+                    totaltrue += 1.
+            topktrue = topktrue / totaltrue
+            ys.append(topktrue)
+        ys = np.stack(ys)
+        ret = q.var(ys).cuda(original_inputs).v
+        return ret, None
+
+
+class MRR(q.Loss):
+    callwithoriginalinputs = True
+    def __init__(self, rankcomp=None, **kw):
+        super(MRR, self).__init__(**kw)
+        self.bind(rankcomp)
+
+    def bind(self, x):
+        self.ranking_computer = x
+
+    def _forward(self, _w, _z, original_inputs=None, **kw):
+        rankings = self.ranking_computer.get_rankings(original_inputs)
+        # list or (eid, lid, ranking)
+        # ranking is a list of triples (_scores, rids, trueornot)
+        ys = []
+        for _, _, ranking in rankings:
+            res = 0
+            for i in range(len(ranking)):
+                if ranking[i][2] == 1:
+                    res = 1./(i+1)
+                    break
+            ys.append(res)
+        ys = np.stack(ys)
+        ret = q.var(ys).cuda(original_inputs).v
+        return ret, None
+
+
+def run_dummy(lr=.01,
+              margin=1.,
+              wreg=0.00001,
+              epochs=10000):
+    ldata = np.arange(0, 500)
+    rdata = np.arange(0, 500)
+
+    D = dict(zip(map(str, range(500)), range(500)))
+
+    eid2lid = dict(zip(range(500), range(500)))
+    eid2rid_gold = {}
+    eid2rids = {}
+    for i in range(500):
+        eid2rid_gold[i] = {i,}
+        eid2rids[i] = set(np.random.randint(0, 500, (50,))) - {i,}
+
+    _left_model = q.WordEmb(50, worddic=D)       # TODO model takes something, produces vector
+    _right_model = q.WordEmb(50, worddic=D)      # TODO model takes something, produces vector
+    # _right_model = _left_model
+    left_model = q.Lambda(lambda x: _left_model(x)[0], register_modules=[_left_model])
+    right_model = q.Lambda(lambda x: _right_model(x)[0], register_modules=[_right_model])
+    similarity = q.DotDistance()    # computes score
+
+    rankmodel = RankModel(left_model, right_model, similarity)
+
+    scoremodel = ScoreModel(left_model, right_model, similarity)
+    rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
+    recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
+    mrr = MRR(rankcomp=rankcomp)
+
+
+    eids = np.arange(0, 500)
+    eidstrain, eidsvalid = q.split([eids])
+
+    alleidsloader = q.dataload(eids, batch_size=100, shuffle=True)
+    eidsloader = q.dataload(*eidstrain, batch_size=100, shuffle=True)
+    eidsvalidloader = q.dataload(*eidsvalid, batch_size=100, shuffle=True)
+
+    inptransform = InpFeeder(ldata, rdata, eid2lid, eid2rids,
+                             eid2rid_gold=eid2rid_gold)
+
+    losses = q.lossarray(q.PairRankingLoss(margin=margin))
+    validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
+
+    optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
+
+    # TODO: add validation and test
+    q.train(rankmodel).train_on(eidsloader, losses) \
+        .set_batch_transformer(inptransform) \
+        .optimizer(optim) \
+        .valid_on(eidsloader, validlosses) \
+        .train(epochs)
+
+
+def make_relemb(relD, dim=50):
+    rev_relD = {v: k for k, v in relD.items()}
+    max_id = max(relD.keys())
+    direction = [0 if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1
+                 for i in range(max_id)]
+    diremb = q.WordEmb(dim, worddic={"-": 0, "+": 1})
+    wordsm = q.StringMatrix()
+    wordsm.tokenize = lambda x: x.split()
+    for i in range(max_id):
+        if i not in rev_relD:
+            wordsm.add("<MASK>")
+        else:
+            relname = rev_relD[i] if i in rev_relD else None
+            relname = relname[1:] if relname[0] == "-" else relname
+            relname = re.sub("([A-Z])", " \1", relname).lower()
+            wordsm.add(relname)
+    wordsm.finalize()
+    wordemb = q.WordEmb(dim=dim, worddic=wordsm.D)
+    gloveemb = q.WordEmb(dim=dim, worddic=wordsm.D, fixed=True)
+    wordemb = wordemb.override(gloveemb)
+
+    class RelEmbComp(nn.Module):
+        def __init__(self, wordemb, diremb, **kw):
+            super(RelEmbComp, self).__init__(**kw)
+            self.wordemb = wordemb
+            self.diremb = diremb
+
+        def forward(self):
+            #TODO: embed words, encode words, add diremb vectors
+
+
+
+
+
+
+
+
 def run(lr=0.1,
         rankmode="gold",       # "gold" or "score"
         margin=1.,
@@ -320,6 +534,8 @@ def run(lr=0.1,
     numex = len(ldata)
 
     #################
+
+    relemb = make_relemb(rdata.D)
 
     left_model = q.Forward(5, 5)       # TODO model takes something, produces vector
     right_model = q.Forward(5, 5)      # TODO model takes something, produces vector
@@ -349,3 +565,4 @@ def run(lr=0.1,
 if __name__ == "__main__":
     # q.argprun(run_preload)
     q.argprun(run)
+    # q.argprun(run_dummy)
