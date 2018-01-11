@@ -858,8 +858,14 @@ class _BidirRNNLayer(nn.Module, Recurrent):
     def forward(self, x, mask=None):
         fwd_ret = self.layer_fwd(x, mask=mask)
         rev_ret = self.layer_rev(x, mask=mask)
-        
-        merge_fn = (lambda a, b: torch.cat([a, b], -1)) if self.mode == "cat" else (lambda a, b: a + b)
+
+        if self.mode == "cat":
+            merge_fn = lambda a, b: torch.cat([a, b], -1)
+        elif self.mode == "intercat":
+            merge_fn = lambda a, b: q.intercat([a, b], -1)  # TODO test
+        else:
+            merge_fn = lambda a, b: a + b
+        # merge_fn = (lambda a, b: torch.cat([a, b], -1)) if self.mode == "cat" else (lambda a, b: a + b)
 
         if not q.issequence(fwd_ret):
             fwd_ret = [fwd_ret]
@@ -887,13 +893,13 @@ class _BidirRNNLayer(nn.Module, Recurrent):
 
 
 class BidirGRULayer(_BidirRNNLayer):
-    def __init__(self, indim, outdim, use_bias=True):
-        super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias)
+    def __init__(self, indim, outdim, use_bias=True, mode="cat"):
+        super(BidirGRULayer, self).__init__(GRULayer, indim, outdim, use_bias=use_bias, mode=mode)
 
 
 class BidirLSTMLayer(_BidirRNNLayer):
-    def __init__(self, indim, outdim, use_bias=True):
-        super(BidirLSTMLayer, self).__init__(LSTMLayer, indim, outdim, use_bias=use_bias)
+    def __init__(self, indim, outdim, use_bias=True, mode="cat"):
+        super(BidirLSTMLayer, self).__init__(LSTMLayer, indim, outdim, use_bias=use_bias, mode=mode)
 
 
 class BiRNNLayer(nn.Module, Recurrent):

@@ -500,6 +500,7 @@ class train(object):
         self.valid_transform_batch_inp = False
         self.valid_transform_batch_out = False
         self.valid_transform_batch_gold = False
+        self._validinter = 1
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
@@ -573,6 +574,10 @@ class train(object):
     def valid_on(self, dataloader, losses):
         self.validdataloader = dataloader
         self.validlosses = losses
+        return self
+
+    def valid_inter(self, interval=1):
+        self._validinter = interval
         return self
 
     def valid_with(self, model):
@@ -668,7 +673,7 @@ class train(object):
                 )
             train_epoch_losses = self.trainlosses.get_agg_errors()
             valid_epoch_losses = []
-            if self.validlosses is not None:
+            if self.validlosses is not None and self.current_epoch % self._validinter == 0:
                 model = self.valid_model if self.valid_model is not None else self.model
                 model.eval()
                 self.validlosses.push_and_reset()
