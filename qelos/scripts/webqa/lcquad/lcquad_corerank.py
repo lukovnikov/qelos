@@ -337,11 +337,11 @@ class RankingComputer(object):
     def get_rankings(self, eids):
         _eids = eids[0].cpu().data.numpy()
         if self.current_batch_input is None or not np.all(_eids == self.current_batch_input):
-            self.compute_rankings(_eids)
+            self.compute_rankings(_eids, cuda=eids)
             self.current_batch_input = _eids
         return self.current_batch
 
-    def compute_rankings(self, eids):
+    def compute_rankings(self, eids, cuda=False):
         # get all pairs to score
         self.current_batch = []
         for eid in eids:
@@ -356,9 +356,9 @@ class RankingComputer(object):
                 right_data = tuple([rdat[rid] for rdat in self.rdata])
                 rdata.append(right_data)
             ldata = zip(*ldata)
-            ldata = [q.var(np.stack(ldata_e), volatile=True).cuda(eids).v for ldata_e in ldata]
+            ldata = [q.var(np.stack(ldata_e), volatile=True).cuda(cuda).v for ldata_e in ldata]
             rdata = zip(*rdata)
-            rdata = [q.var(np.stack(posdata_e), volatile=True).cuda(eids).v for posdata_e in rdata]
+            rdata = [q.var(np.stack(posdata_e), volatile=True).cuda(cuda).v for posdata_e in rdata]
             scores = self.scoremodel(ldata, rdata)
             _scores = list(scores.cpu().data.numpy())
             ranking = sorted(zip(_scores, rids, trueornot), key=lambda x: x[0], reverse=True)
