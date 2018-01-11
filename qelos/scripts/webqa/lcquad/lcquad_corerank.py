@@ -46,6 +46,7 @@ class ScoreModel(nn.Module):
     def forward(self, ldata, rdata):
         ldata = ldata if q.issequence(ldata) else (ldata,)
         rdata = rdata if q.issequence(rdata) else (rdata,)
+        q.embed()
         lvecs = self.lmodel(*ldata)      # 2D
         rvecs = self.rmodel(*rdata)      # 2D
         psim = self.sim(lvecs, rvecs)    # 1D:(batsize,)
