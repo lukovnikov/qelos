@@ -478,7 +478,7 @@ def run_dummy(lr=.01,
         .train(epochs)
 
 
-def make_relemb(relD, dim=50):
+def make_relemb(relD, dim=50, dropout=0):
     rev_relD = {v: k for k, v in relD.items()}
     max_id = max(relD.values()) + 1
     direction = [0 if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1
@@ -508,6 +508,7 @@ def make_relemb(relD, dim=50):
             self.wordemb = wordemb
             self.diremb = diremb
             self.dense = nn.Linear(wordsm.matrix.shape[1]*dim, dim)
+            self.dropout = nn.Dropout(p=dropout)
 
         def forward(self, inpdata):
             dirs = inpdata[:, 0]
@@ -515,7 +516,9 @@ def make_relemb(relD, dim=50):
 
             rel_wordembs, rel_wordembs_mask = self.wordemb(wordids)
             rel_wordembs = rel_wordembs.view(rel_wordembs.size(0), -1)
+            rel_wordembs = self.dropout(rel_wordembs)
             rel_wordembs = self.dense(rel_wordembs)
+            rel_wordembs = nn.Tanh()(rel_wordembs)
             rel_dirembs, rel_dirembs_mask = self.diremb(dirs)
             rel_embs = rel_wordembs + rel_dirembs
             return rel_embs
@@ -560,6 +563,7 @@ def run(lr=0.001,
         rankmode="gold",       # "gold" or "score"
         margin=1.,
         wreg=0.00001,
+        dropout=0.3,
         epochs=10000,
         batsize=50,
         dim=50,
@@ -589,7 +593,7 @@ def run(lr=0.001,
 
     #################
 
-    relemb = make_relemb(chainsm.D, dim=dim)
+    relemb = make_relemb(chainsm.D, dim=dim, dropout=dropout)
 
     # make left encoder
     leftemb = q.WordEmb(dim, worddic=qsm.D)
@@ -598,7 +602,9 @@ def run(lr=0.001,
     # left model
     left_model = q.RecurrentStack(
         leftemb,
-        q.wire((1, 0), mask=(1, 1)),
+        q.wire((-1, 0)),
+        q.TimesharedDropout(p=dropout),
+        q.wire((-1, 0), mask=(1, 1)),
         q.BidirLSTMLayer(dim, encdim//2, mode="intercat").return_final("only"),
     )
 
@@ -610,11 +616,14 @@ def run(lr=0.001,
             super(RightModel, self).__init__(**kw)
             self.dense = nn.Linear(chainsm.matrix.shape[1]*dim, encdim)
             self.relemb = relemb
+            self.dropout = nn.Dropout(p=dropout)
 
         def forward(self, x):
             rel_embs, rel_embs_mask = self.relemb(x)
             rel_embs = rel_embs.view(rel_embs.size(0), -1)
+            rel_embs = self.dropout(rel_embs)
             rel_encs = self.dense(rel_embs)
+            rel_encs = nn.Tanh()(rel_encs)
             return rel_encs
 
     right_model = RightModel()
