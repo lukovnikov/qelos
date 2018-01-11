@@ -46,7 +46,7 @@ class ScoreModel(nn.Module):
     def forward(self, ldata, rdata):
         ldata = ldata if q.issequence(ldata) else (ldata,)
         rdata = rdata if q.issequence(rdata) else (rdata,)
-        q.embed()
+        # q.embed()
         lvecs = self.lmodel(*ldata)      # 2D
         rvecs = self.rmodel(*rdata)      # 2D
         psim = self.sim(lvecs, rvecs)    # 1D:(batsize,)
@@ -336,6 +336,7 @@ class RankingComputer(object):
         self.current_batch_input = None
 
     def get_rankings(self, eids):
+        q.embed()
         _eids = eids[0].cpu().data.numpy()
         if self.current_batch_input is None or not np.all(_eids == self.current_batch_input):
             self.compute_rankings(_eids, cuda=eids)
