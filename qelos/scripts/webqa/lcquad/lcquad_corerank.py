@@ -336,10 +336,10 @@ class RankingComputer(object):
         self.current_batch_input = None
 
     def get_rankings(self, eids):
-        q.embed()
+        # q.embed()
         _eids = eids[0].cpu().data.numpy()
         if self.current_batch_input is None or not np.all(_eids == self.current_batch_input):
-            self.compute_rankings(_eids, cuda=eids)
+            self.compute_rankings(_eids, cuda=eids[0])
             self.current_batch_input = _eids
         return self.current_batch
 
