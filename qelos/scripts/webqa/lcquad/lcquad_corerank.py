@@ -335,7 +335,7 @@ class RankingComputer(object):
         self.current_batch_input = None
 
     def get_rankings(self, eids):
-        _eids = eids[0].data.numpy()
+        _eids = eids[0].cpu().data.numpy()
         if self.current_batch_input is None or not np.all(_eids == self.current_batch_input):
             self.compute_rankings(_eids)
             self.current_batch_input = _eids
@@ -360,7 +360,7 @@ class RankingComputer(object):
             rdata = zip(*rdata)
             rdata = [q.var(np.stack(posdata_e), volatile=True).cuda(eids).v for posdata_e in rdata]
             scores = self.scoremodel(ldata, rdata)
-            _scores = list(scores.data.numpy())
+            _scores = list(scores.cpu().data.numpy())
             ranking = sorted(zip(_scores, rids, trueornot), key=lambda x: x[0], reverse=True)
             self.current_batch.append((eid, lid, ranking))
 
