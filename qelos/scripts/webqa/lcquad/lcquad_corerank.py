@@ -558,12 +558,17 @@ def run(lr=0.001,
         rankmode="gold",       # "gold" or "score"
         margin=1.,
         wreg=0.00001,
-        epochs=100,
+        epochs=10000,
         batsize=50,
         dim=50,
         encdim=100,
         validinter=10,
+        cuda=False,
+        gpu=0,
         ):
+    _test = False
+    if cuda:
+        torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     tt.tick("loading data")
     qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
@@ -646,7 +651,7 @@ def run(lr=0.001,
         .set_batch_transformer(inptransform)\
         .optimizer(optim)\
         .valid_on(validloader, validlosses).valid_inter(validinter) \
-        .train(epochs)
+        .cuda(cuda).train(epochs)
 
 
 if __name__ == "__main__":
