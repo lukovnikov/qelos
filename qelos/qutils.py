@@ -56,6 +56,70 @@ def v(x):
         return x
 
 
+def add_tag(x, tag):
+    assert(isinstance(x, Variable) and q.isstring(tag))
+    add_qelos_key(x, "tags", set())
+    x._qelos["tags"].add(tag)
+
+
+def remove_tag(x, tag):
+    assert(isinstance(x, Variable) and q.isstring(tag))
+    if hasattr(x, "_qelos") and "tags" in x._qelos:
+        x._qelos["tags"].remove(tag)
+
+
+def get_tags(x):
+    assert(isinstance(x, Variable))
+    if hasattr(x, "_qelos") and "tags" in x._qelos:
+        return x._qelos["tags"]
+
+
+def filter_by_tag(xs, tag):
+    assert(q.isstring(tag))
+    for x in xs:
+        if hasattr(x, "_qelos") and "tags" in x._qelos and tag in x._qelos["tags"]:
+            yield x
+
+
+def add_qelos_key(x, k, v=None):
+    assert(isinstance(x, Variable) and q.isstring(k))
+    if not hasattr(x, "_qelos"):
+        x._qelos = {}
+    if k not in x._qelos:
+        x._qelos[k] = v
+
+
+def has_qelos_key(x, k):
+    assert (isinstance(x, Variable) and q.isstring(k))
+    return hasattr(x, "_qelos") and k in x._qelos
+
+
+def get_qelos_key(x, k):
+    if has_qelos_key(x, k):
+        return x._qelos[k]
+
+
+def gradmult(xs, frac=1.):
+    def hookf(_grad):
+        return _grad * q.v(frac)
+    if isinstance(xs, Variable):
+        xs = [xs]
+    for xt in xs:
+        remover = xt.register_hook(hookf)
+        add_qelos_key(xt, "gradmult_removers", set())
+        xt._qelos["gradmult_removers"].add(remover)
+
+
+def remove_gradmult(xs):
+    if isinstance(xs, Variable):
+        xs = [xs]
+    for xt in xs:
+        if hasattr(xt, "_qelos") and "gradmult_removers" in xt._qelos:
+            for rmvr in xt._qelos["gradmult_removers"]:
+                rmvr()
+            del xt._qelos["gradmult_removers"]
+
+
 def name2fn(x):
     mapping = {"tanh": nn.Tanh,
                "sigmoid": nn.Sigmoid,

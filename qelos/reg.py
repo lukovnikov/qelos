@@ -4,20 +4,18 @@ import qelos as q
 # regularization
 
 def add(x):     # x's are regularization variables
+    pass
 
-
-def l1(*x, **kw):
-    l = q.getkw(kw, "l", 0)
+def l1(*x):
     acc = 0
     for x_e in x:
-        acc += l * torch.abs(x_e)
+        acc += torch.abs(x_e)
     return acc
 
 
-def l2(*x, **kw):
-    l = q.getkw(kw, "l", 0)
+def l2(*x):
     acc = 0
     for x_e in x:
-        acc += l * torch.norm(x_e, 2)
+        acc += (x_e ** 2).sum()
     return acc
 

@@ -50,6 +50,10 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     save_sparse_tensor, load_sparse_tensor, makeiter, getkw
 
 from qelos.qutils import name2fn, var, val, v, seq_pack, seq_unpack, dataload, \
-    params_of, batchablesparse2densemask, rec_clone, intercat, hyperparam
+    params_of, batchablesparse2densemask, rec_clone, intercat, hyperparam, \
+    add_tag, remove_tag, filter_by_tag, get_tags, add_qelos_key, has_qelos_key, get_qelos_key, \
+    gradmult, remove_gradmult
 
 # from tfun import TFModule
+
+from qelos.reg import l1, l2

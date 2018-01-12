@@ -511,6 +511,7 @@ class train(object):
         self.usecuda = False
         self.cudaargs = ([], {})
         self.optim = None
+        self._l1, self._l2 = None, None
         self.transform_batch_inp = None
         self.transform_batch_out = None
         self.transform_batch_gold = None
@@ -601,8 +602,19 @@ class train(object):
             self.valid_transform_batch_gold = gold_transform
         return self
 
-    def optimizer(self, optimizer):
-        self.optim = optimizer
+    def optimizer(self, optimizer, lr=None, **kw):
+        if isinstance(optimizer, type):
+            optim = optimizer(q.params_of(self.model), lr=lr, **kw)
+            self.optim = optim
+        else:
+            self.optim = optimizer
+            assert(lr is None)
+            assert(kw == {})
+        return self
+
+    def l1l2(self, l1=0., l2=0.):
+        self._l1 = l1
+        self._l2 = l2
         return self
 
     def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
@@ -649,7 +661,15 @@ class train(object):
                     gold = self.transform_batch_gold(gold)
                 trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
 
-                trainlosses[0].backward()
+                l1reg, l2reg = 0., 0.
+                if self._l1 > 0:
+                    l1reg = q.l1(*list(params)) * self._l1
+                if self._l2 > 0:
+                    l2reg = q.l2(*list(params)) * self._l2
+
+                cost = trainlosses[0] + l1reg + l2reg
+
+                cost.backward()
 
                 self.do_callbacks(self.BEFORE_OPTIM_STEP)
                 self.optim.step()
