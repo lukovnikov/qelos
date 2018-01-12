@@ -645,7 +645,8 @@ def run(lr=0.001,
     if _test:
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
-    similarity = q.CosineDistance()    # computes score
+    similarity = q.DotDistance()    # computes score
+
     rankmodel = RankModel(left_model, right_model, similarity)
     scoremodel = ScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
@@ -845,7 +846,7 @@ def run_stupid(lr=0.001,
     if _test:
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
-    similarity = q.CosineDistance()    # computes score
+    similarity = q.DotDistance()    # computes score
     rankmodel = RankModel(left_model, right_model, similarity)
     scoremodel = ScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
@@ -886,3 +887,4 @@ if __name__ == "__main__":
     # q.argprun(run_preload)
     q.argprun(run)
     # q.argprun(run_dummy)
+    # q.argprun(run_stupid)
