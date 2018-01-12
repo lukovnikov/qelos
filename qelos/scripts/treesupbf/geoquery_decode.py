@@ -232,8 +232,6 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                          q.SeqElemAccuracy(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0))
 
-    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr, weight_decay=wreg)
-
     # validation with freerunner
     freerunner = q.FreeRunner()
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -255,7 +253,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
-    q.train(encdec).train_on(train_loader, losses).optimizer(optimizer)\
+    q.train(encdec).train_on(train_loader, losses)\
+        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
