@@ -645,7 +645,7 @@ def run(lr=0.001,
     if _test:
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
-    similarity = q.DotDistance()    # computes score
+    similarity = q.CosineDistance()    # computes score
     rankmodel = RankModel(left_model, right_model, similarity)
     scoremodel = ScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
