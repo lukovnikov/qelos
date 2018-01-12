@@ -125,22 +125,38 @@ def remove_gradmult(xs):
             del xt._qelos["gradmult_removers"]
 
 
-def save_lr(x, lr):
-    add_qelos_key(x, "lr", None)
-    x._qelos["lr"] = lr
+def set_lr(x, lr):
+    if isinstance(x, nn.Module):
+        for p in q.params_of(x):
+            set_lr(p, lr)
+    else:
+        add_qelos_key(x, "lr", None)
+        x._qelos["lr"] = lr
 
 
 def remove_lr(x):
-    remove_qelos_key(x, "lr")
+    if isinstance(x, nn.Module):
+        for p in q.params_of(x):
+            remove_lr(p)
+    else:
+        remove_qelos_key(x, "lr")
 
 
-def save_l2(x, l2):
-    add_qelos_key(x, "l2", None)
-    x._qelos["l2"] = l2
+def set_l2(x, l2):
+    if isinstance(x, nn.Module):
+        for p in q.params_of(x):
+            set_l2(p, l2)
+    else:
+        add_qelos_key(x, "l2", None)
+        x._qelos["l2"] = l2
 
 
 def remove_l2(x):
-    remove_qelos_key(x, "l2")
+    if isinstance(x, nn.Module):
+        for p in q.params_of(x):
+            remove_l2(p)
+    else:
+        remove_qelos_key(x, "l2")
 
 
 def name2fn(x):

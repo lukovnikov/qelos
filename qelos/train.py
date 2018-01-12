@@ -482,6 +482,44 @@ class aux_train(object):
         self._iter += 1
 
 
+class OptimSettingsMaterializer(object):
+    def __init__(self, paramgroups, defaults):
+        super(OptimSettingsMaterializer, self).__init__()
+        self.groups = paramgroups
+        self.defaults = defaults
+        self.mapping = []
+        self.generated = None
+        self._generate()
+
+    def _generate(self):
+        gs = []
+        for group in self.groups:
+            g = {}
+            for k, v in self.defaults.items():
+                g[k] = q.v(v)
+            for k, v in group.items():
+                if k == "params":
+                    g[k] = group[k]
+                else:
+                    defarg = 1. if k not in self.defaults else self.defaults[k]
+                    g[k] = q.v(defarg) * q.v(group[k])
+            gs.append(g)
+            self.mapping.append((group, g))
+        self.generated = gs
+
+    def update(self):
+        for protogroup, matgroup in self.mapping:
+            for k, v in self.defaults.items():
+                matgroup[k] = q.v(v)
+            for k, v in protogroup.items():
+                assert(k in matgroup)
+                if k == "params":
+                    pass
+                else:
+                    defarg = 1. if k not in self.defaults else self.defaults[k]
+                    matgroup[k] = q.v(defarg) * q.v(protogroup[k])
+
+
 class train(object):
     START = 0
     END = 1
@@ -511,7 +549,7 @@ class train(object):
         self.usecuda = False
         self.cudaargs = ([], {})
         self.optim = None
-        self._proto_optim_settings = None
+        self._optim_settings_materializer = None
         self._l1, self._l2 = None, None
         self.transform_batch_inp = None
         self.transform_batch_out = None
@@ -606,10 +644,9 @@ class train(object):
     def optimizer(self, optimizer, **kw):
         if isinstance(optimizer, type):
             paramgroups = q.paramgroups_of(self.model)
-            self._proto_optim_settings = (paramgroups, kw)
-            # TODO: materialize proto settings for initial optim settings (which can be re-materialized later)
-            # optim = optimizer(paramgroups)
-            # self.optim = optim
+            osm = OptimSettingsMaterializer(paramgroups, kw)
+            self.optim = optimizer(osm.generated)
+            self._optim_settings_materializer = osm
         else:
             self.optim = optimizer
             assert(kw == {})
@@ -675,9 +712,8 @@ class train(object):
 
                 cost.backward()
 
-                if self._proto_optim_settings is not None:
-                    # TODO: materialize settings to update optim's groups
-                    pass
+                if self._optim_settings_materializer is not None:
+                    self._optim_settings_materializer.update()
 
                 self.do_callbacks(self.BEFORE_OPTIM_STEP)
                 self.optim.step()

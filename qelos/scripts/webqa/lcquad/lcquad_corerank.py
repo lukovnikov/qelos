@@ -369,9 +369,10 @@ class RankingComputer(object):
 
 class RecallAt(q.Loss):
     callwithoriginalinputs = True
-    def __init__(self, k, rankcomp=None, **kw):
+    def __init__(self, k, rankcomp=None, take=None, **kw):
         super(RecallAt, self).__init__(**kw)
         self.k = k
+        self.take = take
         self.bind(rankcomp)
 
     def bind(self, x):
@@ -441,6 +442,7 @@ def run_dummy(lr=.01,
         eid2rids[i] = set(np.random.randint(0, 500, (50,))) - {i,}
 
     _left_model = q.WordEmb(50, worddic=D)       # TODO model takes something, produces vector
+    q.set_lr(_left_model, 0.1)
     _right_model = q.WordEmb(50, worddic=D)      # TODO model takes something, produces vector
     # _right_model = _left_model
     left_model = q.Lambda(lambda x: _left_model(x)[0], register_modules=[_left_model])
@@ -473,7 +475,7 @@ def run_dummy(lr=.01,
     # TODO: add validation and test
     q.train(rankmodel).train_on(eidsloader, losses) \
         .set_batch_transformer(inptransform) \
-        .optimizer(optim) \
+        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg) \
         .valid_on(eidsloader, validlosses) \
         .train(epochs)
 
@@ -589,11 +591,17 @@ def run(lr=0.001,
     eid2rid_gold = eid2rid_gold       # mapping from example ids to rdata ids for gold
     eid2rids = eid2rid_neg           # maps from example ids to sets of rdata ids
 
-    maxqpids = 0
+    max_rids_gold = 0.
+    max_rids_neg = 0.
+    avg_rids_neg = 0.
     for eid, rid_gold in eid2rid_gold.items():
-        maxqpids = max(maxqpids, len(rid_gold))
+        max_rids_gold = max(max_rids_gold, len(rid_gold))
+        max_rids_neg = max(max_rids_neg, len(eid2rids[eid]))
+        avg_rids_neg += len(eid2rids[eid])
+    avg_rids_neg /= len(eid2rids)
 
-    print("max nr. of qpids per qid: {}".format(maxqpids))
+    print("max nr. of gold rids per eid: {}".format(max_rids_gold))
+    print("nr. of neg rids per eid: max: {}, avg: {}".format(max_rids_neg, avg_rids_neg))
 
     numex = len(ldata)
 
@@ -661,14 +669,217 @@ def run(lr=0.001,
     losses = q.lossarray(q.PairRankingLoss(margin=margin if rankmode == "gold" else None))
     validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
 
-    optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
+    # optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
 
     # TODO: add validation and test
     q.train(rankmodel).train_on(trainloader, losses)\
         .set_batch_transformer(inptransform)\
-        .optimizer(optim)\
+        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
         .valid_on(validloader, validlosses).valid_inter(validinter) \
         .cuda(cuda).train(epochs)
+
+
+def make_relemb_stupid(relD, dim=50, dropout=0):
+    rev_relD = {v: k for k, v in relD.items()}
+    max_id = max(relD.values()) + 1
+    direction = [0 if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1
+                 for i in range(max_id)]
+    direction = np.asarray(direction)
+    diremb = q.WordEmb(dim, worddic={"-": 0, "+": 1})
+    wordsm = q.StringMatrix()   # matrix of words that constitute label for each rel
+    wordsm.tokenize = lambda x: x.split()
+    relovers = []
+    for i in range(max_id):
+        if i not in rev_relD or re.match(r'-?<[^>]+>', rev_relD[i]):
+            wordsm.add("<MASK>")
+            relovers.append(rev_relD[i])
+        else:
+            relname = rev_relD[i] if i in rev_relD else None
+            relname = relname[1:] if relname[0] == "-" else relname
+            relname = re.sub(r"([A-Z])", r" \1", relname).lower()
+            wordsm.add(relname)
+    wordsm.finalize()
+    wordemb = q.WordEmb(dim=dim, worddic=wordsm.D)
+    gloveemb = q.PretrainedWordEmb(dim=dim, worddic=wordsm.D, fixed=True)
+    wordemb = wordemb.override(gloveemb)
+
+    class RelEmbComp(nn.Module):
+        def __init__(self, wordemb, diremb, **kw):
+            super(RelEmbComp, self).__init__(**kw)
+            self.wordemb = wordemb
+            self.diremb = diremb
+            self.dense = nn.Linear(wordsm.matrix.shape[1]*dim, dim)
+            self.dropout = nn.Dropout(p=dropout)
+
+        def forward(self, inpdata):
+            dirs = inpdata[:, 0]
+            wordids = inpdata[:, 1:]
+
+            rel_wordembs, rel_wordembs_mask = self.wordemb(wordids)
+            rel_wordembs = rel_wordembs.view(rel_wordembs.size(0), -1)
+            rel_wordembs = self.dropout(rel_wordembs)
+            rel_wordembs = self.dense(rel_wordembs)
+            rel_wordembs = nn.Tanh()(rel_wordembs)
+            rel_dirembs, rel_dirembs_mask = self.diremb(dirs)
+            rel_embs = rel_wordembs + rel_dirembs
+            return rel_embs
+
+    relembcomp = RelEmbComp(wordemb, diremb)
+
+    # test computer
+    if _test:
+        test_words = np.random.randint(2, 20, (10, 4))
+        test_words[:, 2:] = 0
+        test_words = q.var(test_words).v
+        test_dirs = q.var(np.random.randint(0, 2, (10,))).v
+        test_inpdata = torch.cat([test_dirs.unsqueeze(1), test_words], 1)
+        test_relembs = relembcomp(test_inpdata)
+        loss = test_relembs.sum()
+        loss.backward()
+        print("gradnorm wordemb base: {}".format(wordemb.base.embedding.weight.grad.norm()))
+        print("gradnorm wordemb base for mask: {}".format(wordemb.base.embedding.weight.grad[0, :].norm()))
+        # print("gradnorm wordemb over: {}".format(wordemb.over.inner.embedding.weight.grad.norm()))
+        # print("gradnorm wordemb base for mask: {}".format(wordemb.over.inner.embedding.weight.grad[0, :].norm()))
+        print("test backwarded")
+
+    relembcompdata = np.concatenate([direction[:, np.newaxis], wordsm.matrix], axis=1)
+    relemb = q.ComputedWordEmb(relembcompdata, relembcomp, worddic=relD)
+    reloverdic = dict(zip(relovers, range(len(relovers))))
+    relembover = q.WordEmb(dim, worddic=reloverdic)
+    relemb = relemb.override(relembover)
+
+    # test relemb
+    if _test:
+        test_relids = q.var(np.asarray([0, 1, 2, 9, 821, 834])).v
+        test_relembs, test_relembs_mask = relemb(test_relids)
+        loss = test_relembs.sum()
+        loss.backward()
+        print("gradnorm for over: {}".format(relembover.embedding.weight.grad.norm()))
+        print("relemb test backwarded")
+
+    return relemb
+
+
+
+def run_stupid(lr=0.001,
+        rankmode="gold",       # "gold" or "score"
+        margin=1.,
+        wreg=0.00001,
+        dropout=0.3,
+        epochs=10000,
+        batsize=50,
+        dim=50,
+        encdim=100,
+        validinter=10,
+        cuda=False,
+        gpu=0,
+        ):
+    _test = False
+    if cuda:
+        torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    tt.tick("loading data")
+    qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
+    tt.tock("data loaded")
+    # q.embed()
+
+    ldata = qsm.matrix            # should be tensor
+    rdata = chainsm.matrix            # should be tensor
+    rscores = None          # should be vector of scores for each rdata 0-axis slice
+
+    eid2lid = eid2lid            # mapping from example ids to ldata ids
+    eid2rid_gold = eid2rid_gold       # mapping from example ids to rdata ids for gold
+    eid2rids = eid2rid_neg           # maps from example ids to sets of rdata ids
+
+    max_rids_gold = 0.
+    max_rids_neg = 0.
+    avg_rids_neg = 0.
+    for eid, rid_gold in eid2rid_gold.items():
+        max_rids_gold = max(max_rids_gold, len(rid_gold))
+        max_rids_neg = max(max_rids_neg, len(eid2rids[eid]))
+        avg_rids_neg += len(eid2rids[eid])
+    avg_rids_neg /= len(eid2rids)
+
+    print("max nr. of gold rids per eid: {}".format(max_rids_gold))
+    print("nr. of neg rids per eid: max: {}, avg: {}".format(max_rids_neg, avg_rids_neg))
+
+    numex = len(ldata)
+
+    #################
+
+    relemb = make_relemb_stupid(chainsm.D, dim=dim, dropout=dropout)
+
+    # make left encoder
+    leftemb = q.WordEmb(dim, worddic=qsm.D)
+    leftemb_pretrained = q.PretrainedWordEmb(dim, worddic=qsm.D, fixed=True)
+    leftemb = leftemb.override(leftemb_pretrained)
+    # left model
+    left_model = q.RecurrentStack(
+        leftemb,
+        q.wire((-1, 0)),
+        q.TimesharedDropout(p=dropout),
+        q.wire((-1, 0), mask=(1, 1)),
+        q.BidirLSTMLayer(dim, encdim//2, mode="intercat").return_final("only"),
+    )
+
+    if _test:
+        test_l_encs = left_model(q.var(ldata[:5, :]).v)
+
+    class RightModel(nn.Module):
+        def __init__(self, **kw):
+            super(RightModel, self).__init__(**kw)
+            self.dense = nn.Linear(chainsm.matrix.shape[1]*dim, encdim)
+            self.relemb = relemb
+            self.dropout = nn.Dropout(p=dropout)
+
+        def forward(self, x):
+            rel_embs, rel_embs_mask = self.relemb(x)
+            rel_embs = rel_embs.view(rel_embs.size(0), -1)
+            rel_embs = self.dropout(rel_embs)
+            rel_encs = self.dense(rel_embs)
+            rel_encs = nn.Tanh()(rel_encs)
+            return rel_encs
+
+    right_model = RightModel()
+
+    if _test:
+        test_r_encs = right_model(q.var(rdata[:5, :]).v)
+
+    similarity = q.CosineDistance()    # computes score
+    rankmodel = RankModel(left_model, right_model, similarity)
+    scoremodel = ScoreModel(left_model, right_model, similarity)
+    rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
+    recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
+    mrr = MRR(rankcomp=rankcomp)
+
+    #################
+
+    eids = np.arange(0, numex)
+    traineids, valideids = q.split([eids], splits=(7, 3), random=False)
+    valideids, testeids = q.split(valideids, splits=(1, 2), random=False)
+
+    trainloader = q.dataload(*traineids, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*valideids, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testeids, batch_size=batsize, shuffle=False)
+
+    inptransform = InpFeeder(ldata, rdata, eid2lid, eid2rids,
+                             eid2rid_gold=eid2rid_gold if rankmode == "gold" else None,
+                             scores=rscores if rankmode == "score" else None)
+
+    losses = q.lossarray(q.PairRankingLoss(margin=margin if rankmode == "gold" else None))
+    validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
+
+    # optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
+
+    # TODO: add validation and test
+    q.train(rankmodel).train_on(trainloader, losses)\
+        .set_batch_transformer(inptransform)\
+        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
+        .valid_on(validloader, validlosses).valid_inter(validinter) \
+        .cuda(cuda).train(epochs)
+
+
+
 
 
 if __name__ == "__main__":
