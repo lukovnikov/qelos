@@ -37,6 +37,25 @@ class val(object):
         self.v = nn.Parameter(x, requires_grad=False)
 
 
+class hyperparam(object):
+    def __init__(self, initval):
+        super(hyperparam, self).__init__()
+        self._v = initval
+
+
+def v(x):
+    if isinstance(x, hyperparam):
+        return x._v
+    elif isinstance(x, (var, val)):
+        return x.v
+    elif isinstance(x, torch.autograd.Variable):
+        return x.data
+    elif isinstance(x, torch.Tensor):
+        return x.cpu().numpy()
+    else:
+        return x
+
+
 def name2fn(x):
     mapping = {"tanh": nn.Tanh,
                "sigmoid": nn.Sigmoid,

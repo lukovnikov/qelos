@@ -483,12 +483,29 @@ class aux_train(object):
 
 
 class train(object):
+    START = 0
+    END = 1
+    START_EPOCH = 2
+    END_EPOCH = 3
+    START_TRAIN = 4
+    END_TRAIN = 5
+    START_VALID = 6
+    END_VALID = 7
+    START_BATCH = 8
+    END_BATCH = 9
+    START_VALID_BATCH = 10
+    END_VALID_BATCH = 11
+    BEFORE_OPTIM_STEP = 12
+    AFTER_OPTIM_STEP = 13
+
     def __init__(self, model):
         super(train, self).__init__()
         self.model = model
         self.valid_model = None
         self.epochs = None
         self.current_epoch = 0
+        self.stop_training = None
+        self.current_batch = None
         self.trainlosses = None
         self.validlosses = None
         self.usecuda = False
@@ -504,55 +521,43 @@ class train(object):
         self.traindataloader = None
         self.validdataloader = None
         self.tt = ticktock("trainer")
-        # long API
-        self._clip_grad_norm = None
-        # early stopping
-        self._earlystop = False
-        self._earlystop_criterium = None
-        self._earlystop_selector = None
-        self._earlystop_select_history = None
-        # chained trainers
-        self._chained_trainers = []
+        # events
+        self._event_callbacks = {}
+
+    def hook(self, f, *es):
+        """ f to be called when e happens. Returns deleter for bound f """
+        for e in es:
+            if e not in self._event_callbacks:
+                self._event_callbacks[e] = []
+            self._event_callbacks[e].append(f)
+        def deleter():
+            for e in es:
+                self._event_callbacks[e].remove(f)
+        return deleter
+
+    def do_callbacks(self, e):
+        if not e in self._event_callbacks:
+            return
+        for f in self._event_callbacks[e]:
+            f(self, self.model)
 
     def chain_trainer(self, trainer):
-        self._chained_trainers.append(trainer)
+        trainerchainer = TrainerChainer(trainer)
+        atstart, atendbatch = trainerchainer.get_hooks()
+        self.hook(atendbatch, self.END_BATCH)
+        self.hook(atstart, self.START)
         return self
 
     def clip_grad_norm(self, x):
-        self._clip_grad_norm = x
+        self.hook(ClipGradNorm(x), self.BEFORE_OPTIM_STEP)
         return self
 
-    def earlystop(self, select=None, stopcrit=None):
-        if select is None:
-            select = lambda (x, y, i): y[0]
-        if stopcrit is None:
-            stopcrit = lambda h: h[-2] < h[-1] if len(h) >= 2 else False
-        elif isinstance(stopcrit, int):
-            stopcrit_window = stopcrit
-
-            def windowstopcrit(h):
-                window = stopcrit_window
-                minpos = 0
-                minval = np.infty
-                for i, he in enumerate(h):
-                    if he < minval:
-                        minval = he
-                        minpos = i
-                ret = minpos < len(h) - window
-                return ret
-
-            stopcrit = windowstopcrit
-        self._earlystop_criterium = stopcrit
-        self._earlystop_selector = select
-        self._earlystop_select_history = []
-        self._earlystop = True
-        return self
-
-    def earlystop_eval(self, trainscores, validscores):
-        selected = self._earlystop_selector(trainscores, validscores, self.current_epoch)
-        self._earlystop_select_history.append(selected)
-        ret = self._earlystop_criterium(self._earlystop_select_history)
-        return ret
+    def earlystop(self, select=None, patience=0, delta=0., minepochs=5,
+                  lessisbetter=True, custom=None, **kw):
+        self.hook(EarlyStopper(select=select, patience=patience, delta=delta,
+                               minepochs=minepochs, lessisbetter=lessisbetter,
+                               custom=custom, **kw),
+                  self.END_EPOCH)
 
     def cuda(self, usecuda, *args, **kwargs):
         self.usecuda = usecuda
@@ -610,18 +615,21 @@ class train(object):
         if self.epochs == 0:
             self.tt.msg("skipping training")
             return
-        stop = False
+        self.stop_training = False
         self.tt.tick("training")
         tt = ticktock("-")
         current_epoch = 0
         totaltrainbats = len(self.traindataloader)
-        while not stop:
+        while not self.stop_training:
             self.current_epoch = current_epoch
-            stop = self.current_epoch+1 == self.epochs
+            self.stop_training = self.current_epoch + 1 == self.epochs
             self.trainlosses.push_and_reset()
             tt.tick()
             self.model.train()
+            self.do_callbacks(self.START_EPOCH)
+            self.do_callbacks(self.START_TRAIN)
             for i, _batch in enumerate(self.traindataloader):
+                self.do_callbacks(self.START_BATCH)
                 self.optim.zero_grad()
                 params = q.params_of(self.model)
                 _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
@@ -638,33 +646,21 @@ class train(object):
                     gold = self.transform_batch_gold(gold)
                 trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
                 trainlosses[0].backward()
-                # grad total norm
-                tgn0 = None
-                if self._clip_grad_norm is not None:
-                    tgn0 = nn.utils.clip_grad_norm(self.model.parameters(), self._clip_grad_norm)
-                if tgn0 is not None:
-                    tgn = tgn0
-                else:
-                    tgn = 0
-                    for param in self.model.parameters():
-                        tgn += param.grad.pow(2).sum() if param.grad is not None else 0
-                    tgn = tgn.pow(1./2)
-                    tgn = tgn.data[0]
 
+                self.do_callbacks(self.BEFORE_OPTIM_STEP)
                 self.optim.step()
+                self.do_callbacks(self.AFTER_OPTIM_STEP)
 
-                tt.live("train - Epoch {}/{} - [{}/{}]: {} - TGN: {:.4f}"
+                tt.live("train - Epoch {}/{} - [{}/{}]: {}"
                         .format(
                             self.current_epoch+1,
                             self.epochs,
                             i+1,
                             totaltrainbats,
                             self.trainlosses.pp(),
-                            tgn
                             )
                         )
-                for chained_trainer in self._chained_trainers:
-                    chained_trainer.do_next_iter()
+                self.do_callbacks(self.END_BATCH)
             ttmsg = "Epoch {}/{} -- train: {}"\
                 .format(
                     self.current_epoch+1,
@@ -672,13 +668,16 @@ class train(object):
                     self.trainlosses.pp()
                 )
             train_epoch_losses = self.trainlosses.get_agg_errors()
+            self.do_callbacks(self.END_TRAIN)
             valid_epoch_losses = []
             if self.validlosses is not None and self.current_epoch % self._validinter == 0:
+                self.do_callbacks(self.START_VALID)
                 model = self.valid_model if self.valid_model is not None else self.model
                 model.eval()
                 self.validlosses.push_and_reset()
                 totalvalidbats = len(self.validdataloader)
                 for i, _batch in enumerate(self.validdataloader):
+                    self.do_callbacks(self.START_VALID_BATCH)
                     _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
                     _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not False else self.transform_batch_inp
                     _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not False else self.transform_batch_out
@@ -704,15 +703,13 @@ class train(object):
                                 self.validlosses.pp()
                                 )
                             )
+                    self.do_callbacks(self.END_VALID_BATCH)
                 ttmsg += " -- valid: {}".format(self.validlosses.pp())
                 valid_epoch_losses = self.validlosses.get_agg_errors()
+                self.do_callbacks(self.END_VALID)
             tt.stoplive()
             tt.tock(ttmsg)
-            if self._earlystop:
-                doearlystop = self.earlystop_eval(train_epoch_losses, valid_epoch_losses)
-                if doearlystop:
-                    tt.msg("stopping early")
-                stop = stop or doearlystop
+            self.do_callbacks(self.END_EPOCH)
             current_epoch += 1
         self.tt.tock("trained")
 
@@ -728,11 +725,92 @@ class train(object):
         self.epochs = epochs
         self.reset()
         self.initialize()
-        for chained_trainer in self._chained_trainers:
-            chained_trainer.reset()
-            chained_trainer.initialize()
+        self.do_callbacks(self.START)
         self.trainlosses.reset()
         self.trainloop()
+        self.do_callbacks(self.END)
+
+
+class TrainHooked(object):
+    pass
+
+
+class ClipGradNorm(TrainHooked):
+    def __init__(self, norm, **kw):
+        super(ClipGradNorm, self).__init__(**kw)
+        self._norm = norm
+
+    def __call__(self, trainer, model, **kw):
+        tgn0 = None
+        if self._norm is not None:
+            tgn0 = nn.utils.clip_grad_norm(model.parameters(), self._norm)
+        if tgn0 is not None:
+            tgn = tgn0
+        else:
+            tgn = 0
+            for param in model.parameters():
+                tgn += param.grad.pow(2).sum() if param.grad is not None else 0
+            tgn = tgn.pow(1./2)
+            tgn = tgn.data[0]
+        return tgn
+
+
+class TrainerChainer(TrainHooked):
+    def __init__(self, trainer, **kw):
+        super(TrainerChainer, self).__init__(**kw)
+        self._trainer = trainer
+
+    def get_hooks(self):
+        def atendbatch(*x, **kw):
+            self._trainer.do_next_iter()
+        def atstart(*x, **kw):
+            self._trainer.reset()
+            self._trainer.initialize()
+        return atstart, atendbatch
+
+
+class EarlyStopper(TrainHooked):
+    def __init__(self, select=None, patience=0, delta=0.,
+                 minepochs=5, lessisbetter=True, custom=None, **kw):
+        super(EarlyStopper, self).__init__(**kw)
+        if select is None:
+            select = lambda trainlosses, validlosses, epochnumber: validlosses[0] if len(validlosses) > 0 else None
+        self.monitor = select
+        self.patience = patience
+        self.delta = delta
+        self.minepochs = minepochs
+        self.history = []
+        self.customf = custom
+        self.lessisbetter = lessisbetter
+
+    def __call__(self, trainer, model, **kw):
+        train_epoch_losses = trainer.trainlosses.get_agg_errors()
+        valid_epoch_losses = trainer.validlosses.get_agg_errors() if trainer.validlosses is not None else []
+        i = trainer.current_epoch
+
+        monval = self.monitor(train_epoch_losses, valid_epoch_losses, i)
+        if monval is None:
+            return
+
+        self.history.append(monval)
+
+        # make early stopping decision based on history (including latest)
+        stop = False
+        stop |= self.customf(self.history)
+        if len(self.history) >= 2 + self.patience and i > self.minepochs:
+            last, check = self.history[-1], self.history[-2-self.patience]
+            inbetween = self.history[-self.patience-1:-1]
+            if self.lessisbetter:
+                _stop = last > check + self.delta
+                _cancel_stop = check > min(inbetween)
+            else:
+                _stop = last < check + self.delta
+                _cancel_stop = check < max(inbetween)
+            _stop &= not _cancel_stop
+            stop |= stop
+        trainer.stop_training |= stop
+
+
 
 
 # class ovar(object):
