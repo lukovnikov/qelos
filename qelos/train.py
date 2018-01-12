@@ -526,38 +526,41 @@ class train(object):
 
     def hook(self, f, *es):
         """ f to be called when e happens. Returns deleter for bound f """
-        for e in es:
+        if isinstance(f, AutoHooker) and len(es) > 0:
+            raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
+        if isinstance(f, AutoHooker):
+            hookdic = f.get_hooks()
+        else:
+            hookdic = dict(zip(es, [f]*len(es)))
+        for e, fe in hookdic.items():
             if e not in self._event_callbacks:
                 self._event_callbacks[e] = []
-            self._event_callbacks[e].append(f)
+            self._event_callbacks[e].append(fe)
         def deleter():
-            for e in es:
-                self._event_callbacks[e].remove(f)
+            for e, fe in hookdic.items():
+                self._event_callbacks[e].remove(fe)
         return deleter
 
     def do_callbacks(self, e):
         if not e in self._event_callbacks:
             return
         for f in self._event_callbacks[e]:
-            f(self, self.model)
+            f(self)
 
     def chain_trainer(self, trainer):
-        trainerchainer = TrainerChainer(trainer)
-        atstart, atendbatch = trainerchainer.get_hooks()
-        self.hook(atendbatch, self.END_BATCH)
-        self.hook(atstart, self.START)
+        self.hook(TrainerChainer(trainer))
         return self
 
     def clip_grad_norm(self, x):
-        self.hook(ClipGradNorm(x), self.BEFORE_OPTIM_STEP)
+        self.hook(ClipGradNorm(x))
         return self
 
     def earlystop(self, select=None, patience=0, delta=0., minepochs=5,
                   lessisbetter=True, custom=None, **kw):
         self.hook(EarlyStopper(select=select, patience=patience, delta=delta,
                                minepochs=minepochs, lessisbetter=lessisbetter,
-                               custom=custom, **kw),
-                  self.END_EPOCH)
+                               custom=custom, **kw))
+        return self
 
     def cuda(self, usecuda, *args, **kwargs):
         self.usecuda = usecuda
@@ -645,6 +648,7 @@ class train(object):
                 if self.transform_batch_gold is not None:
                     gold = self.transform_batch_gold(gold)
                 trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
+
                 trainlosses[0].backward()
 
                 self.do_callbacks(self.BEFORE_OPTIM_STEP)
@@ -731,16 +735,21 @@ class train(object):
         self.do_callbacks(self.END)
 
 
-class TrainHooked(object):
-    pass
+class AutoHooker(object):
+    def get_hooks(self):
+        raise NotImplemented()
 
 
-class ClipGradNorm(TrainHooked):
+class ClipGradNorm(AutoHooker):
     def __init__(self, norm, **kw):
         super(ClipGradNorm, self).__init__(**kw)
         self._norm = norm
 
-    def __call__(self, trainer, model, **kw):
+    def get_hooks(self):
+        return {train.BEFORE_OPTIM_STEP: self.on_before_optim_step}
+
+    def on_before_optim_step(self, trainer, **kw):
+        model = trainer.model
         tgn0 = None
         if self._norm is not None:
             tgn0 = nn.utils.clip_grad_norm(model.parameters(), self._norm)
@@ -755,21 +764,23 @@ class ClipGradNorm(TrainHooked):
         return tgn
 
 
-class TrainerChainer(TrainHooked):
+class TrainerChainer(AutoHooker):
     def __init__(self, trainer, **kw):
         super(TrainerChainer, self).__init__(**kw)
         self._trainer = trainer
 
     def get_hooks(self):
-        def atendbatch(*x, **kw):
-            self._trainer.do_next_iter()
-        def atstart(*x, **kw):
-            self._trainer.reset()
-            self._trainer.initialize()
-        return atstart, atendbatch
+        return {train.END_BATCH: self.on_end_batch, train.START: self.on_start}
+
+    def on_end_batch(self, *x, **kw):
+        self._trainer.do_next_iter()
+
+    def on_start(self, *x, **kw):
+        self._trainer.reset()
+        self._trainer.initialize()
 
 
-class EarlyStopper(TrainHooked):
+class EarlyStopper(AutoHooker):
     def __init__(self, select=None, patience=0, delta=0.,
                  minepochs=5, lessisbetter=True, custom=None, **kw):
         super(EarlyStopper, self).__init__(**kw)
@@ -783,7 +794,10 @@ class EarlyStopper(TrainHooked):
         self.customf = custom
         self.lessisbetter = lessisbetter
 
-    def __call__(self, trainer, model, **kw):
+    def get_hooks(self):
+        return {train.END_EPOCH: self.on_end_epoch}
+
+    def on_end_epoch(self, trainer, **kw):
         train_epoch_losses = trainer.trainlosses.get_agg_errors()
         valid_epoch_losses = trainer.validlosses.get_agg_errors() if trainer.validlosses is not None else []
         i = trainer.current_epoch
@@ -809,6 +823,15 @@ class EarlyStopper(TrainHooked):
             _stop &= not _cancel_stop
             stop |= stop
         trainer.stop_training |= stop
+
+
+class HyperparamScheduler(AutoHooker):
+    def __init__(self, hp, **kw):
+        super(HyperparamScheduler, self).__init__(**kw)
+        self._hp = hp
+
+    def on_start_epoch(self, trainer, **kw):
+        pass
 
 
 

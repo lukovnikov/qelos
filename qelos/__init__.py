@@ -1,5 +1,5 @@
 from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg, \
-    aux_train, loss_input_transform
+    aux_train, loss_input_transform, AutoHooker, HyperparamScheduler
 
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \
@@ -49,7 +49,7 @@ from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \
     wordids2string, wordmat2wordchartensor, slicer_from_flatcharseq, split, log, kw2dict, \
     save_sparse_tensor, load_sparse_tensor, makeiter, getkw
 
-from qelos.qutils import name2fn, var, val, seq_pack, seq_unpack, dataload, \
-    params_of, batchablesparse2densemask, rec_clone, intercat
+from qelos.qutils import name2fn, var, val, v, seq_pack, seq_unpack, dataload, \
+    params_of, batchablesparse2densemask, rec_clone, intercat, hyperparam
 
 # from tfun import TFModule
