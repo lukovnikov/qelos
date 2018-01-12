@@ -5,7 +5,7 @@ from qelos.scripts.treesupbf.trees import Node
 import sys
 
 
-OPT_LR = 0.1
+OPT_LR = 0.001
 OPT_EPOCHS = 100
 OPT_BATSIZE = 20
 
