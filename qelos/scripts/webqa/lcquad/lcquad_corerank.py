@@ -281,7 +281,7 @@ def load_preloaded(p="lcquad.multilin.chains.preload", allparses=True, cachep="l
     for qid in qidsD:
         if qid not in qids2qpids:
             qids2qpids[qid] = set()
-        for i in range(1):
+        for i in range(2):
             qpid = qid + ".P{}".format(i)
             if qpid in preload["goldchains"]:
                 qids2qpids[qid].add(qpid)
