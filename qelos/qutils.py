@@ -99,7 +99,12 @@ def get_qelos_key(x, k):
         return x._qelos[k]
 
 
-def gradmult(xs, frac=1.):
+def remove_qelos_key(x, k):
+    if has_qelos_key(x, k):
+        del x._qelos[k]
+
+
+def gradmult(xs, frac=1.):  # supports hyperparam as frac
     def hookf(_grad):
         return _grad * q.v(frac)
     if isinstance(xs, Variable):
@@ -118,6 +123,24 @@ def remove_gradmult(xs):
             for rmvr in xt._qelos["gradmult_removers"]:
                 rmvr()
             del xt._qelos["gradmult_removers"]
+
+
+def save_lr(x, lr):
+    add_qelos_key(x, "lr", None)
+    x._qelos["lr"] = lr
+
+
+def remove_lr(x):
+    remove_qelos_key(x, "lr")
+
+
+def save_l2(x, l2):
+    add_qelos_key(x, "l2", None)
+    x._qelos["l2"] = l2
+
+
+def remove_l2(x):
+    remove_qelos_key(x, "l2")
 
 
 def name2fn(x):
@@ -152,10 +175,28 @@ def dataload(*tensors, **kw):
     return dataloader
 
 
-def params_of(module):
-    params = module.parameters()
+def params_of(m):
+    params = m.parameters()
     params = filter(lambda x: x.requires_grad == True, params)
     return params
+
+
+def paramgroups_of(m):
+    params = q.params_of(m)
+    default_group = {"params": []}
+    paramgroups = []
+    for param in params:
+        g = None
+        if q.has_qelos_key(param, "lr"):
+            g = {"params": [param], "lr": q.get_qelos_key(param, "lr")}
+        if q.has_qelos_key(param, "l2"):
+            g = {"params": [param], "weight_decay": q.get_qelos_key(param, "l2")}
+        if g is None:
+            default_group["params"].append(param)
+        else:
+            paramgroups.append(g)
+    paramgroups.append(default_group)
+    return paramgroups
 
 
 def batchablesparse2densemask(bs):      # 2D !!!

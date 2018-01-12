@@ -281,7 +281,7 @@ def load_preloaded(p="lcquad.multilin.chains.preload", allparses=True, cachep="l
     for qid in qidsD:
         if qid not in qids2qpids:
             qids2qpids[qid] = set()
-        for i in range(3):
+        for i in range(1):
             qpid = qid + ".P{}".format(i)
             if qpid in preload["goldchains"]:
                 qids2qpids[qid].add(qpid)
@@ -588,6 +588,12 @@ def run(lr=0.001,
     eid2lid = eid2lid            # mapping from example ids to ldata ids
     eid2rid_gold = eid2rid_gold       # mapping from example ids to rdata ids for gold
     eid2rids = eid2rid_neg           # maps from example ids to sets of rdata ids
+
+    maxqpids = 0
+    for eid, rid_gold in eid2rid_gold.items():
+        maxqpids = max(maxqpids, len(rid_gold))
+
+    print("max nr. of qpids per qid: {}".format(maxqpids))
 
     numex = len(ldata)
 

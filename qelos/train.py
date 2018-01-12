@@ -511,6 +511,7 @@ class train(object):
         self.usecuda = False
         self.cudaargs = ([], {})
         self.optim = None
+        self._proto_optim_settings = None
         self._l1, self._l2 = None, None
         self.transform_batch_inp = None
         self.transform_batch_out = None
@@ -602,19 +603,22 @@ class train(object):
             self.valid_transform_batch_gold = gold_transform
         return self
 
-    def optimizer(self, optimizer, lr=None, **kw):
+    def optimizer(self, optimizer, **kw):
         if isinstance(optimizer, type):
-            optim = optimizer(q.params_of(self.model), lr=lr, **kw)
-            self.optim = optim
+            paramgroups = q.paramgroups_of(self.model)
+            self._proto_optim_settings = (paramgroups, kw)
+            # TODO: materialize proto settings for initial optim settings (which can be re-materialized later)
+            # optim = optimizer(paramgroups)
+            # self.optim = optim
         else:
             self.optim = optimizer
-            assert(lr is None)
             assert(kw == {})
         return self
 
     def l1l2(self, l1=0., l2=0.):
         self._l1 = l1
         self._l2 = l2
+        print("WARNING: better use weight_decay on optimizer")
         return self
 
     def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
@@ -670,6 +674,10 @@ class train(object):
                 cost = trainlosses[0] + l1reg + l2reg
 
                 cost.backward()
+
+                if self._proto_optim_settings is not None:
+                    # TODO: materialize settings to update optim's groups
+                    pass
 
                 self.do_callbacks(self.BEFORE_OPTIM_STEP)
                 self.optim.step()
