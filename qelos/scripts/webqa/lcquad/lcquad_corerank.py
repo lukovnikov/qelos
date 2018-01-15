@@ -683,15 +683,16 @@ def run(lr=0.001,
 def make_relemb_stupid(relD, dim=50, dropout=0):
     rev_relD = {v: k for k, v in relD.items()}
     max_id = max(relD.values()) + 1
-    direction = [0 if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1
+    direction = [-1. if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1.
                  for i in range(max_id)]
-    direction = np.asarray(direction)
+    direction = np.asarray(direction, dtype="float32")
+    direction[relD["<MASK>"]] = 0
     diremb = q.WordEmb(dim, worddic={"-": 0, "+": 1})
     wordsm = q.StringMatrix()   # matrix of words that constitute label for each rel
     wordsm.tokenize = lambda x: x.split()
     relovers = []
     for i in range(max_id):
-        if i not in rev_relD or re.match(r'-?<[^>]+>', rev_relD[i]):
+        if i not in rev_relD or rev_relD[i] in "<MASK> <RARE>".split():
             wordsm.add("<MASK>")
             relovers.append(rev_relD[i])
         else:
@@ -713,17 +714,11 @@ def make_relemb_stupid(relD, dim=50, dropout=0):
             self.dropout = nn.Dropout(p=dropout)
 
         def forward(self, inpdata):
-            dirs = inpdata[:, 0]
-            wordids = inpdata[:, 1:]
-
+            wordids = inpdata
             rel_wordembs, rel_wordembs_mask = self.wordemb(wordids)
-            rel_wordembs = rel_wordembs.view(rel_wordembs.size(0), -1)
-            rel_wordembs = self.dropout(rel_wordembs)
-            rel_wordembs = self.dense(rel_wordembs)
-            rel_wordembs = nn.Tanh()(rel_wordembs)
-            rel_dirembs, rel_dirembs_mask = self.diremb(dirs)
-            rel_embs = rel_wordembs + rel_dirembs
-            return rel_embs
+            rel_wordemb = torch.sum(rel_wordembs, 1) \
+                          / (torch.sum(rel_wordembs_mask, 1).float().unsqueeze(1) + 1e-16)
+            return rel_wordemb
 
     relembcomp = RelEmbComp(wordemb, diremb)
 
@@ -733,7 +728,7 @@ def make_relemb_stupid(relD, dim=50, dropout=0):
         test_words[:, 2:] = 0
         test_words = q.var(test_words).v
         test_dirs = q.var(np.random.randint(0, 2, (10,))).v
-        test_inpdata = torch.cat([test_dirs.unsqueeze(1), test_words], 1)
+        test_inpdata = test_words
         test_relembs = relembcomp(test_inpdata)
         loss = test_relembs.sum()
         loss.backward()
@@ -743,11 +738,25 @@ def make_relemb_stupid(relD, dim=50, dropout=0):
         # print("gradnorm wordemb base for mask: {}".format(wordemb.over.inner.embedding.weight.grad[0, :].norm()))
         print("test backwarded")
 
-    relembcompdata = np.concatenate([direction[:, np.newaxis], wordsm.matrix], axis=1)
-    relemb = q.ComputedWordEmb(relembcompdata, relembcomp, worddic=relD)
+    relembcompdata = wordsm.matrix
+    _relemb = q.ComputedWordEmb(relembcompdata, relembcomp, worddic=relD)
     reloverdic = dict(zip(relovers, range(len(relovers))))
     relembover = q.WordEmb(dim, worddic=reloverdic)
-    relemb = relemb.override(relembover)
+    _relemb = _relemb.override(relembover)
+
+    class RelEmb(nn.Module):
+        def __init__(self):
+            super(RelEmb, self).__init__()
+            self.relemb = _relemb    # only the word part
+            self.reldirs = q.val(direction).v
+
+        def forward(self, x):
+            rel_embs, rel_embs_mask = self.relemb(x)
+            rel_dirs = self.reldirs[x]
+            ret = torch.cat([rel_dirs.unsqueeze(1), rel_embs], 1)
+            return ret, rel_embs_mask
+
+    relemb = RelEmb()
 
     # test relemb
     if _test:
@@ -760,6 +769,58 @@ def make_relemb_stupid(relD, dim=50, dropout=0):
 
     return relemb
 
+
+def make_stupid_encoder(dim, encdim, qsm, dropout):
+    leftemb = q.WordEmb(dim, worddic=qsm.D)
+    leftemb_pretrained = q.PretrainedWordEmb(dim, worddic=qsm.D, fixed=True)
+    leftemb = leftemb.override(leftemb_pretrained)
+
+    class StupidLeftModel(nn.Module):
+        def __init__(self):
+            super(StupidLeftModel, self).__init__()
+            self.emb = leftemb
+            self.dropout = q.TimesharedDropout(p=dropout)
+            self.layer = q.BidirLSTMLayer(dim, encdim // 2, mode="intercat").return_final(True)
+            self.addr_dense = nn.Linear(encdim, 2)
+            self.dirs_dense = nn.Linear(encdim, 1)
+            self.term_dense = nn.Linear(encdim, 1)
+            self.sm = q.Softmax()
+
+        def forward(self, x):
+            embs, mask = self.emb(x)
+            embs = self.dropout(embs)
+            finalencs, allencs = self.layer(embs, mask=mask)
+            scores = self.addr_dense(allencs)
+            alphas, _ = self.sm(scores[:, :, 0], mask=mask)
+            betas, _ = self.sm(scores[:, :, 1], mask=mask)
+            alphasumm = torch.sum(embs * alphas.unsqueeze(2), 1)
+            betasumm = torch.sum(embs * betas.unsqueeze(2), 1)
+            alphasumm_enc = torch.sum(allencs * alphas.unsqueeze(2), 1)
+            betasumm_enc = torch.sum(allencs * betas.unsqueeze(2), 1)
+            summ_enc = torch.stack([alphasumm_enc, betasumm_enc], 1)
+            dirs = self.dirs_dense(summ_enc)
+            dirs = dirs.squeeze(-1)
+            dirs = nn.Tanh()(dirs)
+            terms = self.term_dense(finalencs)
+            terms = terms.squeeze(-1)
+            terms = nn.Tanh()(terms)
+            return alphasumm, betasumm, dirs, terms
+
+    return StupidLeftModel()
+
+
+class StupidScorer(torch.nn.Module):
+    def __init__(self, sim):
+        super(StupidScorer, self).__init__()
+        self.sim = sim
+
+    def forward(self, lvecs, rvecs):
+        # lvecs: tuple of (1st_enc, 2nd_enc, dirs, terms)
+        # rvecs: tuple of (1st_enc, 2nd_enc, dirs)
+        firstsim = self.sim(lvecs[0], rvecs[0])
+        secondsim = self.sim(lvecs[1], rvecs[1])
+        sim = firstsim + secondsim * lvecs[-1]
+        return sim
 
 
 def run_stupid(lr=0.001,
@@ -775,7 +836,7 @@ def run_stupid(lr=0.001,
         cuda=False,
         gpu=0,
         ):
-    _test = False
+    _test = True
     if cuda:
         torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
@@ -811,17 +872,7 @@ def run_stupid(lr=0.001,
     relemb = make_relemb_stupid(chainsm.D, dim=dim, dropout=dropout)
 
     # make left encoder
-    leftemb = q.WordEmb(dim, worddic=qsm.D)
-    leftemb_pretrained = q.PretrainedWordEmb(dim, worddic=qsm.D, fixed=True)
-    leftemb = leftemb.override(leftemb_pretrained)
-    # left model
-    left_model = q.RecurrentStack(
-        leftemb,
-        q.wire((-1, 0)),
-        q.TimesharedDropout(p=dropout),
-        q.wire((-1, 0), mask=(1, 1)),
-        q.BidirLSTMLayer(dim, encdim//2, mode="intercat").return_final("only"),
-    )
+    left_model = make_stupid_encoder(dim, encdim, qsm, dropout)
 
     if _test:
         test_l_encs = left_model(q.var(ldata[:5, :]).v)
@@ -834,19 +885,17 @@ def run_stupid(lr=0.001,
             self.dropout = nn.Dropout(p=dropout)
 
         def forward(self, x):
-            rel_embs, rel_embs_mask = self.relemb(x)
-            rel_embs = rel_embs.view(rel_embs.size(0), -1)
-            rel_embs = self.dropout(rel_embs)
-            rel_encs = self.dense(rel_embs)
-            rel_encs = nn.Tanh()(rel_encs)
-            return rel_encs
+            rel_embs, rel_embs_mask = self.relemb(x[:, 0])
+            rel_embs2, rel_embs_mask2 = self.relemb(x[:, 1])
+            rel_encs = torch.stack([rel_embs, rel_embs2], 2)
+            return rel_embs[:, 1:], rel_embs2[:, 1:], rel_encs[:, 0, :]
 
     right_model = RightModel()
 
     if _test:
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
-    similarity = q.DotDistance()    # computes score
+    similarity = StupidScorer(q.DotDistance())  #q.DotDistance()    # computes score
     rankmodel = RankModel(left_model, right_model, similarity)
     scoremodel = ScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
@@ -885,6 +934,6 @@ def run_stupid(lr=0.001,
 
 if __name__ == "__main__":
     # q.argprun(run_preload)
-    q.argprun(run)
+    # q.argprun(run)
     # q.argprun(run_dummy)
-    # q.argprun(run_stupid)
+    q.argprun(run_stupid)

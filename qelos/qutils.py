@@ -40,7 +40,19 @@ class val(object):
 class hyperparam(object):
     def __init__(self, initval):
         super(hyperparam, self).__init__()
+        self._initval = initval
         self._v = initval
+
+    def reset(self):
+        self._v = self._initval
+
+    @property
+    def v(self):
+        return self._v
+
+    @v.setter
+    def v(self, value):
+        self._v = value
 
 
 def v(x):
