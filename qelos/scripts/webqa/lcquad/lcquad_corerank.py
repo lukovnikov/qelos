@@ -819,7 +819,7 @@ class StupidScorer(torch.nn.Module):
         # rvecs: tuple of (1st_enc, 2nd_enc, dirs)
         firstsim = self.sim(lvecs[0], rvecs[0])
         secondsim = self.sim(lvecs[1], rvecs[1])
-        sim = firstsim + secondsim * lvecs[-1]
+        sim = firstsim + secondsim #* lvecs[-1]
         return sim
 
 
@@ -836,7 +836,7 @@ def run_stupid(lr=0.001,
         cuda=False,
         gpu=0,
         ):
-    _test = True
+    _test = False
     if cuda:
         torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
