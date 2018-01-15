@@ -819,7 +819,7 @@ class StupidScorer(torch.nn.Module):
         # rvecs: tuple of (1st_enc, 2nd_enc, dirs)
         firstsim = self.sim(lvecs[0], rvecs[0])
         secondsim = self.sim(lvecs[1], rvecs[1])
-        sim = firstsim + secondsim #* lvecs[-1]
+        sim = firstsim + secondsim * lvecs[-1]
         return sim
 
 
