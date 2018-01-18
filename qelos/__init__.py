@@ -8,7 +8,7 @@ from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
 
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, \
     RankingLoss, SeqRankingLoss, CrossEntropyLoss, \
-    SeqCrossEntropyLoss, PairRankingLoss, Accuracy, DiscreteLoss, Loss
+    SeqCrossEntropyLoss, PairRankingLoss, Accuracy, DiscreteLoss, Loss, MacroBLEU
 
 from qelos.seq import Decoder, DecoderCell, ContextDecoderCell, \
     AttentionDecoderCell, Attention, ContextDecoder, AttentionDecoder, \

@@ -325,6 +325,34 @@ class SeqElemAccuracy(DiscreteLoss):
         return acc, total
 
 
+class MacroBLEU(DiscreteLoss):
+    """ macro-averaged BLEU over sequences """
+    def __init__(self, order=4, ignore_index=None, **kw):
+        super(MacroBLEU, self).__init__(ignore_index=ignore_index, **kw)
+        self.order = order
+        self.weights = tuple([1. / self.order for _ in range(self.order)])
+
+    def forward(self, x, gold, mask=None):
+        if x.size(1) > gold.size(1):
+            x = x[:, :gold.size(1)]
+        if mask is not None and mask.data[0, 0, 1] > 1:     # batchable sparse
+            mask = q.batchablesparse2densemask(mask)
+        if mask is not None:
+            x = x + torch.log(mask.float())
+        ignoremask = self._get_ignore_mask(gold)
+        maxes, argmaxes = torch.max(x, dim=2)
+        diff = argmaxes == gold
+        if ignoremask is not None:
+            diff = diff * ignoremask
+            total = torch.sum(ignoremask.long()).data[0]
+        else:
+            total = gold.size(0) * gold.size(1)
+        acc = torch.sum(diff.float())
+        if self.size_average:
+            acc = acc / total
+        return acc, total
+
+
 class OldSeqNLLLoss(nn.NLLLoss):
     def __init__(self, weight=None, size_average=True, time_average=True, ignore_index=0):
         if ignore_index is not None:

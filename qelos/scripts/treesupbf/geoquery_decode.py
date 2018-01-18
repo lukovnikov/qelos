@@ -63,7 +63,7 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
     tt.tick("loading data")
     ism = q.StringMatrix()
     ism.tokenize = lambda x: x.split()
-    osm = q.StringMatrix(indicate_start=True)
+    osm = q.StringMatrix(indicate_start=True, indicate_end=True)
     osm.tokenize = lambda x: x.split()
 
     numtrain = 0
@@ -260,7 +260,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         return tree
 
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                              q.SeqElemAccuracy(ignore_index=0),
+                              q.MacroBLEU(ignore_index=0),
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
