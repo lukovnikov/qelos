@@ -78,7 +78,7 @@ class DiscreteLoss(Loss):
         return mask
 
 
-class SeqLoss(nn.Module):
+class SeqLoss(nn.Module):       # TODO: take end of sequence token into account
     def __init__(self, time_agg="sum", **kw):
         super(SeqLoss, self).__init__(**kw)
         self.time_agg = time_agg
@@ -303,7 +303,7 @@ class SeqAccuracy(SeqLoss, Accuracy):
                                           time_agg="all")
 
 
-class SeqElemAccuracy(DiscreteLoss):
+class SeqElemAccuracy(DiscreteLoss):    # TODO take end of sequence token into account
     def forward(self, x, gold, mask=None):
         if x.size(1) > gold.size(1):
             x = x[:, :gold.size(1)]
@@ -325,7 +325,7 @@ class SeqElemAccuracy(DiscreteLoss):
         return acc, total
 
 
-class MacroBLEU(DiscreteLoss):
+class MacroBLEU(DiscreteLoss):      # TODO take end of sequence token into account
     """ macro-averaged BLEU over sequences """
     def __init__(self, order=4, ignore_index=None, **kw):
         super(MacroBLEU, self).__init__(ignore_index=ignore_index, **kw)
