@@ -53,11 +53,13 @@ class Logger(q.AutoHooker):
 
     def save_settings(self, **kw):
         p = self.p + "/" + OPT_SETTINGS_NAME
-        json.dump(kw, open(p, "w"), sort_keys=True)
+        with open(p, "w") as f:
+            json.dump(kw, f, sort_keys=True)
 
     def load_settings(self):
         p = self.p + "/" + OPT_SETTINGS_NAME
-        r = json.load(p)
+        with open(p) as f:
+            r = json.load(f)
         return r
 
     def update_settings(self, **kw):
