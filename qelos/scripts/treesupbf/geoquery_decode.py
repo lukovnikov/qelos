@@ -199,7 +199,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              cuda=False, gpu=0,
                              validontest=False):
     settings = locals().copy()
-    logger = q.Logger(prefix="testexp")
+    logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
 
     if validontest:
