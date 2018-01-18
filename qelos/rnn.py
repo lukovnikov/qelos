@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 import qelos as q
-from qelos.basic import Stack, Lambda
+from qelos.basic import Stack, Lambda, Dropout
 
 
 # region I. RNN cells
@@ -327,30 +327,24 @@ class GRUCell(RNUBase):
 
     def __init__(self, indim, outdim, use_bias=True,
                  dropout_in=None, dropout_rec=None, zoneout=None,
-                 shared_dropout_rec=None, shared_zoneout=None,
                  use_cudnn_cell=True, activation="tanh",
                  gate_activation="sigmoid", rec_batch_norm=None):    # custom activations have only an effect when not using cudnn cell
         super(GRUCell, self).__init__()
-        self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout, self.shared_dropout_rec, self.shared_zoneout = \
-            indim, outdim, use_bias, dropout_in, dropout_rec, zoneout, shared_dropout_rec, shared_zoneout
+        self.indim, self.outdim, self.use_bias, self.dropout_in, self.dropout_rec, self.zoneout= \
+            indim, outdim, use_bias, dropout_in, dropout_rec, zoneout
         self.use_cudnn_cell = use_cudnn_cell
         self.activation, self.gate_activation, self.recbn = activation, gate_activation, rec_batch_norm
         self.nncell = None
         self.setcell()
 
-        if self.dropout_in:
-            self.dropout_in = nn.Dropout(p=self.dropout_in)
-        if self.dropout_rec:
-            self.dropout_rec = nn.Dropout(p=self.dropout_rec)
-        if self.shared_dropout_rec:
-            self.shared_dropout_rec = nn.Dropout(p=self.shared_dropout_rec)
-            self.shared_dropout_reccer = None
-        if self.zoneout:
-            self.zoner = None
-            self.zoneout = nn.Dropout(p=self.zoneout)
-        if self.shared_zoneout:
-            self.shared_zoneout = nn.Dropout(p=self.shared_zoneout)
-            self.shared_zoneouter = None
+        if self.dropout_in and not isinstance(self.dropout_in, (q.Dropout, nn.Dropout)):
+            self.dropout_in = q.RecDropout(p=self.dropout_in)
+        if self.dropout_rec and not isinstance(self.dropout_rec, (q.Dropout, nn.Dropout)):
+            self.dropout_rec = q.RecDropout(p=self.dropout_rec)
+        if self.zoneout and not isinstance(self.zoneout, (Zoneout,)):
+            self.zoneout = Zoneout(p=self.zoneout)
+        assert(isinstance(self.zoneout, (Zoneout, type(None))))
+        assert(isinstance(self.zoneout, (q.Dropout, type(None))))
 
     @property
     def h_0(self):
@@ -385,8 +379,12 @@ class GRUCell(RNUBase):
 
     def reset_state(self):
         super(GRUCell, self).reset_state()
-        self.shared_dropout_reccer = None
-        self.shared_zoneouter = None
+        if isinstance(self.dropout_in, RecDropout):
+            self.dropout_in.reset()
+        if isinstance(self.dropout_rec, RecDropout):
+            self.dropout_rec.reset()
+        if isinstance(self.zoneout, Zoneout):
+            self.zoneout.reset()
 
     @property
     def state_spec(self):
@@ -397,24 +395,11 @@ class GRUCell(RNUBase):
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             h_tm1 = self.dropout_rec(h_tm1)
-        if self.shared_dropout_rec:
-            if self.shared_dropout_reccer is None:
-                ones = q.var(torch.ones(h_tm1.size())).cuda(crit=h_tm1).v
-                self.shared_dropout_reccer = [self.shared_dropout_rec(ones)]
-            h_tm1 = torch.mul(h_tm1, self.shared_dropout_reccer[0])
 
         h_t = self.apply_nncell(x_t, h_tm1, t=t)
 
         if self.zoneout:
-            if self.zoner is None:
-                self.zoner = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
-            zoner = self.zoneout(self.zoner)
-            h_t = torch.mul(1 - zoner, h_tm1) + torch.mul(zoner, h_t)
-        if self.shared_zoneout:
-            if self.shared_zoneouter is None:
-                ones = q.var(torch.ones(h_t.size())).cuda(crit=h_t).v
-                self.shared_zoneouter = [self.shared_zoneout(ones)]
-            h_t = torch.mul(1 - self.shared_zoneouter[0], h_tm1) + torch.mul(self.shared_zoneouter[0], h_t)
+            h_t = self.zoneout(zip(h_tm1, h_t))
         return h_t, h_t
 
 
@@ -478,28 +463,11 @@ class LSTMCell(GRUCell):
         if self.dropout_in:
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
-            y_tm1 = self.dropout_rec(y_tm1)
-            c_tm1 = self.dropout_rec(c_tm1)
-        if self.shared_dropout_rec:
-            if self.shared_dropout_reccer is None:
-                ones = q.var(torch.ones(c_tm1.size())).cuda(crit=c_tm1).v
-                self.shared_dropout_reccer = [self.shared_dropout_rec(ones), self.shared_dropout_rec(ones)]
-            y_tm1 = torch.mul(c_tm1, self.shared_dropout_reccer[0])
-            c_tm1 = torch.mul(y_tm1, self.shared_dropout_reccer[1])
+            y_tm1, c_tm1 = self.dropout_rec(y_tm1, c_tm1)
         # endregion
         y_t, c_t = self.apply_nncell(x_t, (y_tm1, c_tm1), t=t)
         if self.zoneout:
-            if self.zoner is None:
-                self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
-            zoner = self.zoneout(self.zoner)
-            c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
-            y_t = torch.mul(1 - zoner, y_tm1) + torch.mul(zoner, y_t)
-        if self.shared_zoneout:
-            if self.shared_zoneouter is None:
-                ones = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
-                self.shared_zoneouter = [self.shared_zoneout(ones), self.shared_zoneout(ones)]
-            c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
-            y_t = torch.mul(1 - self.shared_zoneouter[1], y_tm1) + torch.mul(self.shared_zoneouter[1], y_t)
+            y_t, c_t = self.zoneout((y_tm1, y_t), (c_tm1, c_t))
         return y_t, c_t, y_t
 
 
@@ -541,19 +509,15 @@ class _SRUCell(nn.Module):
         return y_t, c_t
 
 
-
 class SRUCell(GRUCell):
     def __init__(self, dim, use_bias=True,
                  dropout_in=None, dropout_rec=None, zoneout=None,
-                 shared_dropout_rec=None, shared_zoneout=None,
                  use_cudnn_cell=False, activation="tanh",
                  gate_activation="sigmoid",
                  rec_batch_norm=None):  # custom activations have only an effect when not using cudnn cell
         self.dim = dim
         super(SRUCell, self).__init__(dim, dim, use_bias=use_bias,
-          dropout_in=dropout_in, dropout_rec=dropout_rec,
-          shared_dropout_rec=shared_dropout_rec,
-          shared_zoneout=shared_zoneout, zoneout=zoneout,
+          dropout_in=dropout_in, dropout_rec=dropout_rec, zoneout=zoneout,
           use_cudnn_cell=use_cudnn_cell,
           activation=activation, gate_activation=gate_activation)
 
@@ -573,24 +537,11 @@ class SRUCell(GRUCell):
             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             c_tm1 = self.dropout_rec(c_tm1)
-        if self.shared_dropout_rec:
-            if self.shared_dropout_reccer is None:
-                ones = q.var(torch.ones(c_tm1.size())).cuda(crit=c_tm1).v
-                self.shared_dropout_reccer = [self.shared_dropout_rec(ones)]
-            c_tm1 = torch.mul(c_tm1, self.shared_dropout_reccer[0])
 
         y_t, c_t = self.apply_nncell(x_t, c_tm1, t=t)
 
         if self.zoneout:
-            if self.zoner is None:
-                self.zoner = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
-            zoner = self.zoneout(self.zoner)
-            c_t = torch.mul(1 - zoner, c_tm1) + torch.mul(zoner, c_t)
-        if self.shared_zoneout:
-            if self.shared_zoneouter is None:
-                ones = q.var(torch.ones(c_t.size())).cuda(crit=c_t).v
-                self.shared_zoneouter = [self.shared_zoneout(ones)]
-            c_t = torch.mul(1 - self.shared_zoneouter[0], c_tm1) + torch.mul(self.shared_zoneouter[0], c_t)
+            c_t = self.zoneout((c_tm1, c_t))
         return y_t, c_t
 
 # endregion
@@ -609,6 +560,7 @@ class RNNLayer(nn.Module, Recurrent):
         self._return_final = False
         self._return_all = True
         self._return_mask = False
+        self._reverse = False
 
     def return_all(self, truth=True):
         if truth == "only":
@@ -628,7 +580,12 @@ class RNNLayer(nn.Module, Recurrent):
         self._return_mask = truth
         return self
 
-    def forward(self, x, mask=None, init_states=None, reverse=False):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
+    def reverse(self, truth=True):
+        self._reverse = truth
+        return self
+
+    def forward(self, x, mask=None, init_states=None, reverse=None):       # (batsize, seqlen, indim), (batsize, seqlen), [(batsize, hdim)]
+        reverse = self._reverse if reverse is None else reverse
         batsize = x.size(0)
         if init_states is not None:
             if not q.issequence(init_states):
@@ -1091,6 +1048,37 @@ class PositionwiseForward(nn.Module, Recurrent):       # TODO: make Recurrent
         output = self.w_2(output).transpose(2, 1)
         output = self.dropout(output)
         return self.layer_norm(output + residual)
+
+
+class RecDropout(Dropout):
+    """ Variational Dropout """
+    def __init__(self, p=.5):
+        super(RecDropout, self).__init__(p=p)
+        self.mask = None
+
+    def reset(self):
+        self.mask = None
+
+    def forward(self, *x):
+        y = x
+        if self.training:
+            if self.mask is None:
+                self.mask = map(lambda xe: self.d(q.var(torch.ones(xe.size())).cuda(xe).v), x)
+            y = map(lambda (xe, me): xe * me, zip(x, self.mask))
+        y = y[0] if len(y) == 1 else y
+        return y
+
+
+class Zoneout(RecDropout):
+    def forward(self, *x):
+        y = [xe[1] for xe in x]
+        if self.training:
+            if self.mask is None:
+                self.mask = map(lambda (_, xe): self.d(q.var(torch.ones(xe.size())).cuda(xe).v), x)
+                self.mask = (self.mask > 0).float()
+            y = [torch.mul(1 - zoner, h_t) + torch.mul(zoner, h_tm1) for (h_tm1, h_t), zoner in zip(x, self.mask)]
+        y = y[0] if len(y) == 1 else y
+        return y
 
 
 class TimesharedDropout(nn.Module, Recurrent):

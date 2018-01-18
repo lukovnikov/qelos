@@ -4,7 +4,7 @@ from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \
     BidirLSTMLayer, Recurrent, Reccable, PositionwiseForward, \
-    TimesharedDropout, CatLSTMCell, ReccableLambda, RecurrentLambda
+    TimesharedDropout, CatLSTMCell, ReccableLambda, RecurrentLambda, RecDropout
 
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, \
     RankingLoss, SeqRankingLoss, CrossEntropyLoss, \
@@ -20,7 +20,7 @@ from qelos.basic import Softmax, LogSoftmax, BilinearDistance, \
     CosineDistance, DotDistance, Forward, ForwardDistance, \
     Distance, Lambda, Stack, TrilinearDistance, LNormDistance, \
     SeqBatchNorm1d, CReLU, Identity, argmap, argsave, persist_kwargs, \
-    LayerNormalization, wire
+    LayerNormalization, wire, Dropout
 
 from qelos.containers import ModuleList
 

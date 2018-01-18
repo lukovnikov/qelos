@@ -641,6 +641,17 @@ class Identity(nn.Module):
         return x
 
 
+class Dropout(nn.Module):
+    def __init__(self, p=.5):
+        super(Dropout, self).__init__()
+        self.d = nn.Dropout(p=p, inplace=False)
+
+    def forward(self, *x):
+        y = map(lambda z: self.d(z), x)
+        y = y[0] if len(y) == 1 else y
+        return y
+
+
 class LayerNormalization(nn.Module):
     ''' Layer normalization module '''
 

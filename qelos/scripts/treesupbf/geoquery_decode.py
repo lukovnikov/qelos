@@ -167,10 +167,6 @@ def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( st
     #     return head, x[i:]
 
 
-
-
-
-
 def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
@@ -182,17 +178,27 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    trainmats, testmats, inpD, outD = load_data(reverse_input=True)
+    trainmats, testmats, inpD, outD = load_data(reverse_input=False)
 
     inpemb = q.WordEmb(inpembdim, worddic=inpD)     # TODO glove embeddings
     outemb = q.WordEmb(outembdim, worddic=outD)
     linout = q.WordLinout(innerdim + innerdim, worddic=outD)
 
-    encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)
+    # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
+    encoderstack = q.RecStack(
+        q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
+        q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
+    ).to_layer().return_final().return_mask().reverse()
+    encoder = q.RecurrentStack(
+        inpemb,
+        encoderstack,
+    )
 
-    layers = (torch.nn.Dropout(0),
-              q.GRUCell(outembdim, innerdim),       # TODO: LSTM cell
-              q.GRUCell(innerdim, innerdim))
+    # test
+    # testencret = encoder(q.var(trainmats[0][:5]).v)
+
+    layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
+              )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                linout, ctx2out=False)
@@ -210,7 +216,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
         def forward(self, inpseq, outinpseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
-            self.decoder.set_init_states(None, final_encoding)
+            # self.decoder.set_init_states(None, final_encoding)
             decoding = self.decoder(outinpseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
