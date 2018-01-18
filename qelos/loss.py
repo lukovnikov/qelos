@@ -327,10 +327,11 @@ class SeqElemAccuracy(DiscreteLoss):    # TODO take end of sequence token into a
 
 class MacroBLEU(DiscreteLoss):      # TODO take end of sequence token into account
     """ macro-averaged BLEU over sequences """
-    def __init__(self, order=4, ignore_index=None, **kw):
+    def __init__(self, order=4, stopid=None, ignore_index=None, **kw):
         super(MacroBLEU, self).__init__(ignore_index=ignore_index, **kw)
         self.order = order
         self.weights = tuple([1. / self.order for _ in range(self.order)])
+        self.stopid = stopid
 
     def forward(self, x, gold, mask=None):
         if x.size(1) > gold.size(1):

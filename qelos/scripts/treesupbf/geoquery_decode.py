@@ -63,7 +63,7 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
     tt.tick("loading data")
     ism = q.StringMatrix()
     ism.tokenize = lambda x: x.split()
-    osm = q.StringMatrix(indicate_start=True, indicate_end=True)
+    osm = q.StringMatrix(indicate_start=True, indicate_end=False)
     osm.tokenize = lambda x: x.split()
 
     numtrain = 0
