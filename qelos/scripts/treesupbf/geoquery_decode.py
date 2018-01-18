@@ -183,7 +183,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     if embdim > 0:
         tt.msg("embdim overrides inpembdim and outembdim")
-        inpembdim, outembdim = embdim
+        inpembdim, outembdim = embdim, embdim
 
     inpemb = q.WordEmb(inpembdim, worddic=inpD)     # TODO glove embeddings
     outemb = q.WordEmb(outembdim, worddic=outD)
