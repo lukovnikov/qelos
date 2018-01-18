@@ -266,6 +266,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqElemAccuracy(ignore_index=0),
+                         q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                          q.SeqAccuracy(ignore_index=0))
 
     # validation with freerunner
@@ -284,7 +285,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         tree = parse_query_tree(treestring)
         return tree
 
-    validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+    validlosses = q.lossarray(#q.SeqCrossEntropyLoss(ignore_index=0),
                               q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
