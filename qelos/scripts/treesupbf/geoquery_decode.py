@@ -169,7 +169,7 @@ def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( st
 
 def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=None,
+                             embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
                              validontest=False):
@@ -181,7 +181,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     ttt = q.ticktock("test")
     trainmats, testmats, inpD, outD = load_data(reverse_input=False)
 
-    if embdim is not None:
+    if embdim > 0:
         tt.msg("embdim overrides inpembdim and outembdim")
         inpembdim, outembdim = embdim
 
