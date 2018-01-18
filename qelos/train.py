@@ -32,12 +32,16 @@ class TensorDataset(Dataset):      # TODO
 
 class HistoryAggregator(object):
     """ Keeps history. Defines aggregator interface, keeps history """
-    def __init__(self):
+    def __init__(self, name=None):
         super(HistoryAggregator, self).__init__()
         self.agg_history = []
+        self.agg_epochs = []
+        self.name = name
 
-    def push_agg_to_history(self):
+    def push_agg_to_history(self, epoch=None):
         self.agg_history.append(self.get_agg_error())
+        if epoch is not None:
+            self.agg_epochs.append(epoch)
 
     def get_agg_error_history(self):
         return self.agg_history
@@ -129,6 +133,12 @@ class LossAndAgg(LossWithAgg):
     def cuda(self, *a, **kw):
         self.loss.cuda(*a, **kw)
 
+    def set_name(self, name):
+        self.agg.name = name
+
+    def get_name(self):
+        return self.agg.name
+
 
 class loss_input_transform(object):
     """ wrapper for full-control loss input lambda
@@ -163,10 +173,12 @@ class lossarray(object):
             prediction, gold and input arguments are passed to transf.
     """
 
-    def __init__(self, trainloss, *losses):
+    def __init__(self, trainloss, *losses, **kw):
         super(lossarray, self).__init__()
         self.losses = []
         self.loss_transformers = []
+        _default_names_prefix = q.getkw(kw, "_default_names_prefix", "#")
+        _default_names_nextnumber = q.getkw(kw, "_default_names_nextnumber", 0)
         for loss in (trainloss,) + losses:
             loss_transf = default_loss_input_transform
             if isinstance(loss, tuple):
@@ -178,6 +190,20 @@ class lossarray(object):
                 self.losses.append(loss)
             else:
                 self.losses.append(LossAndAgg(loss, Aggregator(mode="mean")))
+            self.losses[-1].set_name("{}{}".format(_default_names_prefix, _default_names_nextnumber))
+            _default_names_nextnumber += 1
+
+    def set_names(self, *names):
+        assert(len(names) == len(self.losses))
+        for loss, name in zip(self.losses, names):
+            loss.set_name(name)
+
+    def set_default_names(self, prefix):
+        names = ["{}{}".format(prefix, i) for i in range(len(self.losses))]
+        self.set_names(*names)
+
+    def get_names(self):
+        return [loss.get_name() if hasattr(loss, "get_name") else "NONAME" for loss in self.losses]
 
     def __call__(self, prediction, gold, inputs=None, original_inputs=None):
         """ prediction from gold, gold from model, inputs to model, original (untransformed) inputs """
@@ -214,9 +240,9 @@ class lossarray(object):
         for loss in self.losses:
             loss.cuda(*a, **kw)
 
-    def push_and_reset(self):
+    def push_and_reset(self, epoch=None):
         for loss in self.losses:
-            loss.push_agg_to_history()
+            loss.push_agg_to_history(epoch=epoch)
             loss.reset_agg()
 
     def reset(self):
@@ -585,7 +611,14 @@ class train(object):
         def deleter():
             for e, fe in hookdic.items():
                 self._event_callbacks[e].remove(fe)
-        return deleter
+        return self
+
+    def schedule(self, hp, f):
+        """ shortcut for hooking an epochhyperparamscheduler for some hyperparam """
+        assert(isinstance(hp, q.hyperparam))
+        assert(q.iscallable(f))
+        scheduler = EpochHyperparamScheduler(hp, f)
+        self.hook(scheduler)
 
     def do_callbacks(self, e):
         if not e in self._event_callbacks:
@@ -623,11 +656,13 @@ class train(object):
     def train_on(self, dataloader, losses):
         self.traindataloader = dataloader
         self.trainlosses = losses
+        self.trainlosses.set_default_names("#")
         return self
 
     def valid_on(self, dataloader, losses):
         self.validdataloader = dataloader
         self.validlosses = losses
+        self.validlosses.set_default_names("##")
         return self
 
     def valid_inter(self, interval=1):
@@ -685,7 +720,7 @@ class train(object):
         while not self.stop_training:
             self.current_epoch = current_epoch
             self.stop_training = self.current_epoch + 1 == self.epochs
-            self.trainlosses.push_and_reset()
+            self.trainlosses.push_and_reset(epoch=self.current_epoch-1)
             tt.tick()
             self.model.train()
             self.do_callbacks(self.START_EPOCH)
@@ -767,7 +802,8 @@ class train(object):
                     gold = batch[-1]
                     if _tbg is not None:
                         gold = _tbg(gold)
-                    validlosses = self.validlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
+                    validlosses = self.validlosses(modelout2loss, gold,
+                                                   inputs=batch[:-1], original_inputs=_batch)
                     tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
                             .format(
                                 self.current_epoch+1,
@@ -900,8 +936,26 @@ class HyperparamScheduler(AutoHooker):
         super(HyperparamScheduler, self).__init__(**kw)
         self._hp = hp
 
+    def get_hooks(self):
+        return {train.START_EPOCH: self.on_start_epoch}
+
     def on_start_epoch(self, trainer, **kw):
         pass
+
+
+class EpochHyperparamScheduler(HyperparamScheduler):
+    def __init__(self, hp, f, **kw):
+        """ f takes epoch number and max epochs and hp and returns new value for hp """
+        super(EpochHyperparamScheduler, self).__init__()
+        self._f = f
+
+    def get_hooks(self):
+        return {train.START_EPOCH: self.on_start_epoch}
+
+    def on_start_epoch(self, trainer, **kw):
+        newval = self._f(trainer.current_epoch, maxepoch=trainer.epochs, hp=self._hp)
+        self._hp.v = newval
+
 
 
 

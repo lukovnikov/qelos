@@ -198,6 +198,10 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
                              validontest=False):
+    settings = locals().copy()
+    logger = q.Logger(prefix="testexp")
+    logger.save_settings(**settings)
+
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
     print("SEQSEQ REPRODUCTION")
@@ -259,7 +263,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         traindata = trainmats
         validdata = testmats
     else:
-        traindata, validdata = q.split(trainmats, random=True)
+        traindata, validdata = q.split(trainmats, random=1234)
+    # q.embed()
     train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
@@ -290,12 +295,16 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
+    logger.update_settings(optimizer="adam")
+
     q.train(encdec).train_on(train_loader, losses)\
         .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
-        .cuda(cuda).train(epochs)
+        .cuda(cuda)\
+        .hook(logger)\
+        .train(epochs)
 
     results = q.test(valid_encdec).on(test_loader, validlosses)\
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
