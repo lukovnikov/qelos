@@ -111,7 +111,13 @@ class LossAndAgg(LossWithAgg):
         if len(l) == 2:     # loss returns numex too
             numex = l[1]
             l = l[0]
-        self.agg.update_agg(l.data[0], numex)
+        if isinstance(l, Variable):
+            lp = l.data[0]
+        elif isinstance(l, torch.Tensor):
+            lp = l[0]
+        else:
+            lp = l
+        self.agg.update_agg(lp, numex)
         return l
 
     def get_agg_error(self):

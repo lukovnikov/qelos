@@ -167,6 +167,31 @@ def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( st
     #     return head, x[i:]
 
 
+class PredCutter(object):
+    def __init__(self, D, **kw):
+        super(PredCutter, self).__init__()
+        self.D = D
+        self.paropen = D["("]
+        self.parclose = D[")"]
+
+    def __call__(self, a, ignore_index=None):   # a: 2D of ints
+        for i in range(len(a)):
+            numpar = 0
+            fillzero = False
+            for j in range(len(a[i])):
+                if not fillzero:
+                    if a[i, j] == self.paropen:
+                        numpar += 1
+                    elif a[i, j] == self.parclose:
+                        numpar -= 1
+                        if numpar == 0:
+                            fillzero = True
+                else:
+                    if ignore_index is not None:
+                        a[i, j] = ignore_index
+        return a
+
+
 def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1,
@@ -260,7 +285,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         return tree
 
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                              q.MacroBLEU(ignore_index=0),
+                              q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
@@ -283,6 +308,7 @@ def run_noisy_parse():
     tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) )")
     print(tree.pp())
     print(treen.pp())
+    assert(treen == tree)
     # sys.exit()
 
 
@@ -329,5 +355,6 @@ def run_some_tests():
 
 
 if __name__ == "__main__":
+    # run_noisy_parse()
     # run_some_tests()
     q.argprun(run_seq2seq_reproduction)

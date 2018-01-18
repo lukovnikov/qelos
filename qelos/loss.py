@@ -325,13 +325,23 @@ class SeqElemAccuracy(DiscreteLoss):    # TODO take end of sequence token into a
         return acc, total
 
 
+from nltk.translate.bleu_score import sentence_bleu
+import warnings
+
+
 class MacroBLEU(DiscreteLoss):      # TODO take end of sequence token into account
     """ macro-averaged BLEU over sequences """
-    def __init__(self, order=4, stopid=None, ignore_index=None, **kw):
+    def __init__(self, order=4, predcut=None, ignore_index=None, **kw):
+        """
+        :param order:           n-gram order of BLEU
+        :param predcut:         function to cut prediction. Gets the argmax over prediction and ignore_index kwarg.
+                                Must fill all elements after end of sequence with provided ignore_index
+        """
         super(MacroBLEU, self).__init__(ignore_index=ignore_index, **kw)
         self.order = order
         self.weights = tuple([1. / self.order for _ in range(self.order)])
-        self.stopid = stopid
+        self.predcut = predcut
+        warnings.filterwarnings("ignore", module="nltk")
 
     def forward(self, x, gold, mask=None):
         if x.size(1) > gold.size(1):
@@ -342,16 +352,24 @@ class MacroBLEU(DiscreteLoss):      # TODO take end of sequence token into accou
             x = x + torch.log(mask.float())
         ignoremask = self._get_ignore_mask(gold)
         maxes, argmaxes = torch.max(x, dim=2)
-        diff = argmaxes == gold
-        if ignoremask is not None:
-            diff = diff * ignoremask
-            total = torch.sum(ignoremask.long()).data[0]
-        else:
-            total = gold.size(0) * gold.size(1)
-        acc = torch.sum(diff.float())
+        ignore_id = None
+        if self.ignore_indices is not None:
+            ignore_id = self.ignore_indices[0]
+        argmaxes = argmaxes.data.cpu()
+        if self.predcut is not None:
+            argmaxes = self.predcut(argmaxes, ignore_index=ignore_id)
+        gold = gold.data.cpu()
+        bleus = 0.
+        for i in range(gold.size(0)):
+            predseq = [str(a) for a in list(argmaxes[i]) if a != ignore_id]
+            goldseq = [str(a) for a in list(gold[i]) if a not in self.ignore_indices]
+            bleu = sentence_bleu([goldseq], predseq, weights=self.weights)
+            bleus += bleu
+
+        total = gold.size(0)
         if self.size_average:
-            acc = acc / total
-        return acc, total
+            bleus = bleus / total
+        return bleus, total
 
 
 class OldSeqNLLLoss(nn.NLLLoss):
