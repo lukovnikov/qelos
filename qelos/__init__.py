@@ -60,3 +60,4 @@ from qelos.qutils import name2fn, var, val, v, seq_pack, seq_unpack, dataload, \
 from qelos.reg import l1, l2
 
 from qelos.log import Logger
+from qelos import log

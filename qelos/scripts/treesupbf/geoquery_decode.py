@@ -301,7 +301,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
-        .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
+        .valid_with(valid_encdec).valid_on(valid_loader, validlosses).valid_inter(2)\
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)

@@ -2,6 +2,8 @@ import qelos as q
 import os
 import json
 import warnings
+import pandas as pd
+import glob
 
 
 OPT_PREFIX = "zexp"
@@ -117,3 +119,32 @@ class Logger(q.AutoHooker):
         line = "\t".join(["{:f}".format(n) for n in numbers]) + "\n"
         self._current_train_file.write(line)
         self._current_train_file.flush()
+
+    @classmethod
+    def load_path(cls, p):
+        """ loads one log (from dir specified by p) """
+        settings = {}
+        settingsp = p + "/" + OPT_SETTINGS_NAME
+        if os.path.exists(settingsp):
+            with open(p + "/" + OPT_SETTINGS_NAME) as f:
+                settings = json.load(f)
+        datap = p + "/" + OPT_LOG_NAME.format("")
+        data = pd.DataFrame.from_csv(datap, sep="\t")
+        return ExpLog(settings, data)
+
+    @classmethod
+    def load_multiple(cls, expr):
+        """ expr is unix path expression (check glob specs) """
+        matched_paths = glob.glob(expr)
+        for path in matched_paths:
+            yield cls.load_path(path)
+
+
+class ExpLog(object):
+    def __init__(self, settings, data, **kw):
+        super(ExpLog, self).__init__(**kw)
+        self.settings = settings
+        self.data = data
+
+
+
