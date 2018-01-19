@@ -129,7 +129,7 @@ class Logger(q.AutoHooker):
             with open(p + "/" + OPT_SETTINGS_NAME) as f:
                 settings = json.load(f)
         datap = p + "/" + OPT_LOG_NAME.format("")
-        data = pd.DataFrame.from_csv(datap, sep="\t")
+        data = pd.read_csv(datap, sep="\t")
         return ExpLog(settings, data)
 
     @classmethod
@@ -145,6 +145,15 @@ class ExpLog(object):
         super(ExpLog, self).__init__(**kw)
         self.settings = settings
         self.data = data
+
+
+class ExpLogCollection(object):
+    def __init__(self, explogs, **kw):
+        super(ExpLogCollection, self).__init__(**kw)
+        self.explogs = explogs
+
+    def filter(self, **kw):
+        pass
 
 
 

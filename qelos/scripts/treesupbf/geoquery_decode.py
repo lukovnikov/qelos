@@ -221,7 +221,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
-        q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
+        q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
     ).to_layer().return_final().return_mask().reverse()
     encoder = q.RecurrentStack(
         inpemb,
@@ -231,10 +231,11 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # test
     # testencret = encoder(q.var(trainmats[0][:5]).v)
 
-    layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
+    layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=None),
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(dropout),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -295,13 +296,13 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
-    logger.update_settings(optimizer="adam")
+    logger.update_settings(optimizer="rmsprop")
 
     q.train(encdec).train_on(train_loader, losses)\
-        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
+        .optimizer(torch.optim.RMSprop, lr=lr, weight_decay=wreg)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
-        .valid_with(valid_encdec).valid_on(valid_loader, validlosses).valid_inter(2)\
+        .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)
