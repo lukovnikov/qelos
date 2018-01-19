@@ -607,20 +607,21 @@ class train(object):
         elif isinstance(f, torch.optim.lr_scheduler.ReduceLROnPlateau):
             assert(len(es) == 1)
             return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
-        if isinstance(f, AutoHooker) and len(es) > 0:
-            raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
-        if isinstance(f, AutoHooker):
-            hookdic = f.get_hooks()
         else:
-            hookdic = dict(zip(es, [f]*len(es)))
-        for e, fe in hookdic.items():
-            if e not in self._event_callbacks:
-                self._event_callbacks[e] = []
-            self._event_callbacks[e].append(fe)
-        def deleter():
+            if isinstance(f, AutoHooker):
+                if len(es) > 0:
+                    raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
+                hookdic = f.get_hooks()
+            else:
+                hookdic = dict(zip(es, [f]*len(es)))
             for e, fe in hookdic.items():
-                self._event_callbacks[e].remove(fe)
-        # TODO: implement unhooking mechanism
+                if e not in self._event_callbacks:
+                    self._event_callbacks[e] = []
+                self._event_callbacks[e].append(fe)
+            def deleter():
+                for e, fe in hookdic.items():
+                    self._event_callbacks[e].remove(fe)
+            # TODO: implement unhooking mechanism
         return self
 
     def schedule(self, hp, f):
