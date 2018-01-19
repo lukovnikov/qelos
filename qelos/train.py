@@ -597,7 +597,16 @@ class train(object):
         self._event_callbacks = {}
 
     def hook(self, f, *es):
-        """ f to be called when e happens. Returns deleter for bound f """
+        """ f to be called when e happens. Returns deleter for bound f
+            can also pass pytorch's lr schedulers
+            if passing a ReduceLROnPlateau, must also pass a function that can be called without arguments
+                and that returns the metric for Reducer
+        """
+        if isinstance(f, torch.optim.lr_scheduler._LRScheduler):
+            return self.hook(_LRSchedulerAutoHooker(f))
+        elif isinstance(f, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            assert(len(es) == 1)
+            return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
         if isinstance(f, AutoHooker) and len(es) > 0:
             raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
         if isinstance(f, AutoHooker):
@@ -611,6 +620,7 @@ class train(object):
         def deleter():
             for e, fe in hookdic.items():
                 self._event_callbacks[e].remove(fe)
+        # TODO: implement unhooking mechanism
         return self
 
     def schedule(self, hp, f):
@@ -684,6 +694,7 @@ class train(object):
 
     def optimizer(self, optimizer, **kw):
         if isinstance(optimizer, type):
+            raise Exception("disabled, use torch's lr scheduler instead")
             paramgroups = q.paramgroups_of(self.model)
             osm = OptimSettingsMaterializer(paramgroups, kw)
             self.optim = optimizer(osm.generated)
@@ -844,6 +855,31 @@ class train(object):
 class AutoHooker(object):
     def get_hooks(self):
         raise NotImplemented()
+
+
+class _LRSchedulerAutoHooker(AutoHooker):
+    def __init__(self, s, **kw):
+        super(_LRSchedulerAutoHooker, self).__init__(**kw)
+        self.s = s
+
+    def get_hooks(self):
+        return {train.START_EPOCH: self.on_start_epoch}
+
+    def on_start_epoch(self, model, **kw):
+        self.s.step(epoch=model.current_epoch)
+
+
+class _ReduceLROnPlateauAutoHooker(AutoHooker):
+    def __init__(self, s, critf, **kw):
+        super(_ReduceLROnPlateauAutoHooker, self).__init__(**kw)
+        self.s = s
+        self.critf = critf
+
+    def get_hooks(self):
+        return {train.END_EPOCH: self.on_end_epoch}
+
+    def on_end_epoch(self, model, **kw):
+        self.s.step(self.critf(), epoch=model.current_epoch)
 
 
 class ClipGradNorm(AutoHooker):

@@ -201,6 +201,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
+    logger.update_settings(version="2")
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
@@ -264,7 +265,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         traindata = trainmats
         validdata = testmats
     else:
-        traindata, validdata = q.split(trainmats, random=1234)
+        traindata, validdata = q.split(trainmats, random=True)
     # q.embed()
     train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
@@ -297,9 +298,10 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
     logger.update_settings(optimizer="rmsprop")
+    optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
     q.train(encdec).train_on(train_loader, losses)\
-        .optimizer(torch.optim.RMSprop, lr=lr, weight_decay=wreg)\
+        .optimizer(optim)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
