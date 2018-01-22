@@ -461,7 +461,7 @@ class LSTMCell(GRUCell):
     def _forward(self, x_t, c_tm1, y_tm1, t=None):
         # region apply dropouts
         if self.dropout_in:
-            x_t = self.dropout_in(x_t)
+             x_t = self.dropout_in(x_t)
         if self.dropout_rec:
             y_tm1, c_tm1 = self.dropout_rec(y_tm1, c_tm1)
         # endregion

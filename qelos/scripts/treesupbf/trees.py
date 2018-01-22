@@ -240,6 +240,7 @@ class Node(Trackable):
 
     @classmethod
     def build_dict_from(cls, trees):
+        """ build dictionary for collection of trees (Nodes)"""
         allnames = set()
         alllabels = set()
         suffixes = [cls.suffix_sep + cls.leaf_suffix, cls.suffix_sep + cls.last_suffix,
@@ -1000,18 +1001,22 @@ class SentenceTracker(Tracker):
 
 
 class GroupTracker(object):
+    """ provides single access point to a collection of trackers of trees.
+        Given a collection of trackables (e.g. Nodes), build dictionary based on the trackable's .build_dict_from(),
+            and initializes individual trackers for every trackable from the trackable's .track()"""
     def __init__(self, trackables):
         super(GroupTracker, self).__init__()
-        self.trackables = trackables
-        indic, outdic = trackables[0].__class__.build_dict_from(trackables)
-        self.dic = outdic
-        self.rdic = {v: k for k, v in self.dic.items()}
-        self.trackers = []
-        self.D = outdic
-        self.D_in = indic
-        for xe in self.trackables:
-            tracker = xe.track()
-            self.trackers.append(tracker)
+        if trackables is not None:
+            self.trackables = trackables
+            indic, outdic = trackables[0].__class__.build_dict_from(trackables)
+            self.dic = outdic
+            self.rdic = {v: k for k, v in self.dic.items()}
+            self.trackers = []
+            self.D = outdic
+            self.D_in = indic
+            for xe in self.trackables:
+                tracker = xe.track()
+                self.trackers.append(tracker)
 
     def get_valid_next(self, eid):
         tracker = self.trackers[eid]
@@ -1047,6 +1052,23 @@ class GroupTracker(object):
     def reset(self):
         for tracker in self.trackers:
             tracker.reset()
+
+    def __getitem__(self, item):
+        """ if called with a slice, returns new GroupTracker for that slice
+                (all the dictionaries are shared, the same tracker objects are reused)
+            if called with an int, returns the tracker at that position """
+        if isinstance(item, slice):
+            gt = GroupTracker(None)
+            gt.trackables = self.trackables[item]
+            gt.trackers = self.trackers[item]
+            gt.D = self.D
+            gt.D_in = self.D_in
+            gt.rdic = self.rdic
+            gt.dic = self.dic
+            return gt
+        else:
+            return self.trackers[item]
+            # raise Exception("GroupTracker can only slice slices to construct new GroupTracker with multiple trackables")
 
 
 def generate_random_trees(n=1000, maxleaves=6, vocsize=100, skipprob=0.3, seed=None):

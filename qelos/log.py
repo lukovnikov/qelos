@@ -129,6 +129,8 @@ class Logger(q.AutoHooker):
             with open(p + "/" + OPT_SETTINGS_NAME) as f:
                 settings = json.load(f)
         datap = p + "/" + OPT_LOG_NAME.format("")
+        if not os.path.exists(datap):
+            return None
         data = pd.read_csv(datap, sep="\t")
         return ExpLog(settings, data)
 
@@ -137,7 +139,9 @@ class Logger(q.AutoHooker):
         """ expr is unix path expression (check glob specs) """
         matched_paths = glob.glob(expr)
         for path in matched_paths:
-            yield cls.load_path(path)
+            loaded = cls.load_path(path)
+            if loaded is not None:
+                yield loaded
 
 
 class ExpLog(object):

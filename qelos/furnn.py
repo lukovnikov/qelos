@@ -818,6 +818,9 @@ class DynamicOracleRunner(q.DecoderRunner):
                  eps=0.05,
                  explore=0.,
                  **kw):
+        """ sample mode samples a correct token from predicted dist.
+            argmax mode takes the most probable correct token (according to predicted dist).
+            uniform mode takes any correct token with equal prob """
         super(DynamicOracleRunner, self).__init__(**kw)
         self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs

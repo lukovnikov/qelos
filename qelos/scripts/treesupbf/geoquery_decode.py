@@ -1,7 +1,8 @@
 import torch
 import qelos as q
 import numpy as np
-from qelos.scripts.treesupbf.trees import Node
+from qelos.scripts.treesupbf.trees import Node, GroupTracker
+import random
 import sys
 
 
@@ -58,6 +59,85 @@ def make_encoder(inpemb, inpembdim, encdim, dropout, ttt=None):
     return encoder
 
 
+def load_data_trees(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.txt", reverse_input=False):
+    tt = q.ticktock("dataloader")
+    tt.tick("loading data")
+    ism = q.StringMatrix()
+    ism.tokenize = lambda x: x.split()
+
+    trees = []
+    numtrain = 0
+
+    with open(p+trainp) as f:
+        for line in f:
+            inp, out = line.split("\t")
+            if reverse_input:
+                inp = " ".join(inp.split()[::-1])
+            out = "( {} )".format(out)
+            ism.add(inp)
+            trees.append(parse_query_tree(out))
+            numtrain += 1
+
+    with open(p+testp) as f:
+        for line in f:
+            inp, out = line.split("\t")
+            if reverse_input:
+                inp = " ".join(inp.split()[::-1])
+            out = "( {} )".format(out)
+            ism.add(inp)
+            trees.append(parse_query_tree(out))
+
+    ism.finalize()
+    tracker = GroupTracker(trees)
+
+    print(ism[0])
+    print(tracker[0].root.pptree())
+
+    print(tracker[:5][0].root.pptree())
+
+    # check number of different linearizations
+    first = True
+    for i in range(80, 85):
+        numsam = 200
+        uniquelins = set()
+        for j in range(numsam):
+            tracker[i].reset()
+            nvt = tracker[i]._nvt
+            tokens = []
+            while len(nvt) > 0:
+                x = random.choice(list(nvt))
+                tokens.append(x)
+                nvt = tracker[i].nxt(x)
+            lin = " ".join(tokens)
+            recons = Node.parse(lin)
+            assert (recons == tracker[i].root)
+            if numsam < 11:
+                print(recons.pp())
+                print(recons.pptree())
+            uniquelins.add(lin)
+        print("{} unique lins for tree {}".format(len(uniquelins), tracker[i].root.pp()))
+        if first:
+            for uniquelin in uniquelins:
+                print(uniquelin)
+        first = False
+
+
+
+    # check overlap
+    trainseqs = set()
+    testseqs = set()
+    for i in range(ism.matrix.shape[0]):
+        if i < numtrain:
+            trainseqs.add(ism[i] + " - " + tracker[i].root.pp(arbitrary=False))
+        else:
+            testseqs.add(ism[i] + " - " + tracker[i].root.pp(arbitrary=False))
+    tt.msg("overlap: {}/{} of test occur in train ({})".format(
+        len(testseqs & trainseqs), len(testseqs), len(trainseqs)))
+
+    tt.tock("data loaded")
+    return ism, tracker, numtrain
+
+
 def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.txt", reverse_input=False):
     tt = q.ticktock("dataloader")
     tt.tick("loading data")
@@ -112,6 +192,8 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
 
 
 def parse_query_tree(x, _toprec=True, redro=False):    # "lambda $0 e ( and ( state:t $0 ) ( next_to:t $0 s0 ) )"
+    """ given a query in lambda, generates partially ordered tree.
+        redro: ??? TODO """
     if _toprec:
         x = x.strip().split()
     assert(x[0] == "(")
@@ -316,11 +398,21 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # print(encdec)
 
 
+def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+                             wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
+                             embdim=-1,
+                             inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
+                             cuda=False, gpu=0,
+                             validontest=False):
+    pass
+
+
 def run_noisy_parse():
     treen = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) ) ( ) ) ) ) ) )")
     tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) )")
     print(tree.pp())
     print(treen.pp())
+    print(treen.pptree())
     assert(treen == tree)
     # sys.exit()
 
@@ -368,6 +460,7 @@ def run_some_tests():
 
 
 if __name__ == "__main__":
-    # run_noisy_parse()
+    run_noisy_parse()
+    load_data_trees()
     # run_some_tests()
-    q.argprun(run_seq2seq_reproduction)
+    # q.argprun(run_seq2seq_reproduction)

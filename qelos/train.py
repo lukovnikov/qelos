@@ -602,11 +602,13 @@ class train(object):
             if passing a ReduceLROnPlateau, must also pass a function that can be called without arguments
                 and that returns the metric for Reducer
         """
+        # special hooker wrappers
         if isinstance(f, torch.optim.lr_scheduler._LRScheduler):
             return self.hook(_LRSchedulerAutoHooker(f))
         elif isinstance(f, torch.optim.lr_scheduler.ReduceLROnPlateau):
             assert(len(es) == 1)
             return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
+        # normal hooking
         else:
             if isinstance(f, AutoHooker):
                 if len(es) > 0:
