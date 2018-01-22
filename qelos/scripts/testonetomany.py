@@ -160,8 +160,29 @@ def run_cvae(lr=0.001, epochs=10000):
     xvar = q.var(x).v
     yvar = q.var(y).v
 
-    epochs = 3000
+    epochs = 10000
 
+    kl_weight = q.hyperparam(1.)
+
+    for i in range(epochs):
+        # kl_weight.v = float(np.tanh(i/1000.-7.)/2.+.5)
+        kl_weight.v = float(-np.cos(i/500.)/2.+.5)
+        optim.zero_grad()
+        # sample a y
+        goldvecs = q.var(torch.zeros(xvar.size(0), 7).scatter_(1, yvar.data, 1)).v
+        samplegold = goldvecs.multinomial(1).squeeze(1)
+        prob_y, means, logvar = model(xvar, samplegold)
+        l_r, l_kl = loss(prob_y, samplegold.unsqueeze(1), means, logvar)
+        print(i, l_r.data[0], l_kl.data[0], q.v(kl_weight))
+        l = torch.mean(l_r + q.v(kl_weight) * l_kl)
+        # print(l)
+        l.backward()
+        optim.step()
+        # temp.v = (1. - 0.99 * i/epochs)
+        # print(i, q.v(temp))
+
+    kl_weight.v = 1.
+    epochs = 1000
     for i in range(epochs):
         optim.zero_grad()
         # sample a y
@@ -169,13 +190,11 @@ def run_cvae(lr=0.001, epochs=10000):
         samplegold = goldvecs.multinomial(1).squeeze(1)
         prob_y, means, logvar = model(xvar, samplegold)
         l_r, l_kl = loss(prob_y, samplegold.unsqueeze(1), means, logvar)
-        print(i, l_r.data[0], l_kl.data[0])
-        l = torch.mean(l_r + l_kl)
+        print(i, l_r.data[0], l_kl.data[0], q.v(kl_weight))
+        l = torch.mean(l_r + q.v(kl_weight) * l_kl)
         # print(l)
         l.backward()
         optim.step()
-        temp.v = (1. - 0.99 * i/epochs)
-        # print(i, q.v(temp))
 
     # model.xemb.embedding.weight.requires_grad = False
     # for p in model.ff_fromx.parameters():
