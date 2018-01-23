@@ -1086,7 +1086,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     # training
     eids = np.arange(0, len(ism.matrix), dtype="int64")
     startid = outemb.D["<ROOT>"]
-    tt.msg("using startid {} from outemb".format(startid))
+    tt.msg("using startid {} ({}) from outemb".format(startid, "<ROOT>"))
     starts = np.ones((len(ism.matrix,)), dtype="int64") * startid
 
     alldata = [ism.matrix, starts, eids, psm.matrix, eids]

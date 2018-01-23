@@ -2,6 +2,7 @@ import torch
 import qelos as q
 import numpy as np
 from qelos.scripts.treesupbf.trees import Node, GroupTracker
+from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 import sys
 
@@ -366,8 +367,6 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     valid_decoder = valid_decoder_cell.to_decoder()
     valid_encdec = EncDecAtt(encoder, valid_decoder)
 
-    from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
-
     rev_outD = {v: k for k, v in outD.items()}
 
     def treeparser(x):  # 1D of output word ids
@@ -564,9 +563,25 @@ def make_oracle(tracker, symbols2cores, symbols2ctrl, mode=OPT_ORACLEMODE, witha
     return oracle
 
 
+class BFTreePredCutter(object):
+    def __init__(self, tracker, **kw):
+        super(BFTreePredCutter, self).__init__()
+        self.tracker = tracker
+
+    def __call__(self, a, ignore_index=None):   # a: 2D of ints
+        for i in range(len(a)):
+            ass = self.tracker.pp(a[i])
+            try:
+                _, (tokens, remainder) = Node.parse(ass, _ret_remainder=True)
+                a[i, -len(remainder):] = ignore_index
+            except Exception as e:
+                a[i, :] = ignore_index
+        return a
+
+
 def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1,
+                             embdim=-1, oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
                              validontest=False):
@@ -583,6 +598,16 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     ttt = q.ticktock("test")
     ism, tracker, numtrain = load_data_trees(reverse_input=False)
     eids = np.arange(0, len(ism), dtype="int64")
+    psm = q.StringMatrix()
+    psm.set_dictionary(tracker.D)
+    psm.tokenize = lambda x: x.split()
+    for tree in tracker.trackables:
+        treestring = tree.pp(arbitrary=False, _remove_order=True)
+        assert(Node.parse(treestring) == tree)
+        psm.add(treestring)
+    psm.finalize()
+    print(ism[0])
+    print(psm[0])
 
     # region MODEL --------------------------------
     # EMBEDDINGS ----------------------------------
@@ -611,7 +636,7 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     # region ORACLE --------------------------------------
     # !!! need oracle in decoder construction
-    oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, ttt=ttt, withannotations=True,
+    oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, mode=oraclemode, ttt=ttt, withannotations=True,
                          trees=tracker.trackables)
     # endregion
 
@@ -628,80 +653,141 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     decoder_core = q.DecoderCore(outemb, *layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(q.TeacherForcer())
+    decoder_cell.set_runner(oracle)
     decoder = decoder_cell.to_decoder()
     # endregion
 
     # region ENCDEC ---------------------------------------
     class EncDecAtt(torch.nn.Module):
-        def __init__(self, _encoder, _decoder, **kwargs):
+        def __init__(self, _encoder, _decoder, maxtime=None, **kwargs):
             super(EncDecAtt, self).__init__(**kwargs)
             self.encoder = _encoder
             self.decoder = _decoder
+            self.maxtime = maxtime
 
-        def forward(self, inpseq, outinpseq):
+        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
+            maxtime = self.maxtime if maxtime is None else maxtime
             # self.decoder.set_init_states(None, final_encoding)
-            decoding = self.decoder(outinpseq,
+            decoding = self.decoder(decstarts,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
-                                    ctxmask=mask)
+                                    ctxmask=mask,
+                                    eids=eids,
+                                    maxtime=maxtime)
             return decoding
 
     encdec = EncDecAtt(encoder, decoder)
+
+    if _opt_test:
+        ttt.tick("testing whole thing dry run")
+        test_eids = q.var(np.arange(80, 83)).cuda(cuda).v
+        test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
+        test_inpseqs = q.var(ism.matrix[:3]).cuda(cuda).v
+        if cuda:
+            encdec.cuda()
+        test_encdec_output = encdec(test_inpseqs, test_start_symbols, eids=test_eids, maxtime=100)
+        out = test_encdec_output
+        golds = oracle.goldacc
+        seqs = oracle.seqacc
+        golds = torch.stack(golds, 1)
+        seqs = torch.stack(seqs, 1)
+        out = out[:, :-1, :]
+        # test if gold tree linearization produces gold tree
+        for i in range(len(out)):
+            goldtree = Node.parse(tracker.pp(golds[i].cpu().data.numpy()))
+            predtree = Node.parse(tracker.pp(seqs[i].cpu().data.numpy()))
+            exptree = tracker.trackables[test_eids.cpu().data[i]]
+            assert (exptree == goldtree)
+            assert (exptree == predtree)
+        ttt.tock("tested whole dryrun").tick()
+
+        loss = q.SeqCrossEntropyLoss(ignore_index=0)
+        lossvalue = loss(out, golds)
+        ttt.msg("value of Seq CE loss: {}".format(lossvalue))
+        encdec.zero_grad()
+        lossvalue.backward()
+        ttt.msg("backward done")
+        params = q.params_of(encdec)
+        for param in params:
+            assert (param.grad is not None)
+            assert (param.grad.norm().data[0] > 0)
+            # print(tuple(param.size()), param.grad.norm().data[0])
+        ttt.tock("all gradients non-zero")
+
+        loss = TreeAccuracy(treeparser=lambda x: Node.parse(tracker.pp(x)))
+        lossvalue = loss(out, golds)
+        ttt.msg("value of predicted Tree Accuracy: {}".format(lossvalue.data[0]))
+        dummyout = q.var(torch.zeros(out.size())).cuda(cuda).v
+        dummyout.scatter_(2, seqs.unsqueeze(2), 1)
+        lossvalue = loss(dummyout, golds)
+        ttt.msg("value of fed Tree Accuracy: {}".format(lossvalue.data[0]))
+        loss = q.SeqAccuracy()
+        lossvalue = loss(dummyout, golds)
+        ttt.msg("value of SeqAccuracy on fed prediction: {}".format(lossvalue.data[0]))
+        encdec.cpu()
+
+        encdec.eval()
+        assert (not oracle.training)
+        ttt.msg("oracle switched to eval")
+        encdec.train()
+        assert (oracle.training)
+        ttt.msg("oracle switched to training")
     # endregion
     # endregion
 
     # region DATA LOADING -------------------------
-    if validontest:
-        traindata = trainmats
-        validdata = testmats
-    else:
-        traindata, validdata = q.split(trainmats, random=True)
+    startid = outemb.D["<ROOT>"]
+    tt.msg("using startid {} ({}) from outemb".format(startid, "<ROOT>"))
+    starts = np.ones((len(ism.matrix,)), dtype="int64") * startid
 
-    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
+    traindata = [ism.matrix[:numtrain], starts[:numtrain], eids[:numtrain], psm.matrix[:numtrain], eids[:numtrain]]
+    testdata = [ism.matrix[numtrain:], starts[numtrain:], eids[numtrain:], psm.matrix[numtrain:], eids[numtrain:]]
+
+    if validontest:
+        validdata = testdata
+    else:
+        traindata, validdata = q.split(traindata, random=True)
+
+    train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2, 4]], batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*[validdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*[testdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
     # endregion
 
     # region TRAINING --------------------
     # region SETTING ---------------------
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
-                         q.SeqElemAccuracy(ignore_index=0),
-                         q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
-                         q.SeqAccuracy(ignore_index=0))
-
     # validation with freerunner
-    freerunner = q.FreeRunner()
+    freerunner = q.FreeRunner(inparggetter=oracle.inparggetter)
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
-    valid_encdec = EncDecAtt(encoder, valid_decoder)
+    valid_encdec = EncDecAtt(encoder, valid_decoder, maxtime=50)
 
-    from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
-
-    rev_outD = {v: k for k, v in outD.items()}
-
-    def treeparser(x):  # 1D of output word ids
-        treestring = " ".join([rev_outD[xe] for xe in x if xe != 0])
-        tree = parse_query_tree(treestring)
-        return tree
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     validlosses = q.lossarray(  # q.SeqCrossEntropyLoss(ignore_index=0),
-        q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
+        q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
         q.SeqAccuracy(ignore_index=0),
-        TreeAccuracy(ignore_index=0, treeparser=treeparser))
+        TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
+
+    out_btf = lambda _out: _out[:, :-1, :]
+    gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
+    valid_gold_btf = lambda x: x
     # endregion
 
     # region TRAIN -----------------------
     q.train(encdec).train_on(train_loader, losses) \
         .optimizer(optim) \
         .clip_grad_norm(gradnorm) \
-        .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:])) \
+        .set_batch_transformer(None, out_btf, gold_btf) \
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses) \
+        .set_valid_batch_transformer(None, out_btf, valid_gold_btf) \
         .cuda(cuda) \
         .hook(logger) \
         .train(epochs)
@@ -720,6 +806,13 @@ def run_noisy_parse():
     print(treen.pp())
     print(treen.pptree())
     assert(treen == tree)
+    p = Node.parse(tree.pp())
+    print(p)
+    p = p.pp() + " s0#2*NC*LS $0#1*NC s0#2*NC*LS"
+    print(p)
+    rp, rem = Node.parse(p, _ret_remainder=True)
+    print(rp)
+    print(rem)
     # sys.exit()
 
 

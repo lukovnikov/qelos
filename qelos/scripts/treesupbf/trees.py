@@ -71,11 +71,13 @@ class Node(Trackable):
         return NodeTracker(self)
 
     @classmethod
-    def parse(cls, inp, _rec_arg=None, _toprec=True):
+    def parse(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
         """ breadth-first parse """
         tokens = inp
         if _toprec:
             tokens = tokens.replace("  ", " ").strip().split()
+
+        otokens = tokens + []
 
         parents = _rec_arg + [] if _rec_arg is not None else None
         level = []
@@ -109,9 +111,11 @@ class Node(Trackable):
                     if len(parents) == 0:
                         break
 
+        remainder = tokens
+
         if len(tokens) > 0:
             if len(level) > 0:
-                cls.parse(tokens, _rec_arg=level, _toprec=False)
+                remainder = cls.parse(tokens, _rec_arg=level, _toprec=False)
         else:
             assert (len(level)) == 0
 
@@ -119,10 +123,15 @@ class Node(Trackable):
             if len(siblings) == 1:
                 ret = siblings[0]
                 ret.delete_nones()
-                return ret
+                if _ret_remainder:
+                    return ret, (otokens, remainder)
+                else:
+                    return ret
             else:
                 raise Exception("siblings is a list")
                 return siblings
+        else:
+            return remainder
 
     def delete_nodes(self, *nodes):
         i = 0
@@ -171,7 +180,7 @@ class Node(Trackable):
         mode = "dfpar" if mode == "par" else "dfann"
         return self.pp(mode=mode, arbitrary=arbitrary)
 
-    def pp(self, mode="ann", arbitrary=False, _rec_arg=None, _top_rec=True):
+    def pp(self, mode="ann", arbitrary=False, _rec_arg=None, _top_rec=True, _remove_order=False):
         assert(mode in "ann tree dfpar dfann".split())
         children = list(self.children)
         if arbitrary:
@@ -179,24 +188,24 @@ class Node(Trackable):
 
         # children = sorted(children, key=lambda x: x.order if x.order is not None else np.infty)
         if mode == "dfpar":     # depth-first with parentheses
-            children = [child.pp(mode=mode, arbitrary=arbitrary) for child in children]
-            ret = self.symbol(with_label=True, with_annotation=False, with_order=True) \
+            children = [child.pp(mode=mode, arbitrary=arbitrary, _remove_order=_remove_order) for child in children]
+            ret = self.symbol(with_label=True, with_annotation=False, with_order=not _remove_order) \
                   + ("" if len(children) == 0 else " ( {} )".format(" , ".join(children)))
         if mode == "dfann":
             _is_last = True if _rec_arg is None else _rec_arg
-            children = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=_is_last_child)
+            children = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=_is_last_child, _remove_order=_remove_order)
                         for child, _is_last_child
                         in zip(children, [False] * (len(children)-1) + [True])]
-            ret = self.symbol(with_label=True, with_annotation=False, with_order=True) \
+            ret = self.symbol(with_label=True, with_annotation=False, with_order=not _remove_order) \
                   + (self.suffix_sep + "NC" if len(children) == 0 else "") + (self.suffix_sep + "LS" if _is_last else "")
             ret += "" if len(children) == 0 else " " + " ".join(children)
         if mode == "ann":
             _rec_arg = True if _rec_arg is None else _rec_arg
-            stacks = [self.symbol(with_annotation=True, with_label=True, with_order=True)
+            stacks = [self.symbol(with_annotation=True, with_label=True, with_order=not _remove_order)
                       + ((self.suffix_sep + self.last_suffix) if (_rec_arg is True and not self.name in [self.root_symbol, self.none_symbol]) else "")]
             if len(children) > 0:
                 last_child = [False] * (len(children) - 1) + [True]
-                children_stacks = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=recarg, _top_rec=False)
+                children_stacks = [child.pp(mode=mode, arbitrary=arbitrary, _rec_arg=recarg, _top_rec=False, _remove_order=_remove_order)
                                    for child, recarg in zip(children, last_child)]
                 for i in range(max([len(child_stack) for child_stack in children_stacks])):
                     acc = []
@@ -216,11 +225,11 @@ class Node(Trackable):
                     _dirs = ["up"] + ["middle"] * (len(_children) - 1) if _direction == "up" \
                         else ["middle"] * (len(_children) - 1) + ["down"]
                     for elem, _dir in zip(_children, _dirs):
-                        elemlines = elem.pp(mode="tree", arbitrary=arbitrary, _rec_arg=_dir, _top_rec=False)
+                        elemlines = elem.pp(mode="tree", arbitrary=arbitrary, _rec_arg=_dir, _top_rec=False, _remove_order=_remove_order)
                         _lines += elemlines
                     return _lines
 
-                parent = self.symbol(with_label=True, with_annotation=False, with_order=True)
+                parent = self.symbol(with_label=True, with_annotation=False, with_order=not _remove_order)
                 up_children, down_children = children[:len(children)//2], children[len(children)//2:]
                 up_lines = print_children(up_children, "up")
                 down_lines = print_children(down_children, "down")
@@ -232,7 +241,7 @@ class Node(Trackable):
                 lines += [downlineprefix + " " * len(parent) + down_line for down_line in down_lines]
             else:
                 connector = '┌' if direction == "up" else '└' if direction == "down" else '├' if direction == "middle" else ""
-                lines = [connector + self.symbol(with_annotation=False, with_label=True, with_order=True)]
+                lines = [connector + self.symbol(with_annotation=False, with_label=True, with_order=not _remove_order)]
             if not _top_rec:
                 return lines
             ret = "\n".join(lines)

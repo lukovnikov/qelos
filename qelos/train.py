@@ -99,6 +99,15 @@ class LossWithAgg(HistoryAggregator):
     def cuda(self, *a, **kw):
         raise NotImplemented()
 
+    def set_name(self, name):
+        raise NotImplemented()
+
+    def get_name(self):
+        raise NotImplemented()
+
+    def get_default_name(self):
+        raise NotImplemented()
+
 
 class LossAndAgg(LossWithAgg):
     """ wraps a loss with aggregator, implements aggregator interface """
@@ -108,6 +117,7 @@ class LossAndAgg(LossWithAgg):
         self.callwithinputs = hasattr(loss, "callwithinputs") and loss.callwithinputs
         self.callwithoriginalinputs = hasattr(loss, "callwithoriginalinputs") and loss.callwithoriginalinputs
         self.agg = agg
+        self.set_name(loss.__class__.__name__)
 
     def __call__(self, pred, gold, **kw):
         l = self.loss(pred, gold, **kw)
@@ -138,6 +148,9 @@ class LossAndAgg(LossWithAgg):
 
     def get_name(self):
         return self.agg.name
+
+    def get_default_name(self):
+        return self.loss.__class__.__name__
 
 
 class loss_input_transform(object):
@@ -199,7 +212,7 @@ class lossarray(object):
             loss.set_name(name)
 
     def set_default_names(self, prefix):
-        names = ["{}{}".format(prefix, i) for i in range(len(self.losses))]
+        names = ["{}{}".format(prefix, loss.get_default_name()) for loss in self.losses]
         self.set_names(*names)
 
     def get_names(self):
