@@ -1080,6 +1080,6 @@ def run_stupid(lr=0.001,
 
 if __name__ == "__main__":
     # q.argprun(run_preload)
-    # q.argprun(run)
+    q.argprun(run)
     # q.argprun(run_dummy)
-    q.argprun(run_stupid)
+    # q.argprun(run_stupid)
