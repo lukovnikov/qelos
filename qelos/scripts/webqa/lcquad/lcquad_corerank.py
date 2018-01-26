@@ -1007,7 +1007,7 @@ def run_stupid(lr=0.001,
         ):
     _test = False
     if cuda:
-        torch.cuda.set_device(gpu).float()
+        torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     tt.tick("loading data")
     qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
