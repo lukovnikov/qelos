@@ -76,7 +76,7 @@ class StupidRankModelRank(StupidRankModel):
         zeros = q.var(torch.zeros(sim1.size(0))).cuda(sim1).v
         # print(type(zeros), type(sim1), type(sim2), type(nsim1))
         pscore = sim1 + sim2 * term
-        nscore = sim1 + sim2 * term
+        nscore = nsim1 + nsim2 * term
         # loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
         # loss2 = torch.max(zeros, self.margin - (sim2 - nsim2))
         # losst = - (goldterm * torch.log(term+self.EPS) + (1 - goldterm) * torch.log(1 - term + self.EPS))
@@ -1109,7 +1109,7 @@ def run_stupid(lr=0.001,
 
     similarity = q.DotDistance()  #q.DotDistance()    # computes score
     rankmodel = StupidRankModelRank(left_model, right_model, similarity, margin=1.)
-    scoremodel = StupidScoreModel(left_model, right_model, similarity)
+    scoremodel = StupidScoreModel(left  _model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
     recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
     mrr = MRR(rankcomp=rankcomp)
