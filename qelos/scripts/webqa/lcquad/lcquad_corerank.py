@@ -36,6 +36,29 @@ class RankModel(nn.Module):
             return torch.stack([psim, nsim], 1)
 
 
+class StupidRankModel(RankModel):
+    def __init__(self, lmodel, rmodel, sim, catscores=False, margin=1., **kw):
+        super(StupidRankModel, self).__init__(lmodel, rmodel, sim, catscores=catscores, **kw)
+        self.margin = margin
+
+    def forward(self, ldata, posrdata, negrdata):
+        ldata = ldata if q.issequence(ldata) else (ldata,)
+        posrdata = posrdata if q.issequence(posrdata) else (posrdata,)
+        negrdata = negrdata if q.issequence(negrdata) else (negrdata,)
+        lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
+        rvecs1, rvecs2 = self.rmodel(*posrdata)
+        nrvecs1, nrvecs2 = self.rmodel(*negrdata)
+        sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
+        nsim1, nsim2 = self.sim(lvecs_frst, nrvecs1), self.sim(lvecs_scnd, nrvecs2)
+        goldterm = (rvecs2.norm(2, 1) > 0).float()   # 1 if two-hop
+        zeros = q.var(torch.zeros(sim1.size(0))).cuda(ldata).v
+        loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
+        loss2 = torch.max(zeros, self.margin - (sim2 - nsim2))
+        losst = - (goldterm * torch.log(term) + (1 - goldterm) * torch.log(1 - term))
+        loss = loss1 + goldterm * loss2 + losst
+        return loss
+
+
 class ScoreModel(nn.Module):
     def __init__(self, lmodel, rmodel, similarity, **kw):
         super(ScoreModel, self).__init__(**kw)
@@ -51,6 +74,22 @@ class ScoreModel(nn.Module):
         rvecs = self.rmodel(*rdata)      # 2D
         psim = self.sim(lvecs, rvecs)    # 1D:(batsize,)
         return psim
+
+
+class StupidScoreModel(ScoreModel):
+    LRG = 1e6
+    def forward(self, ldata, rdata):
+        ldata = ldata if q.issequence(ldata) else (ldata,)
+        rdata = rdata if q.issequence(rdata) else (rdata,)
+        lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
+        rvecs1, rvecs2 = self.rmodel(*rdata)
+        lterm = (term > 0).float()                      # 1 if two-hop
+        rterms = (rvecs2.norm(2, 1) > 0).float()       # 1 if two-hop
+        sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
+        score = torch.abs(lterm - rterms) * self.LRG        # disagreement between number of hops
+        score += sim1
+        score += sim2 * lterm
+        return score
 
 
 class InpFeeder(object):
@@ -950,7 +989,7 @@ class StupidScorer(torch.nn.Module):
         firstsim = self.sim(lvecs[0], rvecs[0])
         secondsim = self.sim(lvecs[1], rvecs[1])
         sim = firstsim + secondsim * lvecs[-1]
-        return sim
+        return firstsim, secondsim, lvecs[-1]
 
 
 def run_stupid(lr=0.001,
@@ -968,7 +1007,7 @@ def run_stupid(lr=0.001,
         ):
     _test = False
     if cuda:
-        torch.cuda.set_device(gpu)
+        torch.cuda.set_device(gpu).float()
     tt = q.ticktock("script")
     tt.tick("loading data")
     qsm, chainsm, eid2lid, eid2rid_gold, eid2rid_neg = load_preloaded()
@@ -1017,6 +1056,7 @@ def run_stupid(lr=0.001,
         def forward(self, x):
             rel_embs, rel_embs_mask = self.relemb(x[:, 0])
             rel_embs2, rel_embs_mask2 = self.relemb(x[:, 1])
+            #: is rel_embs2 an untrainable all-zeroes if it's a one-hop rel? yes.
             rel_encs = torch.stack([rel_embs, rel_embs2], 2)
             return rel_embs, rel_embs2
             # return rel_embs[:, 1:], rel_embs2[:, 1:], rel_encs[:, 0, :]
@@ -1041,9 +1081,9 @@ def run_stupid(lr=0.001,
     if _test:
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
-    similarity = StupidScorer(q.DotDistance())  #q.DotDistance()    # computes score
-    rankmodel = RankModel(left_model, right_model, similarity)
-    scoremodel = ScoreModel(left_model, right_model, similarity)
+    similarity = q.DotDistance()  #q.DotDistance()    # computes score
+    rankmodel = StupidRankModel(left_model, right_model, similarity, margin=1.)
+    scoremodel = StupidScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
     recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
     mrr = MRR(rankcomp=rankcomp)
@@ -1062,8 +1102,8 @@ def run_stupid(lr=0.001,
                              eid2rid_gold=eid2rid_gold if rankmode == "gold" else None,
                              scores=rscores if rankmode == "score" else None)
 
-    losses = q.lossarray(q.PairRankingLoss(margin=margin if rankmode == "gold" else None))
-    validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
+    losses = q.lossarray(q.LinearLoss())
+    validlosses = q.lossarray(q.LinearLoss(), recallat1, recallat5, mrr)
 
     optim = torch.optim.Adam(q.paramgroups_of(rankmodel), lr=lr, weight_decay=wreg)
 
@@ -1080,6 +1120,6 @@ def run_stupid(lr=0.001,
 
 if __name__ == "__main__":
     # q.argprun(run_preload)
-    q.argprun(run)
+    # q.argprun(run)
     # q.argprun(run_dummy)
-    # q.argprun(run_stupid)
+    q.argprun(run_stupid)

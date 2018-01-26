@@ -57,6 +57,14 @@ class PairRankingLoss(Loss):
         return loss, None
 
 
+class LinearLoss(Loss):
+    """ LinearLoss or NoLoss"""
+    def _forward(self, x, gold, **kw):
+        """ x is minimized, gold is ignored"""
+        return x, None
+
+
+
 class DiscreteLoss(Loss):
     def __init__(self, size_average=True, ignore_index=None, **kw):
         super(DiscreteLoss, self).__init__(size_average=size_average, **kw)
