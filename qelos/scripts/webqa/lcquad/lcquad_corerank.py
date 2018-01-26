@@ -132,7 +132,7 @@ class StupidScoreModelRank(StupidScoreModel):
         # score = torch.abs(lterm - rterms) * self.LRG        # disagreement between number of hops
         # score += sim1
         # score += sim2 * lterm
-        score = sim1 + sim2 * lterm
+        score = sim1 + sim2 * term
         return score
 
 
@@ -1034,7 +1034,7 @@ class StupidScorer(torch.nn.Module):
         firstsim = self.sim(lvecs[0], rvecs[0])
         secondsim = self.sim(lvecs[1], rvecs[1])
         sim = firstsim + secondsim * lvecs[-1]
-        return firstsim, secondsim, lvecs[-1]
+        return sim
 
 
 def run_stupid(lr=0.001,
@@ -1127,8 +1127,8 @@ def run_stupid(lr=0.001,
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
     similarity = q.DotDistance()  #q.DotDistance()    # computes score
-    rankmodel = StupidRankModel(left_model, right_model, similarity, margin=1.)
-    scoremodel = StupidScoreModel(left_model, right_model, similarity)
+    rankmodel = StupidRankModelRank(left_model, right_model, similarity, margin=1.)
+    scoremodel = StupidScoreModelRank(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
     recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
     mrr = MRR(rankcomp=rankcomp)
