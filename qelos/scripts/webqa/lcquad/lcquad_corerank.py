@@ -51,7 +51,8 @@ class StupidRankModel(RankModel):
         sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
         nsim1, nsim2 = self.sim(lvecs_frst, nrvecs1), self.sim(lvecs_scnd, nrvecs2)
         goldterm = (rvecs2.norm(2, 1) > 0).float()   # 1 if two-hop
-        zeros = q.var(torch.zeros(sim1.size(0))).cuda(ldata).v
+        zeros = q.var(torch.zeros(sim1.size(0))).cuda(sim1).v
+        # print(type(zeros), type(sim1), type(sim2), type(nsim1))
         loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
         loss2 = torch.max(zeros, self.margin - (sim2 - nsim2))
         losst = - (goldterm * torch.log(term) + (1 - goldterm) * torch.log(1 - term))
