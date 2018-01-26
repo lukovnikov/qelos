@@ -770,6 +770,92 @@ def make_relemb_stupid(relD, dim=50, dropout=0):
     return relemb
 
 
+def make_relemb_skip(relD, dim=50, dropout=0.):
+    rev_relD = {v: k for k, v in relD.items()}
+    max_id = max(relD.values()) + 1
+    direction = [0 if (rev_relD[i][0] == "-" if i in rev_relD else False) else 1
+                 for i in range(max_id)]
+    direction = np.asarray(direction)
+    diremb = q.WordEmb(dim, worddic={"-": 0, "+": 1})
+    wordsm = q.StringMatrix()   # matrix of words that constitute label for each rel
+    wordsm.tokenize = lambda x: x.split()
+    relovers = []
+    for i in range(max_id):
+        if i not in rev_relD or re.match(r'-?<[^>]+>', rev_relD[i]):
+            wordsm.add("<MASK>")
+            relovers.append(rev_relD[i])
+        else:
+            relname = rev_relD[i] if i in rev_relD else None
+            relname = relname[1:] if relname[0] == "-" else relname
+            relname = re.sub(r"([A-Z])", r" \1", relname).lower()
+            wordsm.add(relname)
+    wordsm.finalize()
+    wordemb = q.WordEmb(dim=dim, worddic=wordsm.D)
+    gloveemb = q.PretrainedWordEmb(dim=dim, worddic=wordsm.D, fixed=True)
+    wordemb = wordemb.override(gloveemb)
+
+    class RelEmbComp(nn.Module):
+        def __init__(self, wordemb, diremb, **kw):
+            super(RelEmbComp, self).__init__(**kw)
+            self.wordemb = wordemb
+            self.diremb = diremb
+            self.dense = nn.Linear(wordsm.matrix.shape[1]*dim, dim)
+            self.dropout = nn.Dropout(p=dropout)
+
+        def forward(self, inpdata):
+            dirs = inpdata[:, 0]
+            wordids = inpdata[:, 1:]
+
+            rel_wordembs, rel_wordembs_mask = self.wordemb(wordids)
+
+            rel_wordemb_basic = torch.sum(rel_wordembs, 1) \
+                          / (torch.sum(rel_wordembs_mask, 1).float().unsqueeze(1) + 1e-16)
+
+            rel_wordembs = rel_wordembs.view(rel_wordembs.size(0), -1)
+            rel_wordembs = self.dropout(rel_wordembs)
+            rel_wordembs = self.dense(rel_wordembs)
+            rel_wordembs += rel_wordemb_basic
+            rel_wordembs = nn.Tanh()(rel_wordembs)
+            rel_dirembs, rel_dirembs_mask = self.diremb(dirs)
+            rel_embs = rel_wordembs + rel_dirembs
+            return rel_embs
+
+    relembcomp = RelEmbComp(wordemb, diremb)
+
+    # test computer
+    if _test:
+        test_words = np.random.randint(2, 20, (10, 4))
+        test_words[:, 2:] = 0
+        test_words = q.var(test_words).v
+        test_dirs = q.var(np.random.randint(0, 2, (10,))).v
+        test_inpdata = torch.cat([test_dirs.unsqueeze(1), test_words], 1)
+        test_relembs = relembcomp(test_inpdata)
+        loss = test_relembs.sum()
+        loss.backward()
+        print("gradnorm wordemb base: {}".format(wordemb.base.embedding.weight.grad.norm()))
+        print("gradnorm wordemb base for mask: {}".format(wordemb.base.embedding.weight.grad[0, :].norm()))
+        # print("gradnorm wordemb over: {}".format(wordemb.over.inner.embedding.weight.grad.norm()))
+        # print("gradnorm wordemb base for mask: {}".format(wordemb.over.inner.embedding.weight.grad[0, :].norm()))
+        print("test backwarded")
+
+    relembcompdata = np.concatenate([direction[:, np.newaxis], wordsm.matrix], axis=1)
+    relemb = q.ComputedWordEmb(relembcompdata, relembcomp, worddic=relD)
+    reloverdic = dict(zip(relovers, range(len(relovers))))
+    relembover = q.WordEmb(dim, worddic=reloverdic)
+    relemb = relemb.override(relembover)
+
+    # test relemb
+    if _test:
+        test_relids = q.var(np.asarray([0, 1, 2, 9, 821, 834])).v
+        test_relembs, test_relembs_mask = relemb(test_relids)
+        loss = test_relembs.sum()
+        loss.backward()
+        print("gradnorm for over: {}".format(relembover.embedding.weight.grad.norm()))
+        print("relemb test backwarded")
+
+    return relemb
+
+
 def make_stupid_encoder(dim, encdim, qsm, dropout):
     leftemb = q.WordEmb(dim, worddic=qsm.D)
     leftemb_pretrained = q.PretrainedWordEmb(dim, worddic=qsm.D, fixed=True)
@@ -805,6 +891,50 @@ def make_stupid_encoder(dim, encdim, qsm, dropout):
             terms = terms.squeeze(-1)
             terms = nn.Tanh()(terms)
             return alphasumm, betasumm, dirs, terms
+
+    return StupidLeftModel()
+
+
+def make_stupid_encoder_skip(dim, encdim, qsm, dropout):
+    leftemb = q.WordEmb(dim, worddic=qsm.D)
+    leftemb_pretrained = q.PretrainedWordEmb(dim, worddic=qsm.D, fixed=True)
+    leftemb = leftemb.override(leftemb_pretrained)
+
+    class StupidLeftModel(nn.Module):
+        def __init__(self):
+            super(StupidLeftModel, self).__init__()
+            self.emb = leftemb
+            self.dropout = q.TimesharedDropout(p=dropout)
+            self.layer = q.BidirLSTMLayer(dim, encdim // 2, mode="intercat").return_final(True)
+            self.addr_dense = nn.Linear(encdim, 2)
+            self.dirs_dense = nn.Linear(encdim, 1)
+            self.term_dense = nn.Linear(encdim, 1)
+            self.reduce_state = nn.Linear(encdim, dim)
+            self.sm = q.Softmax()
+
+        def forward(self, x):
+            embs, mask = self.emb(x)
+            embs = self.dropout(embs)
+            finalencs, allencs = self.layer(embs, mask=mask)
+            scores = self.addr_dense(allencs)
+            alphas, _ = self.sm(scores[:, :, 0], mask=mask)
+            betas, _ = self.sm(scores[:, :, 1], mask=mask)
+            # weighted embedding sums
+            alphasumm = torch.sum(embs * alphas.unsqueeze(2), 1)
+            betasumm = torch.sum(embs * betas.unsqueeze(2), 1)
+            # weighted encoded sums
+            alphasumm_enc = torch.sum(allencs * alphas.unsqueeze(2), 1)
+            betasumm_enc = torch.sum(allencs * betas.unsqueeze(2), 1)
+            summ_enc = torch.stack([alphasumm_enc, betasumm_enc], 1)
+            dirs = self.dirs_dense(summ_enc)
+            dirs = dirs.squeeze(-1)
+            dirs = nn.Tanh()(dirs)
+            terms = self.term_dense(finalencs)
+            terms = terms.squeeze(-1)
+            terms = nn.Tanh()(terms)
+            alpharet = alphasumm + self.reduce_state(alphasumm_enc)
+            betaret = betasumm + self.reduce_state(betasumm_enc)
+            return alpharet, betaret, dirs, terms
 
     return StupidLeftModel()
 
@@ -869,10 +999,10 @@ def run_stupid(lr=0.001,
 
     #################
 
-    relemb = make_relemb_stupid(chainsm.D, dim=dim, dropout=dropout)
+    relemb = make_relemb_skip(chainsm.D, dim=dim, dropout=dropout)
 
     # make left encoder
-    left_model = make_stupid_encoder(dim, encdim, qsm, dropout)
+    left_model = make_stupid_encoder_skip(dim, encdim, qsm, dropout)
 
     if _test:
         test_l_encs = left_model(q.var(ldata[:5, :]).v)
@@ -888,8 +1018,24 @@ def run_stupid(lr=0.001,
             rel_embs, rel_embs_mask = self.relemb(x[:, 0])
             rel_embs2, rel_embs_mask2 = self.relemb(x[:, 1])
             rel_encs = torch.stack([rel_embs, rel_embs2], 2)
-            return rel_embs[:, 1:], rel_embs2[:, 1:], rel_encs[:, 0, :]
+            return rel_embs, rel_embs2
+            # return rel_embs[:, 1:], rel_embs2[:, 1:], rel_encs[:, 0, :]
 
+    # class RightModel(nn.Module):
+    #     def __init__(self, **kw):
+    #         super(RightModel, self).__init__(**kw)
+    #         self.dense = nn.Linear(chainsm.matrix.shape[1] * dim, encdim)
+    #         self.relemb = relemb
+    #         self.dropout = nn.Dropout(p=dropout)
+    #
+    #     def forward(self, x):
+    #         rel_embs, rel_embs_mask = self.relemb(x)
+    #         rel_embs = rel_embs.view(rel_embs.size(0), -1)
+    #         rel_embs = self.dropout(rel_embs)
+    #         rel_encs = self.dense(rel_embs)
+    #         rel_encs = nn.Tanh()(rel_encs)
+    #         return rel_encs
+    #
     right_model = RightModel()
 
     if _test:
@@ -919,12 +1065,12 @@ def run_stupid(lr=0.001,
     losses = q.lossarray(q.PairRankingLoss(margin=margin if rankmode == "gold" else None))
     validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
 
-    # optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
+    optim = torch.optim.Adam(q.paramgroups_of(rankmodel), lr=lr, weight_decay=wreg)
 
     # TODO: add validation and test
     q.train(rankmodel).train_on(trainloader, losses)\
         .set_batch_transformer(inptransform)\
-        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
+        .optimizer(optim)\
         .valid_on(validloader, validlosses).valid_inter(validinter) \
         .cuda(cuda).train(epochs)
 
