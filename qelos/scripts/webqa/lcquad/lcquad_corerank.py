@@ -108,6 +108,7 @@ class StupidScoreModel(ScoreModel):
         ldata = ldata if q.issequence(ldata) else (ldata,)
         rdata = rdata if q.issequence(rdata) else (rdata,)
         lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
+        term = term * 2. - 1.
         rvecs1, rvecs2 = self.rmodel(*rdata)
         lterm = (term > 0).float()                      # 1 if two-hop
         rterms = (rvecs2.abs().sum(1) > 0).float()       # 1 if two-hop
@@ -116,6 +117,24 @@ class StupidScoreModel(ScoreModel):
         score += sim1
         score += sim2 * lterm
         return score
+
+
+class StupidScoreModelRank(StupidScoreModel):
+    def forward(self, ldata, rdata):
+        ldata = ldata if q.issequence(ldata) else (ldata,)
+        rdata = rdata if q.issequence(rdata) else (rdata,)
+        lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
+        term = term * 2. - 1.
+        rvecs1, rvecs2 = self.rmodel(*rdata)
+        lterm = (term > 0).float()                      # 1 if two-hop
+        rterms = (rvecs2.abs().sum(1) > 0).float()       # 1 if two-hop
+        sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
+        # score = torch.abs(lterm - rterms) * self.LRG        # disagreement between number of hops
+        # score += sim1
+        # score += sim2 * lterm
+        score = sim1 + sim2 * lterm
+        return score
+
 
 
 class InpFeeder(object):
