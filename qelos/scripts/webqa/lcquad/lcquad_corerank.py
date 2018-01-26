@@ -971,7 +971,7 @@ def make_stupid_encoder_skip(dim, encdim, qsm, dropout):
             dirs = nn.Tanh()(dirs)
             terms = self.term_dense(finalencs)
             terms = terms.squeeze(-1)
-            terms = nn.Tanh()(terms)
+            terms = nn.Sigmoid()(terms)     # for BCE
             alpharet = alphasumm + self.reduce_state(alphasumm_enc)
             betaret = betasumm + self.reduce_state(betasumm_enc)
             return alpharet, betaret, dirs, terms
