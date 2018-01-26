@@ -670,12 +670,12 @@ def run(lr=0.001,
     losses = q.lossarray(q.PairRankingLoss(margin=margin if rankmode == "gold" else None))
     validlosses = q.lossarray(q.PairRankingLoss(margin=margin), recallat1, recallat5, mrr)
 
-    # optim = torch.optim.Adam(q.params_of(rankmodel), lr=lr, weight_decay=wreg)
+    optim = torch.optim.Adam(q.paramgroups_of(rankmodel), lr=lr, weight_decay=wreg)
 
     # TODO: add validation and test
     q.train(rankmodel).train_on(trainloader, losses)\
         .set_batch_transformer(inptransform)\
-        .optimizer(torch.optim.Adam, lr=lr, weight_decay=wreg)\
+        .optimizer(optim)\
         .valid_on(validloader, validlosses).valid_inter(validinter) \
         .cuda(cuda).train(epochs)
 
