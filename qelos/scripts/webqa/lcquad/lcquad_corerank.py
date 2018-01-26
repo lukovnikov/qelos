@@ -37,6 +37,7 @@ class RankModel(nn.Module):
 
 
 class StupidRankModel(RankModel):
+    EPS = 1e-6
     def __init__(self, lmodel, rmodel, sim, catscores=False, margin=1., **kw):
         super(StupidRankModel, self).__init__(lmodel, rmodel, sim, catscores=catscores, **kw)
         self.margin = margin
@@ -55,7 +56,7 @@ class StupidRankModel(RankModel):
         # print(type(zeros), type(sim1), type(sim2), type(nsim1))
         loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
         loss2 = torch.max(zeros, self.margin - (sim2 - nsim2))
-        losst = - (goldterm * torch.log(term) + (1 - goldterm) * torch.log(1 - term))
+        losst = - (goldterm * torch.log(term+self.EPS) + (1 - goldterm) * torch.log(1 - term + self.EPS))
         loss = loss1 + goldterm * loss2 + losst
         return loss
 
