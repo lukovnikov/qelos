@@ -61,6 +61,30 @@ class StupidRankModel(RankModel):
         return loss
 
 
+class StupidRankModelRank(StupidRankModel):
+    def forward(self, ldata, posrdata, negrdata):
+        ldata = ldata if q.issequence(ldata) else (ldata,)
+        posrdata = posrdata if q.issequence(posrdata) else (posrdata,)
+        negrdata = negrdata if q.issequence(negrdata) else (negrdata,)
+        lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
+        term = term * 2. - 1.
+        rvecs1, rvecs2 = self.rmodel(*posrdata)
+        nrvecs1, nrvecs2 = self.rmodel(*negrdata)
+        sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
+        nsim1, nsim2 = self.sim(lvecs_frst, nrvecs1), self.sim(lvecs_scnd, nrvecs2)
+        goldterm = (rvecs2.abs().sum(1) > 0).float()   # 1 if two-hop
+        zeros = q.var(torch.zeros(sim1.size(0))).cuda(sim1).v
+        # print(type(zeros), type(sim1), type(sim2), type(nsim1))
+        pscore = sim1 + sim2 * term
+        nscore = sim1 + sim2 * term
+        # loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
+        # loss2 = torch.max(zeros, self.margin - (sim2 - nsim2))
+        # losst = - (goldterm * torch.log(term+self.EPS) + (1 - goldterm) * torch.log(1 - term + self.EPS))
+        # loss = loss1 + goldterm * loss2 + losst
+        loss = torch.max(zeros, self.margin - (pscore - nscore))
+        return loss
+
+
 class ScoreModel(nn.Module):
     def __init__(self, lmodel, rmodel, similarity, **kw):
         super(ScoreModel, self).__init__(**kw)
@@ -1084,7 +1108,7 @@ def run_stupid(lr=0.001,
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
     similarity = q.DotDistance()  #q.DotDistance()    # computes score
-    rankmodel = StupidRankModel(left_model, right_model, similarity, margin=1.)
+    rankmodel = StupidRankModelRank(left_model, right_model, similarity, margin=1.)
     scoremodel = StupidScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
     recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
