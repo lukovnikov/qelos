@@ -1127,8 +1127,8 @@ def run_stupid(lr=0.001,
         test_r_encs = right_model(q.var(rdata[:5, :]).v)
 
     similarity = q.DotDistance()  #q.DotDistance()    # computes score
-    rankmodel = StupidRankModelRank(left_model, right_model, similarity, margin=1.)
-    scoremodel = StupidScoreModelRank(left_model, right_model, similarity)
+    rankmodel = StupidRankModel(left_model, right_model, similarity, margin=1.)
+    scoremodel = StupidScoreModel(left_model, right_model, similarity)
     rankcomp = RankingComputer(scoremodel, ldata, rdata, eid2lid, eid2rid_gold, eid2rids)
     recallat1, recallat5 = RecallAt(1, rankcomp=rankcomp), RecallAt(5, rankcomp=rankcomp)
     mrr = MRR(rankcomp=rankcomp)
