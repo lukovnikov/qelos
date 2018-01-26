@@ -50,7 +50,7 @@ class StupidRankModel(RankModel):
         nrvecs1, nrvecs2 = self.rmodel(*negrdata)
         sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
         nsim1, nsim2 = self.sim(lvecs_frst, nrvecs1), self.sim(lvecs_scnd, nrvecs2)
-        goldterm = (rvecs2.norm(2, 1) > 0).float()   # 1 if two-hop
+        goldterm = (rvecs2.abs().sum(1) > 0).float()   # 1 if two-hop
         zeros = q.var(torch.zeros(sim1.size(0))).cuda(sim1).v
         # print(type(zeros), type(sim1), type(sim2), type(nsim1))
         loss1 = torch.max(zeros, self.margin - (sim1 - nsim1))
@@ -85,7 +85,7 @@ class StupidScoreModel(ScoreModel):
         lvecs_frst, lvecs_scnd, _, term = self.lmodel(*ldata)
         rvecs1, rvecs2 = self.rmodel(*rdata)
         lterm = (term > 0).float()                      # 1 if two-hop
-        rterms = (rvecs2.norm(2, 1) > 0).float()       # 1 if two-hop
+        rterms = (rvecs2.abs().sum(1) > 0).float()       # 1 if two-hop
         sim1, sim2 = self.sim(lvecs_frst, rvecs1), self.sim(lvecs_scnd, rvecs2)
         score = torch.abs(lterm - rterms) * self.LRG        # disagreement between number of hops
         score += sim1
