@@ -250,7 +250,7 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
             self.decoder = decoder
             self.z_dist = z_dist
             self.ff_inner = torch.nn.Sequential(q.Forward(2, 5, "relu"),
-                                                q.Forward(5, 5, "relu"),
+                                                #q.Forward(5, 5, "relu"),
                                                 torch.nn.Linear(5, 2))
             # self.ff_inner = None
 
@@ -321,6 +321,11 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
     optim_vae = torch.optim.Adam(q.paramgroups_of(vae), lr=lr)
     optim_disc = torch.optim.Adam(q.paramgroups_of(disc), lr=lr)
 
+    postdisc = PriorDisc()
+    postgen = PriorGen()
+    optim_postdisc = torch.optim.Adam(q.paramgroups_of(postdisc), lr=lr)
+    optim_postgen = torch.optim.Adam(q.paramgroups_of(postgen), lr=lr)
+
     disciters = 5
     prioriters = 5
     grad_penalty_weight = 1.
@@ -381,14 +386,38 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
         optim_vae.step()
         print(i, loss_recons.mean().data[0], disc_loss.data[0], loss_prior.data[0])
 
+        for k in range(prioriters):
+            for j in range(disciters):  # train discriminator
+                discbatch = q.var(next(infdata)[0]).v
+                _, _, _, realv = vae(discbatch)
+                # realv = realv.detach()
+                real = realv.data
+                optim_postdisc.zero_grad()
+                z = q.var(z_dist.sample_n(real.size(0))).v
+                fakev = postgen(z)
+                fake = fakev.data
+                interp_alpha = real.new(real.size(0), 1).uniform_(0, 1)
+                interp_points = q.var(interp_alpha * real + (1 - interp_alpha) * fake, requires_grad=True).cuda(real).v
+                disc_interp_grad, = torch.autograd.grad(postdisc(interp_points).sum(), interp_points, create_graph=True)
+                lip_grad_norm = disc_interp_grad.view(real.size(0), -1).norm(2, 1)
+                lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2)
+                core_loss = postdisc(fakev.detach()) - postdisc(realv.detach())
+                disc_loss = core_loss.mean() + lip_loss.mean()
+                disc_loss.backward()
+                optim_postdisc.step()
+            optim_postgen.zero_grad()
+            real = q.var(next(infdata)[0]).v
+            z = q.var(z_dist.sample_n(real.size(0))).v
+            gen_loss = -postdisc(postgen(z)).mean()
+            gen_loss.backward()
+            optim_postgen.step()
+        print(i, core_loss.mean().data[0])
 
-    posttrain = False
+
+
+    posttrain = True
     if posttrain:
-        postepochs = 2000
-        postdisc = PriorDisc()
-        postgen = PriorGen()
-        optim_postdisc = torch.optim.Adam(q.paramgroups_of(postdisc), lr=lr)
-        optim_postgen = torch.optim.Adam(q.paramgroups_of(postgen), lr=lr)
+        postepochs = 500
         print("training post")
         for i in range(postepochs):
             for j in range(disciters):      # train discriminator
@@ -436,8 +465,8 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
         toplot.append(sample.data.numpy())
     z = q.var(z_dist.sample_n(500)).v
     postsamples = z
-    if posttrain:
-        postsamples = postgen(z.data.numpy())
+    # if posttrain:
+    postsamples = postgen(z)
 
     pkl.dump((toplot, postsamples.data.numpy()), open("otm.npz", "w"))
 
