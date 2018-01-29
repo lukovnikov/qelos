@@ -337,7 +337,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
         def forward(self, inpseq, outinpseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
-            # self.decoder.set_init_states(None, final_encoding)
+            # self.decoder.set_inew loss in trainer for stupidmodelnit_states(None, final_encoding)
             decoding = self.decoder(outinpseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
@@ -1065,6 +1065,6 @@ if __name__ == "__main__":
     # run_noisy_parse()
     # load_data_trees()
     # run_some_tests()
-    q.argprun(run_seq2seq_reproduction)
+    # q.argprun(run_seq2seq_reproduction)
     # q.argprun(run_seq2seq_oracle)
     q.argprun(run_seq2tree_tf)
