@@ -12,7 +12,7 @@ OPT_LR = 0.001
 OPT_EPOCHS = 100
 OPT_BATSIZE = 20
 
-OPT_WREG = 0.00001
+OPT_WREG = 0.000001
 OPT_DROPOUT = 0.5
 OPT_GRADNORM = 5.
 
@@ -591,7 +591,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     if validontest:
         validdata = testdata
     else:
-        traindata, validdata = q.split(traindata, random=1234)
+        traindata, validdata = q.split(traindata, random=4567)
 
     train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
