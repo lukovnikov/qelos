@@ -462,7 +462,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                             cuda=False, gpu=0,
+                             cuda=False, gpu=0, splitseed=4567,
                              decodermode="single", useattention=True,
                              validontest=False):
     settings = locals().copy()
@@ -591,7 +591,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     if validontest:
         validdata = testdata
     else:
-        traindata, validdata = q.split(traindata, random=4567)
+        traindata, validdata = q.split(traindata, random=splitseed)
 
     train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
