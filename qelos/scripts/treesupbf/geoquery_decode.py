@@ -622,7 +622,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         for i in range(len(test_x)):
             print(tracker.pp(test_x[i]))
             test_cores, test_ctrls = symbol2corenctrl(q.var(test_x[i]).cuda(cuda).v)
-            test_cores = test_cores.data.numpy()
+            test_cores = test_cores.cpu().data.numpy()
             print(" ".join([revdin[test_cores_ij] for test_cores_ij
                             in test_cores if test_cores_ij != outemb.D["<MASK>"]]))
 
