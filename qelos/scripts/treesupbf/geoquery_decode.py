@@ -472,7 +472,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
-    print("SEQ2TREE REPRODUCTION")
+    print("SEQ2TREE TF")
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
