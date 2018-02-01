@@ -399,7 +399,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # print(encdec)
 
 
-def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
+def make_multilinout(lindim, grouptracker=None, tie_weights=False, chained=False, ttt=None):
     assert(grouptracker is not None)
     ttt = q.ticktock("linout test") if ttt is None else ttt
     inpD, outD = grouptracker.D_in, grouptracker.D
@@ -426,22 +426,24 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
     # endregion
 
     class StrucSMO(torch.nn.Module):
-        def __init__(self, indim, worddic=None, **kw):
+        def __init__(self, indim, worddic=None, chained=False, **kw):
             super(StrucSMO, self).__init__(**kw)
             self.dim = indim
             self.D = worddic
-            self.coreout = q.WordLinout(self.dim+2, worddic=inpD)
+            self.chained = chained
+            self.coreout = q.WordLinout(self.dim+2, worddic=inpD, bias=False)
             annD = {"A": 0, "NC": 1, "LS": 2, "NCLS": 3}
-            self.annout = q.WordLinout(self.dim, worddic=annD)
+            self.annout = q.WordLinout(self.dim, worddic=annD, bias=False)
             self.annemb = q.WordEmb(self.dim, worddic=annD)
             self.annemb.embedding.weight.data.fill_(0)
 
             appendix = torch.zeros(1, 4, 2)
-            appendix[:, 1, 0] = 1.      # NC
-            appendix[:, 2, 1] = 1.      # LS
-            appendix[:, 3, :] = 1.      # NCLS
+            if self.chained:
+                appendix[:, 1, 0] = 1.      # NC
+                appendix[:, 2, 1] = 1.      # LS
+                appendix[:, 3, :] = 1.      # NCLS
             self.appendix = q.val(appendix).v
-            # self.addition = self.annemb.embedding.weight.unsqueeze(0)
+
             coreprobmask = torch.ones(1, 4, self.coreout.lin.weight.size(0))
             coreprobmask[:, :, self.coreout.D["<MASK>"]] = 0
             coreprobmask[:, :, self.coreout.D["<START>"]] = 0
@@ -465,6 +467,8 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
             appendix = self.appendix.repeat(x.size(0), 1, 1)
             xx = x.unsqueeze(1)
             addition = self.annemb.embedding.weight.unsqueeze(0)
+            if not self.chained:
+                addition = q.var(torch.zeros(addition.size())).cuda(addition).v
             xxx = xx + addition
             xxxx = torch.cat([appendix, xxx], 2)
             # core pred
@@ -480,7 +484,7 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
 
             return retprobs
 
-    ret = StrucSMO(lindim, worddic=outD)
+    ret = StrucSMO(lindim, worddic=outD, chained=chained)
     # TODO TEST
     return ret, symbols2cores, symbols2ctrl
 
