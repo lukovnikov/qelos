@@ -558,7 +558,8 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
-    logger.update_settings(version="3")
+    logger.update_settings(completed=False)
+    logger.update_settings(version="1")
     # version "2": with strucSMO
     # verison "3": unchained strucSMO
 
@@ -594,8 +595,8 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     outemb, linout, symbols2cores, symbols2ctrl \
         = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
 
-    linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
-    assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
+    # linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+    # assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
 
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     # endregion
@@ -729,7 +730,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     valid_decoder = valid_decoder_cell.to_decoder()
     valid_encdec = EncDecAtt(encoder, valid_decoder)
 
-    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0), #q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0))
 
@@ -750,9 +751,12 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .hook(logger) \
         .train(epochs)
 
+    logger.update_settings(completed=True)
+
     results = q.test(valid_encdec).on(test_loader, validlosses) \
         .set_batch_transformer(inbtf) \
         .cuda(cuda).run()
+
 
 
 def make_oracle(tracker, symbols2cores, symbols2ctrl, mode=OPT_ORACLEMODE, withannotations=False, cuda=False, ttt=None,
