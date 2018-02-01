@@ -399,6 +399,91 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # print(encdec)
 
 
+def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
+    assert(grouptracker is not None)
+    ttt = q.ticktock("linout test") if ttt is None else ttt
+    inpD, outD = grouptracker.D_in, grouptracker.D
+
+    # region symbols to cores and ctrls
+    symbols_is_last = np.zeros((len(outD),), dtype="int64")
+    symbols_is_leaf = np.zeros((len(outD),), dtype="int64")
+    for k, v in sorted(outD.items(), key=lambda (x, y): y):
+        ksplits = k.split("*")
+        assert(ksplits[0] in inpD)
+        symbols_is_last[v] = "LS" in ksplits[1:] or k in "<MASK> <STOP> <NONE> <ROOT>".split()
+        symbols_is_leaf[v] = "NC" in ksplits[1:] or k in "<MASK> <START> <STOP> <NONE>".split()
+
+    symbols2ctrl = symbols_is_last * 2 + symbols_is_leaf + 1
+    symbols2ctrl[outD["<MASK>"]] = 0
+    symbols2cores = np.zeros((len(outD),), dtype="int64")
+    for symbol in outD:
+        symbols2cores[outD[symbol]] = inpD[symbol.split("*")[0]]
+    assert(inpD["<MASK>"] == 0 == outD["<MASK>"])
+    assert(inpD["<START>"] == 1 == outD["<START>"])
+    assert(inpD["<STOP>"] == 2 == outD["<STOP>"])
+    assert(inpD["<ROOT>"] == 3 == outD["<ROOT>"])
+    assert(inpD["<NONE>"] == 4 == outD["<NONE>"])
+    # endregion
+
+    class StrucSMO(torch.nn.Module):
+        def __init__(self, indim, worddic=None, **kw):
+            super(StrucSMO, self).__init__(**kw)
+            self.dim = indim
+            self.D = worddic
+            self.coreout = q.WordLinout(self.dim+2, worddic=inpD)
+            annD = {"A": 0, "NC": 1, "LS": 2, "NCLS": 3}
+            self.annout = q.WordLinout(self.dim, worddic=annD)
+            self.annemb = q.WordEmb(self.dim, worddic=annD)
+            self.annemb.embedding.weight.data.fill_(0)
+
+            appendix = torch.zeros(1, 4, 2)
+            appendix[:, 1, 0] = 1.      # NC
+            appendix[:, 2, 1] = 1.      # LS
+            appendix[:, 3, :] = 1.      # NCLS
+            self.appendix = q.val(appendix).v
+            self.addition = self.annemb.embedding.weight.unsqueeze(0)
+            coreprobmask = torch.ones(1, 4, self.coreout.lin.weight.size(0))
+            coreprobmask[:, :, self.coreout.D["<MASK>"]] = 0
+            coreprobmask[:, :, self.coreout.D["<START>"]] = 0
+            coreprobmask[:, :, self.coreout.D["<STOP>"]] = 0
+            coreprobmask[:, :, self.coreout.D["<ROOT>"]] = 0
+            coreprobmask[:, :, self.coreout.D["<NONE>"]] = 0
+
+            coreprobmask[:, 3, self.coreout.D["<MASK>"]] = 1
+            coreprobmask[:, 1, self.coreout.D["<START>"]] = 1
+            coreprobmask[:, 3, self.coreout.D["<STOP>"]] = 1
+            coreprobmask[:, 2, self.coreout.D["<ROOT>"]] = 1
+            coreprobmask[:, 3, self.coreout.D["<NONE>"]] = 1
+
+            self.coreprobmask = q.val(coreprobmask).v
+
+
+        def forward(self, x):
+            # predict structure:
+            ctrlprobs = self.annout(x)
+            ctrlprobs = torch.nn.LogSoftmax(1)(ctrlprobs).unsqueeze(2)
+            # prepare core pred
+            appendix = self.appendix.repeat(x.size(0), 1, 1)
+            xx = x.unsqueeze(1)
+            xxx = xx + self.addition
+            xxxx = torch.cat([appendix, xxx], 2)
+            # core pred
+            coreprobs = self.coreout(xxxx)
+            coreprobs += torch.log(self.coreprobmask)
+            coreprobs = torch.nn.LogSoftmax(2)(coreprobs)
+            allprobs = ctrlprobs + coreprobs
+            # join into D's space
+            specialprobs, _ = torch.max(allprobs[:, :, :5], 1)
+            _allprobs = allprobs[:, :, 5:]   # assumes special symbols are only five and they're first and only scored in one struct condition
+            otherprobs = _allprobs.contiguous().view(x.size(0), -1)   # assumes all real symbols are combined with every struct decision
+            retprobs = torch.cat([specialprobs, otherprobs], 1)
+
+            return retprobs
+
+    ret = StrucSMO(lindim, worddic=outD)
+    return ret, symbols2cores, symbols2ctrl
+
+
 def make_outvecs(embdim, lindim, grouptracker=None, tie_weights=False, ttt=None):
     assert(grouptracker is not None)
     ttt = q.ticktock("linout test") if ttt is None else ttt
@@ -501,6 +586,9 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     outemb, linout, symbols2cores, symbols2ctrl \
         = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+
+    linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+    assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
 
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     # endregion
