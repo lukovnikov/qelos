@@ -8,7 +8,7 @@ import random
 import sys
 
 
-OPT_LR = 0.001
+OPT_LR = 0.0003
 OPT_EPOCHS = 100
 OPT_BATSIZE = 20
 
@@ -457,7 +457,6 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
 
             self.coreprobmask = q.val(coreprobmask).v
 
-
         def forward(self, x):
             # predict structure:
             ctrlprobs = self.annout(x)
@@ -481,6 +480,7 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
             return retprobs
 
     ret = StrucSMO(lindim, worddic=outD)
+    # TODO TEST
     return ret, symbols2cores, symbols2ctrl
 
 
@@ -547,13 +547,14 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                             cuda=False, gpu=0, splitseed=4567,
+                             cuda=False, gpu=0, splitseed=14567,
                              decodermode="single", useattention=True,
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
-    logger.update_settings(version="1")
+    logger.update_settings(version="2")
+    # version "2": with strucSMO
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
@@ -722,7 +723,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     valid_decoder = valid_decoder_cell.to_decoder()
     valid_encdec = EncDecAtt(encoder, valid_decoder)
 
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0))
 
@@ -912,6 +913,8 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     outemb, linout, symbols2cores, symbols2ctrl\
         = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+
+    # TODO: use struct linout
 
     # region ENCODER -------------------------------------
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
