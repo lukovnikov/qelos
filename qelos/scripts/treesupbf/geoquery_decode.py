@@ -558,8 +558,9 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
-    logger.update_settings(version="2")
+    logger.update_settings(version="3")
     # version "2": with strucSMO
+    # verison "3": unchained strucSMO
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
