@@ -519,7 +519,7 @@ def make_outvecs(embdim, lindim, grouptracker=None, tie_weights=False, ttt=None)
             super(StructEmbComputer, self).__init__(**kw)
             self.dim = dim
             self.coreemb = q.WordEmb(self.dim, worddic=inpD)
-            self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "LS": 2, "NC": 3, "NCLS": 4})
+            self.annemb = q.WordEmb(self.dim, worddic={"<MASK>": 0, "A": 1, "NC": 2, "LS": 3, "NCLS": 4})
             self.annemb.embedding.weight.data.fill_(0)
 
         def forward(self, data):
@@ -728,9 +728,15 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
-    valid_encdec = EncDecAtt(encoder, valid_decoder)
 
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0), #q.SeqNLLLoss(ignore_index=0),
+    if useattention:
+        valid_encdec = EncDecAtt(encoder, decoder)
+    else:
+        valid_encdec = EncDec(encoder, decoder)
+
+
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         #q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0))
 
