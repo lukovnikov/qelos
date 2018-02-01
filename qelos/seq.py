@@ -951,8 +951,8 @@ class DecoderTop(nn.Module):
 class ContextDecoderTop(DecoderTop):
     """ Decoder Top with context """
     def __init__(self, *layers, **kw):
-        super(ContextDecoderTop, self).__init__(**kw)
-        self.layers = Stack(*layers)
+        super(ContextDecoderTop, self).__init__(*layers, **kw)
+        # self.layers = Stack(*layers)
         self.stored_ctx = None
 
     def set_ctx(self, *ctx_arg, **ctx_kw):

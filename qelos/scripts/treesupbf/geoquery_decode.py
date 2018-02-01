@@ -441,7 +441,7 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
             appendix[:, 2, 1] = 1.      # LS
             appendix[:, 3, :] = 1.      # NCLS
             self.appendix = q.val(appendix).v
-            self.addition = self.annemb.embedding.weight.unsqueeze(0)
+            # self.addition = self.annemb.embedding.weight.unsqueeze(0)
             coreprobmask = torch.ones(1, 4, self.coreout.lin.weight.size(0))
             coreprobmask[:, :, self.coreout.D["<MASK>"]] = 0
             coreprobmask[:, :, self.coreout.D["<START>"]] = 0
@@ -464,7 +464,8 @@ def make_multilinout(lindim, grouptracker=None, tie_weights=False, ttt=None):
             # prepare core pred
             appendix = self.appendix.repeat(x.size(0), 1, 1)
             xx = x.unsqueeze(1)
-            xxx = xx + self.addition
+            addition = self.annemb.embedding.weight.unsqueeze(0)
+            xxx = xx + addition
             xxxx = torch.cat([appendix, xxx], 2)
             # core pred
             coreprobs = self.coreout(xxxx)
