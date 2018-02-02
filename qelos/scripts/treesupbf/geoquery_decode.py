@@ -296,7 +296,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    trainmats, testmats, inpD, outD = load_data(reverse_input=False)
+    trainmats, testmats, inpD, outD = load_data(reverse_input=True)
 
     if embdim > 0:
         tt.msg("embdim overrides inpembdim and outembdim")
@@ -310,7 +310,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
         q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
-    ).to_layer().return_final().return_mask().reverse()
+    ).to_layer().return_final().return_mask()
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
