@@ -1148,7 +1148,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, numtrain = load_data_trees(reverse_input=False)
+    ism, tracker, numtrain = load_data_trees(reverse_input=True)
     eids = np.arange(0, len(ism), dtype="int64")
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
@@ -1181,7 +1181,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
         q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
-    ).to_layer().return_final().return_mask().reverse()
+    ).to_layer().return_final().return_mask()
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
@@ -1218,6 +1218,9 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
         def forward(self, inpseq, outseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.set_init_states(None, final_encoding)
+            encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            self.decoder.set_init_states(*initstates)
             decoding = self.decoder(outseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
