@@ -286,7 +286,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
-    logger.update_settings(version="2")
+    logger.update_settings(version="3")
+    logger.update_settings(completed=False)
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
@@ -391,6 +392,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)
+
+    logger.update_settings(completed=True)
 
     results = q.test(valid_encdec).on(test_loader, validlosses)\
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
@@ -891,12 +894,13 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1, oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                             cuda=False, gpu=0,
+                             cuda=False, gpu=0, splitseed=1,
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
     logger.save_settings(**settings)
     logger.update_settings(version="1")
+    logger.update_settings(completed=False)
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
@@ -930,7 +934,7 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     outemb, linout, symbols2cores, symbols2ctrl\
         = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
 
-    # TODO: use struct linout
+    # TODO: try struct linout
 
     # region ENCODER -------------------------------------
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
@@ -945,10 +949,10 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # endregion
 
     # region ORACLE --------------------------------------
-    # !!! need oracle in decoder construction
     oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, mode=oraclemode, ttt=ttt, withannotations=True,
                          trees=tracker.trackables)
     # endregion
+    logger.update_settings(completed=False)
 
     # region DECODER -------------------------------------
     # test
@@ -1057,12 +1061,14 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     if validontest:
         validdata = testdata
     else:
-        traindata, validdata = q.split(traindata, random=True)
+        splitseed = True if splitseed == 1 else False if splitseed == 0 else splitseed
+        traindata, validdata = q.split(traindata, random=splitseed)
 
     train_loader = q.dataload(*[traindata[i] for i in [0, 1, 2, 4]], batch_size=batsize, shuffle=True)
     valid_loader = q.dataload(*[validdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*[testdata[i] for i in [0, 1, 3]], batch_size=batsize, shuffle=False)
     # endregion
+    logger.update_settings(completed=False)
 
     # region TRAINING --------------------
     # region SETTING ---------------------
@@ -1101,6 +1107,8 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .cuda(cuda) \
         .hook(logger) \
         .train(epochs)
+
+    logger.update_settings(completed=True)
 
     results = q.test(valid_encdec).on(test_loader, validlosses) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:])) \
@@ -1173,5 +1181,5 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    # q.argprun(run_seq2seq_oracle)
-    q.argprun(run_seq2tree_tf)
+    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2tree_tf)
