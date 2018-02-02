@@ -336,12 +336,14 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
             super(EncDecAtt, self).__init__(**kwargs)
             self.encoder = _encoder
             self.decoder = _decoder
+            self.dropout = q.Dropout(dropout)
 
         def forward(self, inpseq, outinpseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.set_inew loss in trainer for stupidmodelnit_states(None, final_encoding)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
-            self.decoder.set_init_states(*encoderstates)
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            self.decoder.set_init_states(*initstates)
             decoding = self.decoder(outinpseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
