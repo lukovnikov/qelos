@@ -952,7 +952,6 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     oracle = make_oracle(tracker, symbols2cores, symbols2ctrl, mode=oraclemode, ttt=ttt, withannotations=True,
                          trees=tracker.trackables)
     # endregion
-    logger.update_settings(completed=False)
 
     # region DECODER -------------------------------------
     # test
@@ -1117,6 +1116,154 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # endregion
 
 
+def run_seq2seq_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+                     wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
+                     embdim=-1,
+                     inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
+                     cuda=False, gpu=0, splitseed=1,
+                     validontest=False):
+    settings = locals().copy()
+    logger = q.Logger(prefix="geoquery_s2s_tf")
+    logger.save_settings(**settings)
+    logger.update_settings(version="1")
+    logger.update_settings(completed=False)
+
+    if validontest:
+        print("VALIDATING ON TEST: WONG !!!")
+    print("SEQ2SEQ ORACLE")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+    ism, tracker, numtrain = load_data_trees(reverse_input=False)
+    eids = np.arange(0, len(ism), dtype="int64")
+    psm = q.StringMatrix()
+    psm.set_dictionary(tracker.D)
+    psm.tokenize = lambda x: x.split()
+    for tree in tracker.trackables:
+        treestring = tree.pp(arbitrary=False, _remove_order=True)
+        assert (Node.parse(treestring) == tree)
+        psm.add("<ROOT> " + treestring)
+    psm.finalize()
+    print(ism[0])
+    print(psm[0])
+
+    # region MODEL --------------------------------
+    # EMBEDDINGS ----------------------------------
+    if embdim > 0:
+        tt.msg("embdim overrides inpembdim and outembdim")
+        inpembdim, outembdim = embdim, embdim
+
+    linoutdim = innerdim + innerdim
+
+    inpemb = q.WordEmb(inpembdim, worddic=ism.D)  # TODO glove embeddings
+
+    outemb, linout, symbols2cores, symbols2ctrl \
+        = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+
+    # TODO: try struct linout
+
+    # region ENCODER -------------------------------------
+    # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
+    encoderstack = q.RecStack(
+        q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
+        q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
+    ).to_layer().return_final().return_mask().reverse()
+    encoder = q.RecurrentStack(
+        inpemb,
+        encoderstack,
+    )
+    # endregion
+
+    # region DECODER -------------------------------------
+    # test
+    # testencret = encoder(q.var(trainmats[0][:5]).v)
+
+    layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=None),
+              )
+
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(dropout),
+                                               linout, ctx2out=False)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+
+    # endregion
+
+    # region ENCDEC ---------------------------------------
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, _encoder, _decoder, maxtime=None, **kwargs):
+            super(EncDecAtt, self).__init__(**kwargs)
+            self.encoder = _encoder
+            self.decoder = _decoder
+            self.maxtime = maxtime
+
+        def forward(self, inpseq, outseq):
+            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            # self.decoder.set_init_states(None, final_encoding)
+            decoding = self.decoder(outseq,
+                                    ctx=all_encoding,
+                                    ctx_0=final_encoding,
+                                    ctxmask=mask)
+            return decoding
+
+    encdec = EncDecAtt(encoder, decoder)
+    # endregion
+    # endregion
+
+    # region DATA LOADING
+    traindata = [ism.matrix[:numtrain], psm.matrix[:numtrain, :-1], psm.matrix[:numtrain, 1:]]
+    testdata = [ism.matrix[numtrain:], psm.matrix[numtrain:, :-1], psm.matrix[numtrain:, 1:]]
+
+    if validontest:
+        validdata = testdata
+    else:
+        splitseed = True if splitseed == 1 else False if splitseed == 0 else splitseed
+        traindata, validdata = q.split(traindata, random=splitseed)
+
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # endregion
+
+    freerunner = q.FreeRunner()
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(freerunner)
+    valid_decoder = valid_decoder_cell.to_decoder()
+    valid_encdec = EncDecAtt(encoder, valid_decoder)
+
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         # q.SeqNLLLoss(ignore_index=0),
+                         q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+
+
+    validlosses = q.lossarray(  # q.SeqCrossEntropyLoss(ignore_index=0),
+        q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
+        q.SeqAccuracy(ignore_index=0),
+        TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+
+    logger.update_settings(optimizer="rmsprop")
+    optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
+
+    q.train(encdec).train_on(train_loader, losses) \
+        .optimizer(optim) \
+        .clip_grad_norm(gradnorm) \
+        .valid_with(valid_encdec).valid_on(valid_loader, validlosses) \
+        .cuda(cuda) \
+        .hook(logger) \
+        .train(epochs)
+
+    logger.update_settings(completed=True)
+
+    results = q.test(valid_encdec).on(test_loader, validlosses) \
+        .cuda(cuda).run()
+
+
 def run_noisy_parse():
     treen = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) ) ( ) ) ) ) ) )")
     tree = parse_query_tree("( lambda $0 e ( and ( state:t $0 ) ( and ( next_to:t $0 s0 ) ( next_to:t $0 s0 ) ) ) )")
@@ -1181,5 +1328,6 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
+    q.argprun(run_seq2seq_tf)
