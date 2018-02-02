@@ -367,6 +367,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
                          q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                          q.SeqAccuracy(ignore_index=0))
 
+    logger.track(losses, "#")
+
     # validation with freerunner
     freerunner = q.FreeRunner()
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -386,20 +388,27 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
                               q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=treeparser))
 
+    logger.track(validlosses, "##")
+
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
     lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
 
-    q.train(encdec).train_on(train_loader, losses)\
+    trainer = q.train(encdec).on(train_loader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
-        .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
         .cuda(cuda)\
         .hook(logger)\
-        .hook(lrsched) \
-        .train(epochs)
+        .hook(lrsched)
+
+    validator = q.valid(valid_encdec).on(valid_loader, validlosses) \
+        .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
+        .cuda(cuda)
+    trainer.hook(validator)
+
+    trainer.train(epochs=epochs)
 
     logger.update_settings(completed=True)
 
@@ -1344,7 +1353,7 @@ if __name__ == "__main__":
     # run_noisy_parse()
     # load_data_trees()
     # run_some_tests()
-    # q.argprun(run_seq2seq_reproduction)
+    q.argprun(run_seq2seq_reproduction)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)

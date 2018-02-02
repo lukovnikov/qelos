@@ -51,7 +51,7 @@ class Logger(q.AutoHooker):
         else:
             os.makedirs(self.p)
         self._current_train_file = None
-        self._current_numbers = []
+        self._tracked = []
 
     def save_settings(self, **kw):
         p = self.p + "/" + OPT_SETTINGS_NAME
@@ -69,10 +69,12 @@ class Logger(q.AutoHooker):
         settings.update(kw)
         self.save_settings(**settings)
 
+    def track(self, lossarray, prefix=""):
+        self._tracked.append({"losses": lossarray, "prefix": prefix})
+        return self
+
     def get_hooks(self):
         return {q.train.START: self.on_start,
-                q.train.END_TRAIN: self.on_end_train,
-                q.train.END_VALID: self.on_end_valid,
                 q.train.END_EPOCH: self.on_end_epoch,
                 q.train.END: self.on_end}
 
@@ -91,9 +93,9 @@ class Logger(q.AutoHooker):
         assert(names is None or trainer is None)
         names = ["Epoch"]
         if trainer is not None:
-            names += trainer.trainlosses.get_names()
-            if trainer.validlosses is not None:
-                names += trainer.validlosses.get_names()
+            for _tracked_e in self._tracked:
+                _names_e = [_tracked_e["prefix"] + _name for _name in _tracked_e["losses"].get_names()]
+                names += _names_e
         line = "\t".join(names) + "\n"
         self._current_train_file.write(line)
         self._current_train_file.flush()
@@ -104,18 +106,16 @@ class Logger(q.AutoHooker):
     def stop_train_logging(self, trainer, **kw):
         self._current_train_file.close()
 
-    def on_end_train(self, trainer, **kw):
-        self._current_numbers = trainer.trainlosses.get_agg_errors()
-
-    def on_end_valid(self, trainer, **kw):
-        self._current_numbers += trainer.validlosses.get_agg_errors()
-
     def on_end_epoch(self, trainer, **kw):
         self.flush_trainer_loss_history(trainer, **kw)
 
     def flush_trainer_loss_history(self, trainer, **kw):
-        cur_epoch = trainer.current_epoch * 1.
-        numbers = [cur_epoch] + self._current_numbers
+        cur_epoch = trainer.current_epoch * 1. + 1
+        current_numbers = []
+        for _tracked_e in self._tracked:
+            _numbers_e = _tracked_e["losses"].get_agg_errors()
+            current_numbers += _numbers_e
+        numbers = [cur_epoch] + current_numbers
         line = "\t".join(["{:f}".format(n) for n in numbers]) + "\n"
         self._current_train_file.write(line)
         self._current_train_file.flush()

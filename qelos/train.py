@@ -270,91 +270,6 @@ def default_loss_input_transform(outs):
     return ret, {}
 
 
-class test(object):
-    def __init__(self, model):
-        super(test, self).__init__()
-        self.model = model
-        self.metrics = None
-        self.usecuda = False
-        self.cudaargs = ([], {})
-        self.transform_batch_inp = None
-        self.transform_batch_out = None
-        self.transform_batch_gold = None
-        self.dataloader = None
-        self.tt = ticktock("tester")
-
-    def cuda(self, usecuda, *args, **kwargs):
-        self.usecuda = usecuda
-        self.cudaargs = (args, kwargs)
-        return self
-
-    def initialize(self):
-        if self.usecuda:
-            self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
-            self.metrics.cuda(*self.cudaargs[0], **self.cudaargs[1])
-
-    def on(self, dataloader, lossarray):
-        self.dataloader = dataloader
-        self.metrics = lossarray
-        return self
-
-    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
-        if input_transform is not None:
-            self.transform_batch_inp = input_transform
-        if output_transform is not None:
-            self.transform_batch_out = output_transform
-        if gold_transform is not None:
-            self.transform_batch_gold = gold_transform
-        return self
-
-    def reset(self):
-        if self.metrics is not None:
-            self.metrics.reset()
-        return self
-
-    def run(self):
-        self.reset()
-        self.initialize()
-        self.metrics.reset()
-        ret = self.testloop()
-        return ret
-
-    def testloop(self):
-        self.tt.tick("testing")
-        tt = ticktock("-")
-        totaltestbats = len(self.dataloader)
-        self.model.eval()
-        for i, batch in enumerate(self.dataloader):
-            batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
-            if self.transform_batch_inp is not None:
-                batch = self.transform_batch_inp(*batch)
-            modelouts = self.model(*batch[:-1])
-            modelouts2loss = modelouts
-            if self.transform_batch_out is not None:
-                modelouts2loss = self.transform_batch_out(modelouts)
-            gold = batch[-1]
-            if self.transform_batch_gold is not None:
-                gold = self.transform_batch_gold(gold)
-            metrics = self.metrics(modelouts2loss, gold, inputs=batch[:-1])
-
-            tt.live("test - [{}/{}]: {}"
-                .format(
-                i + 1,
-                totaltestbats,
-                self.metrics.pp()
-            )
-            )
-        ttmsg = "test: {}" \
-            .format(
-            self.metrics.pp()
-        )
-        metricnumbers = self.metrics.get_agg_errors()
-        tt.stoplive()
-        tt.tock(ttmsg)
-        self.tt.tock("tested")
-        return metricnumbers
-
-
 class eval(object):
     """ to get model predictions in a batched manner """
     def __init__(self, model):
@@ -565,47 +480,15 @@ class OptimSettingsMaterializer(object):
                     matgroup[k] = q.v(defarg) * q.v(protogroup[k])
 
 
-class train(object):
-    START = 0
-    END = 1
-    START_EPOCH = 2
-    END_EPOCH = 3
-    START_TRAIN = 4
-    END_TRAIN = 5
-    START_VALID = 6
-    END_VALID = 7
-    START_BATCH = 8
-    END_BATCH = 9
-    START_VALID_BATCH = 10
-    END_VALID_BATCH = 11
-    BEFORE_OPTIM_STEP = 12
-    AFTER_OPTIM_STEP = 13
+class AutoHooker(object):
+    def get_hooks(self):
+        raise NotImplemented()
 
-    def __init__(self, model):
-        super(train, self).__init__()
-        self.model = model
-        self.valid_model = None
-        self.epochs = None
-        self.current_epoch = 0
-        self.stop_training = None
-        self.current_batch = None
-        self.trainlosses = None
-        self.validlosses = None
-        self.usecuda = False
-        self.cudaargs = ([], {})
-        self.optim = None
-        self._optim_settings_materializer = None
-        self._l1, self._l2 = None, None
-        self.transform_batch_inp = None
-        self.transform_batch_out = None
-        self.transform_batch_gold = None
-        self.valid_transform_batch_inp = False
-        self.valid_transform_batch_out = False
-        self.valid_transform_batch_gold = False
-        self._validinter = 1
-        self.traindataloader = None
-        self.validdataloader = None
-        self.tt = ticktock("trainer")
+
+class EventEmitter(object):
+
+    def __init__(self, **kw):
+        super(EventEmitter, self).__init__(**kw)
         # events
         self._event_callbacks = {}
 
@@ -615,29 +498,73 @@ class train(object):
             if passing a ReduceLROnPlateau, must also pass a function that can be called without arguments
                 and that returns the metric for Reducer
         """
+        if isinstance(f, AutoHooker):
+            if len(es) > 0:
+                raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
+            hookdic = f.get_hooks()
+        else:
+            hookdic = dict(zip(es, [f]*len(es)))
+        for e, fe in hookdic.items():
+            if e not in self._event_callbacks:
+                self._event_callbacks[e] = []
+            self._event_callbacks[e].append(fe)
+        def deleter():
+            for e, fe in hookdic.items():
+                self._event_callbacks[e].remove(fe)
+        # TODO: implement unhooking mechanism
+        return self
+
+    def do_callbacks(self, e):
+        if not e in self._event_callbacks:
+            return
+        for f in self._event_callbacks[e]:
+            f(self)
+
+
+class train(EventEmitter, AutoHooker):
+    START = 0
+    END = 1
+    START_EPOCH = 2
+    END_EPOCH = 3
+    START_TRAIN = 4
+    END_TRAIN = 5
+    START_BATCH = 8
+    END_BATCH = 9
+    RESET = 15
+    INIT = 16
+    BEFORE_OPTIM_STEP = 12
+    AFTER_OPTIM_STEP = 13
+
+    def __init__(self, model, **kw):
+        super(train, self).__init__(**kw)
+        self.model = model
+        self.losses = None
+        self.epochs = None
+        self.current_epoch = 0
+        self.stop_training = None
+        self.current_batch = None
+        self.usecuda = False
+        self.cudaargs = ([], {})
+        self.optim = None
+        self._optim_settings_materializer = None
+        self._l1, self._l2 = None, None
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
+        self.transform_batch_gold = None
+        self.dataloader = None
+        self.tt = ticktock("trainer")
+        self._validlossespp = ""
+
+    def hook(self, f, *es, **kw):
         # special hooker wrappers
         if isinstance(f, torch.optim.lr_scheduler._LRScheduler):
-            return self.hook(_LRSchedulerAutoHooker(f, **kw))
+            return super(train, self).hook(_LRSchedulerAutoHooker(f, **kw))
         elif isinstance(f, torch.optim.lr_scheduler.ReduceLROnPlateau):
             assert(len(es) == 1)
-            return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
+            return super(train, self).hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
         # normal hooking
         else:
-            if isinstance(f, AutoHooker):
-                if len(es) > 0:
-                    raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
-                hookdic = f.get_hooks()
-            else:
-                hookdic = dict(zip(es, [f]*len(es)))
-            for e, fe in hookdic.items():
-                if e not in self._event_callbacks:
-                    self._event_callbacks[e] = []
-                self._event_callbacks[e].append(fe)
-            def deleter():
-                for e, fe in hookdic.items():
-                    self._event_callbacks[e].remove(fe)
-            # TODO: implement unhooking mechanism
-        return self
+            return super(train, self).hook(f, *es, **kw)
 
     def schedule(self, hp, f):
         """ shortcut for hooking an epochhyperparamscheduler for some hyperparam """
@@ -645,12 +572,6 @@ class train(object):
         assert(q.iscallable(f))
         scheduler = EpochHyperparamScheduler(hp, f)
         self.hook(scheduler)
-
-    def do_callbacks(self, e):
-        if not e in self._event_callbacks:
-            return
-        for f in self._event_callbacks[e]:
-            f(self)
 
     def chain_trainer(self, trainer):
         self.hook(TrainerChainer(trainer))
@@ -660,9 +581,19 @@ class train(object):
         self.hook(ClipGradNorm(x))
         return self
 
-    def earlystop(self, select=None, patience=0, delta=0., minepochs=5,
+    def earlystop(self, select, patience=0, delta=0., minepochs=5,
                   lessisbetter=True, custom=None, **kw):
-        self.hook(EarlyStopper(select=select, patience=patience, delta=delta,
+        """
+        :param select: function that returns monitored value
+        :param patience:
+        :param delta:
+        :param minepochs:
+        :param lessisbetter:
+        :param custom:
+        :param kw:
+        :return:
+        """
+        self.hook(EarlyStopper(select, patience=patience, delta=delta,
                                minepochs=minepochs, lessisbetter=lessisbetter,
                                custom=custom, **kw))
         return self
@@ -675,37 +606,13 @@ class train(object):
     def initialize(self):
         if self.usecuda:
             self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
-            self.trainlosses.cuda(*self.cudaargs[0], **self.cudaargs[1])
-            if self.validlosses is not None:
-                self.validlosses.cuda(*self.cudaargs[0], **self.cudaargs[1])
+            self.losses.cuda(*self.cudaargs[0], **self.cudaargs[1])
+        self.do_callbacks(self.INIT)
 
-    def train_on(self, dataloader, losses):
-        self.traindataloader = dataloader
-        self.trainlosses = losses
-        self.trainlosses.set_default_names("#")
-        return self
-
-    def valid_on(self, dataloader, losses):
-        self.validdataloader = dataloader
-        self.validlosses = losses
-        self.validlosses.set_default_names("##")
-        return self
-
-    def valid_inter(self, interval=1):
-        self._validinter = interval
-        return self
-
-    def valid_with(self, model):
-        self.valid_model = model
-        return self
-
-    def set_valid_batch_transformer(self, input_transform = None, output_transform=None, gold_transform=None):
-        if input_transform is not None:
-            self.valid_transform_batch_inp = input_transform
-        if output_transform is not None:
-            self.valid_transform_batch_out = output_transform
-        if gold_transform is not None:
-            self.valid_transform_batch_gold = gold_transform
+    def on(self, dataloader, losses):
+        self.dataloader = dataloader
+        self.losses = losses
+        self.losses.set_default_names("")
         return self
 
     def optimizer(self, optimizer, **kw):
@@ -735,6 +642,56 @@ class train(object):
             self.transform_batch_gold = gold_transform
         return self
 
+    def do_next_iter(self, epoch, maxepochs):
+        pass
+
+    def do_batch(self, _batch, i=-1, totalbats=-1, tt=None):
+        self.do_callbacks(self.START_BATCH)
+        self.optim.zero_grad()
+        params = q.params_of(self.model)
+        _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
+        if self.transform_batch_inp is not None:
+            batch = self.transform_batch_inp(*_batch)
+        else:
+            batch = _batch
+        modelouts = self.model(*batch[:-1])
+        modelout2loss = modelouts
+        if self.transform_batch_out is not None:
+            modelout2loss = self.transform_batch_out(modelouts)
+        gold = batch[-1]
+        if self.transform_batch_gold is not None:
+            gold = self.transform_batch_gold(gold)
+        trainlosses = self.losses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
+
+        l1reg, l2reg = 0., 0.
+        if self._l1 > 0:
+            l1reg = q.l1(*list(params)) * self._l1
+        if self._l2 > 0:
+            l2reg = q.l2(*list(params)) * self._l2
+
+        cost = trainlosses[0] + l1reg + l2reg
+
+        cost.backward()
+
+        if self._optim_settings_materializer is not None:
+            self._optim_settings_materializer.update()
+
+        self.do_callbacks(self.BEFORE_OPTIM_STEP)
+        self.optim.step()
+        self.do_callbacks(self.AFTER_OPTIM_STEP)
+
+        if tt is not None:
+            tt.live("train - Epoch {}/{} - [{}/{}]: {}"
+                    .format(
+                        self.current_epoch+1,
+                        self.epochs,
+                        i+1,
+                        totalbats,
+                        self.losses.pp(),
+                        )
+                    )
+        self.do_callbacks(self.END_BATCH)
+
     def trainloop(self):
         if self.epochs == 0:
             self.tt.msg("skipping training")
@@ -743,19 +700,153 @@ class train(object):
         self.tt.tick("training")
         tt = ticktock("-")
         current_epoch = 0
-        totaltrainbats = len(self.traindataloader)
+        totalbats = len(self.dataloader)
         while not self.stop_training:
+            self._validlossespp = ""
             self.current_epoch = current_epoch
             self.stop_training = self.current_epoch + 1 == self.epochs
-            self.trainlosses.push_and_reset(epoch=self.current_epoch-1)
+            self.losses.push_and_reset(epoch=self.current_epoch-1)
             tt.tick()
             self.model.train()
             self.do_callbacks(self.START_EPOCH)
             self.do_callbacks(self.START_TRAIN)
-            for i, _batch in enumerate(self.traindataloader):
+            for i, _batch in enumerate(self.dataloader):
+                self.do_batch(_batch, i=i, totalbats=totalbats, tt=tt)
+            tt.stoplive()
+            self.do_callbacks(self.END_TRAIN)
+            ttmsg = "Epoch {}/{} -- train: {}"\
+                .format(
+                    self.current_epoch+1,
+                    self.epochs,
+                    self.losses.pp()
+                )
+            if len(self._validlossespp) > 0:
+                ttmsg += " -- valid: {}".format(self._validlossespp)
+            tt.tock(ttmsg)
+            self.do_callbacks(self.END_EPOCH)
+            current_epoch += 1
+        self.tt.tock("trained")
+
+    def reset(self):
+        self.current_epoch = 0
+        if self.losses is not None:
+            self.losses.reset()
+        self.do_callbacks(self.RESET)
+        return self
+
+    def train(self, epochs=10):
+        self.epochs = epochs
+        self.reset()
+        self.initialize()
+        self.do_callbacks(self.START)
+        self.losses.reset()
+        self.trainloop()
+        self.do_callbacks(self.END)
+
+    def get_hooks(self):
+        return {train.END_EPOCH: self.on_end_epoch,
+                train.RESET: self.on_reset,
+                train.INIT: self.on_init}
+
+    def on_reset(self, owner, **kw):    self.reset()
+    def on_init(self, owner, **kw):     self.initialize()
+
+    def on_end_epoch(self, owner, **kw):
+        if not isinstance(owner, train):
+            raise q.SumTingWongException("can only be hooked to a trainer")
+        epoch = owner.current_epoch
+        maxepochs = owner.epochs
+        self.do_next_iter(epoch, maxepochs)
+
+
+class test(EventEmitter, AutoHooker):
+    START = 0
+    END = 1
+    START_TEST = 4
+    END_TEST = 5
+    START_BATCH = 8
+    END_BATCH = 9
+    RESET = 15
+    INIT = 16
+
+    _name = "tester"
+
+    def __init__(self, model, **kw):
+        super(test, self).__init__(**kw)
+        self.model = model
+        self.losses = None
+        self._interval = 1
+        self.current_intercount = 0
+        self.usecuda = False
+        self.cudaargs = ([], {})
+        self.transform_batch_inp = None
+        self.transform_batch_out = None
+        self.transform_batch_gold = None
+        self.dataloader = None
+        self.tt = ticktock(self._name)
+
+    def cuda(self, usecuda, *args, **kwargs):
+        self.usecuda = usecuda
+        self.cudaargs = (args, kwargs)
+        return self
+
+    def initialize(self):
+        if self.usecuda:
+            self.model.cuda(*self.cudaargs[0], **self.cudaargs[1])
+            self.losses.cuda(*self.cudaargs[0], **self.cudaargs[1])
+        self.do_callbacks(self.INIT)
+
+    def on(self, dataloader, lossarray):
+        self.dataloader = dataloader
+        self.losses = lossarray
+        self.losses.set_default_names("")
+        return self
+
+    def interval(self, inter):
+        self._interval = inter
+        return self
+
+    def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
+        if input_transform is not None:
+            self.transform_batch_inp = input_transform
+        if output_transform is not None:
+            self.transform_batch_out = output_transform
+        if gold_transform is not None:
+            self.transform_batch_gold = gold_transform
+        return self
+
+    def reset(self):
+        self.current_intercount = 0
+        if self.losses is not None:
+            self.losses.reset()
+        self.do_callbacks(self.RESET)
+        return self
+
+    def run(self):
+        self.reset()
+        self.initialize()
+        self.do_callbacks(self.START)
+        self.losses.reset()
+        ret = self.testloop()
+        self.do_callbacks(self.END)
+        return ret
+
+    def epoch(self, epoch, maxepoch):
+        results = self.testloop(epoch=(epoch, maxepoch))
+
+    def testloop(self, epoch=None):
+        self.current_intercount += 1
+        if self.current_intercount % self._interval == 0:
+            self.current_intercount = 0
+            if epoch is None:
+                self.tt.tick("testing")
+            tt = ticktock("-")
+            self.model.eval()
+            self.do_callbacks(self.START_TEST)
+            self.losses.push_and_reset()
+            totalbats = len(self.dataloader)
+            for i, _batch in enumerate(self.dataloader):
                 self.do_callbacks(self.START_BATCH)
-                self.optim.zero_grad()
-                params = q.params_of(self.model)
                 _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
                 if self.transform_batch_inp is not None:
                     batch = self.transform_batch_inp(*_batch)
@@ -768,109 +859,59 @@ class train(object):
                 gold = batch[-1]
                 if self.transform_batch_gold is not None:
                     gold = self.transform_batch_gold(gold)
-                trainlosses = self.trainlosses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
+                losses = self.losses(modelout2loss, gold, inputs=batch[:-1], original_inputs=_batch)
 
-                l1reg, l2reg = 0., 0.
-                if self._l1 > 0:
-                    l1reg = q.l1(*list(params)) * self._l1
-                if self._l2 > 0:
-                    l2reg = q.l2(*list(params)) * self._l2
+                epochmsg = ""
+                if epoch is not None:
+                    curepoch, maxepoch = epoch
+                    epochmsg = "Epoch {}/{} -".format(curepoch, maxepoch)
 
-                cost = trainlosses[0] + l1reg + l2reg
-
-                cost.backward()
-
-                if self._optim_settings_materializer is not None:
-                    self._optim_settings_materializer.update()
-
-                self.do_callbacks(self.BEFORE_OPTIM_STEP)
-                self.optim.step()
-                self.do_callbacks(self.AFTER_OPTIM_STEP)
-
-                tt.live("train - Epoch {}/{} - [{}/{}]: {}"
-                        .format(
-                            self.current_epoch+1,
-                            self.epochs,
-                            i+1,
-                            totaltrainbats,
-                            self.trainlosses.pp(),
-                            )
-                        )
-                self.do_callbacks(self.END_BATCH)
-            ttmsg = "Epoch {}/{} -- train: {}"\
-                .format(
-                    self.current_epoch+1,
-                    self.epochs,
-                    self.trainlosses.pp()
+                tt.live("{} - {}[{}/{}]: {}"
+                    .format(
+                    self._name,
+                    epochmsg,
+                    i + 1,
+                    totalbats,
+                    self.losses.pp()
                 )
-            train_epoch_losses = self.trainlosses.get_agg_errors()
-            self.do_callbacks(self.END_TRAIN)
-            valid_epoch_losses = []
-            if self.validlosses is not None and self.current_epoch % self._validinter == 0:
-                self.do_callbacks(self.START_VALID)
-                model = self.valid_model if self.valid_model is not None else self.model
-                model.eval()
-                self.validlosses.push_and_reset()
-                totalvalidbats = len(self.validdataloader)
-                for i, _batch in enumerate(self.validdataloader):
-                    self.do_callbacks(self.START_VALID_BATCH)
-                    _batch = [q.var(batch_e).cuda(self.usecuda).v for batch_e in _batch]
-                    _tbi = self.valid_transform_batch_inp if self.valid_transform_batch_inp is not False else self.transform_batch_inp
-                    _tbo = self.valid_transform_batch_out if self.valid_transform_batch_out is not False else self.transform_batch_out
-                    _tbg = self.valid_transform_batch_gold if self.valid_transform_batch_gold is not False else self.transform_batch_gold
-                    if _tbi is not None:
-                        batch = _tbi(*_batch)
-                    else:
-                        batch = _batch
-                    modelouts = model(*batch[:-1])
-                    modelout2loss = modelouts
-                    if _tbo is not None:
-                        modelout2loss = _tbo(modelouts)
-                    gold = batch[-1]
-                    if _tbg is not None:
-                        gold = _tbg(gold)
-                    validlosses = self.validlosses(modelout2loss, gold,
-                                                   inputs=batch[:-1], original_inputs=_batch)
-                    tt.live("valid - Epoch {}/{} - [{}/{}]: {}"
-                            .format(
-                                self.current_epoch+1,
-                                self.epochs,
-                                i+1,
-                                totalvalidbats,
-                                self.validlosses.pp()
-                                )
-                            )
-                    self.do_callbacks(self.END_VALID_BATCH)
-                ttmsg += " -- valid: {}".format(self.validlosses.pp())
-                valid_epoch_losses = self.validlosses.get_agg_errors()
-                self.do_callbacks(self.END_VALID)
+                )
+                self.do_callbacks(self.END_BATCH)
+            losses = self.losses.get_agg_errors()
             tt.stoplive()
-            tt.tock(ttmsg)
-            self.do_callbacks(self.END_EPOCH)
-            current_epoch += 1
-        self.tt.tock("trained")
+            if epoch is None:
+                ttmsg = "{}: {}" \
+                    .format(
+                    self._name,
+                    self.losses.pp()
+                )
+                tt.tock(ttmsg)
+            self.do_callbacks(self.END_TEST)
+            if epoch is None:
+                self.tt.tock("tested")
+            return losses
 
-    def reset(self):
-        self.current_epoch = 0
-        if self.trainlosses is not None:
-            self.trainlosses.reset()
-        if self.validlosses is not None:
-            self.validlosses.reset()
-        return self
-
-    def train(self, epochs=10):
-        self.epochs = epochs
-        self.reset()
-        self.initialize()
-        self.do_callbacks(self.START)
-        self.trainlosses.reset()
-        self.trainloop()
-        self.do_callbacks(self.END)
-
-
-class AutoHooker(object):
     def get_hooks(self):
-        raise NotImplemented()
+        return {train.END_TRAIN: self.on_end_epoch,
+                train.RESET: self.on_reset,
+                train.INIT: self.on_init}
+
+    def on_reset(self, owner, **kw):    self.reset()
+    def on_init(self, owner, **kw):     self.initialize()
+
+    def on_end_epoch(self, owner, **kw):
+        if not isinstance(owner, train):
+            raise q.SumTingWongException("can only be hooked to a trainer")
+        epoch = owner.current_epoch
+        maxepochs = owner.epochs
+        self.epoch(epoch, maxepochs)
+
+
+class valid(test):
+    _name = "valid"
+
+    def on_end_epoch(self, owner, **kw):
+        super(valid, self).on_end_epoch(owner, **kw)
+        owner._validlossespp += self.losses.pp()
 
 
 class _LRSchedulerAutoHooker(AutoHooker):
@@ -931,7 +972,8 @@ class TrainerChainer(AutoHooker):
         self._trainer = trainer
 
     def get_hooks(self):
-        return {train.END_BATCH: self.on_end_batch, train.START: self.on_start}
+        return {train.END_BATCH: self.on_end_batch,
+                train.START: self.on_start}
 
     def on_end_batch(self, *x, **kw):
         self._trainer.do_next_iter()
@@ -942,12 +984,11 @@ class TrainerChainer(AutoHooker):
 
 
 class EarlyStopper(AutoHooker):
-    def __init__(self, select=None, patience=0, delta=0.,
+    def __init__(self, select, patience=0, delta=0.,
                  minepochs=5, lessisbetter=True, custom=None, **kw):
+        """ select arg must be a function that returns monitored value """
         super(EarlyStopper, self).__init__(**kw)
-        if select is None:
-            select = lambda trainlosses, validlosses, epochnumber: validlosses[0] if len(validlosses) > 0 else None
-        self.monitor = select
+        self.monitorf = select
         self.patience = patience
         self.delta = delta
         self.minepochs = minepochs
@@ -959,11 +1000,9 @@ class EarlyStopper(AutoHooker):
         return {train.END_EPOCH: self.on_end_epoch}
 
     def on_end_epoch(self, trainer, **kw):
-        train_epoch_losses = trainer.trainlosses.get_agg_errors()
-        valid_epoch_losses = trainer.validlosses.get_agg_errors() if trainer.validlosses is not None else []
         i = trainer.current_epoch
 
-        monval = self.monitor(train_epoch_losses, valid_epoch_losses, i)
+        monval = self.monitorf()
         if monval is None:
             return
 

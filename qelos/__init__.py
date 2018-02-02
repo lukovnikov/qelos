@@ -1,4 +1,4 @@
-from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg, \
+from qelos.train import lossarray, train, test, eval, valid, TensorDataset, LossWithAgg, \
     aux_train, loss_input_transform, AutoHooker, HyperparamScheduler
 
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
