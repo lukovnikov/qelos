@@ -278,7 +278,7 @@ class PredCutter(object):
         return a
 
 
-def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
@@ -287,7 +287,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
-    logger.update_settings(version="3")
+    logger.update_settings(version="4")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -385,6 +385,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
+    lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
+
     q.train(encdec).train_on(train_loader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm) \
@@ -392,6 +394,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
         .cuda(cuda)\
         .hook(logger)\
+        .hook(lrsched) \
         .train(epochs)
 
     logger.update_settings(completed=True)
@@ -552,7 +555,7 @@ def make_outvecs(embdim, lindim, grouptracker=None, tie_weights=False, ttt=None)
     return wordemb, linout, symbols2cores, symbols2ctrl
 
 
-def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
@@ -563,7 +566,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="1")
+    logger.update_settings(version="2")
     # version "2": with strucSMO
     # verison "3": unchained strucSMO
 
@@ -752,6 +755,8 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
+    lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
+
     q.train(encdec).train_on(train_loader, losses) \
         .optimizer(optim) \
         .clip_grad_norm(gradnorm) \
@@ -759,6 +764,7 @@ def run_seq2tree_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses) \
         .cuda(cuda) \
         .hook(logger) \
+        .hook(lrsched) \
         .train(epochs)
 
     logger.update_settings(completed=True)
@@ -891,7 +897,7 @@ class BFTreePredCutter(object):
         return a
 
 
-def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1, oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
@@ -900,7 +906,7 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
     logger.save_settings(**settings)
-    logger.update_settings(version="1")
+    logger.update_settings(version="2")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -1092,6 +1098,8 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
+    lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
+
     out_btf = lambda _out: _out[:, :-1, :]
     gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
     valid_gold_btf = lambda x: x
@@ -1106,6 +1114,7 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
         .set_valid_batch_transformer(None, out_btf, valid_gold_btf) \
         .cuda(cuda) \
         .hook(logger) \
+        .hook(lrsched, verbose=False) \
         .train(epochs)
 
     logger.update_settings(completed=True)
@@ -1126,7 +1135,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
     logger.save_settings(**settings)
-    logger.update_settings(version="1")
+    logger.update_settings(version="2")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -1259,7 +1268,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses) \
         .cuda(cuda) \
         .hook(logger) \
-        .hook(lrsched, verbose=True) \
+        .hook(lrsched, verbose=False) \
         .train(epochs)
 
     logger.update_settings(completed=True)
