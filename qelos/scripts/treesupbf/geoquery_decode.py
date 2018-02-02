@@ -1214,6 +1214,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
             self.encoder = _encoder
             self.decoder = _decoder
             self.maxtime = maxtime
+            self.dropout = q.Dropout(dropout)
 
         def forward(self, inpseq, outseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
