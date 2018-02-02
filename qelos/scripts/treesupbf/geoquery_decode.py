@@ -1130,7 +1130,7 @@ def run_seq2seq_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
 
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
-    print("SEQ2SEQ ORACLE")
+    print("SEQ2SEQ TF")
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
