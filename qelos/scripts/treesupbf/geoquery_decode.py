@@ -9,6 +9,7 @@ import sys
 
 
 OPT_LR = 0.0003
+OPT_LR_DECAY = 0.99
 OPT_EPOCHS = 100
 OPT_BATSIZE = 20
 
@@ -1116,7 +1117,7 @@ def run_seq2seq_oracle(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     # endregion
 
 
-def run_seq2seq_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                      embdim=-1,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
@@ -1250,12 +1251,15 @@ def run_seq2seq_tf(lr=OPT_LR, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
 
+    lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
+
     q.train(encdec).train_on(train_loader, losses) \
         .optimizer(optim) \
         .clip_grad_norm(gradnorm) \
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses) \
         .cuda(cuda) \
         .hook(logger) \
+        .hook(lrsched, verbose=True) \
         .train(epochs)
 
     logger.update_settings(completed=True)

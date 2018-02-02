@@ -609,7 +609,7 @@ class train(object):
         # events
         self._event_callbacks = {}
 
-    def hook(self, f, *es):
+    def hook(self, f, *es, **kw):
         """ f to be called when e happens. Returns deleter for bound f
             can also pass pytorch's lr schedulers
             if passing a ReduceLROnPlateau, must also pass a function that can be called without arguments
@@ -617,7 +617,7 @@ class train(object):
         """
         # special hooker wrappers
         if isinstance(f, torch.optim.lr_scheduler._LRScheduler):
-            return self.hook(_LRSchedulerAutoHooker(f))
+            return self.hook(_LRSchedulerAutoHooker(f, **kw))
         elif isinstance(f, torch.optim.lr_scheduler.ReduceLROnPlateau):
             assert(len(es) == 1)
             return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
@@ -874,15 +874,18 @@ class AutoHooker(object):
 
 
 class _LRSchedulerAutoHooker(AutoHooker):
-    def __init__(self, s, **kw):
+    def __init__(self, s, verbose=False, **kw):
         super(_LRSchedulerAutoHooker, self).__init__(**kw)
         self.s = s
+        self.verbose = verbose
 
     def get_hooks(self):
         return {train.START_EPOCH: self.on_start_epoch}
 
     def on_start_epoch(self, model, **kw):
         self.s.step(epoch=model.current_epoch)
+        if self.verbose:
+            print("first group lr decayed to: {}".format(self.s.optimizer.param_groups[0]["lr"]))
 
 
 class _ReduceLROnPlateauAutoHooker(AutoHooker):
