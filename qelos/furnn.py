@@ -815,7 +815,7 @@ class DynamicOracleRunner(q.DecoderRunner):
                  inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),
                  mode="sample",  # "sample" or "argmax" or "uniform" or "esample"
-                 eps=0.05,
+                 eps=0.25,
                  explore=0.,
                  **kw):
         """ sample mode samples a correct token from predicted dist.

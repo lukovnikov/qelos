@@ -20,7 +20,7 @@ OPT_INPEMBDIM = 200
 OPT_OUTEMBDIM = 200
 OPT_INNERDIM = 200
 
-OPT_ORACLEMODE = "sample"       # "sample" or "uniform" or ...
+OPT_ORACLEMODE = "esample"       # "sample" or "uniform" or ...
 
 _opt_test = True
 
