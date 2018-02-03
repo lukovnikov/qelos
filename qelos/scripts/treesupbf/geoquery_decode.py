@@ -267,6 +267,8 @@ class PredCutter(object):
         self.D = D
         self.paropen = D["("]
         self.parclose = D[")"]
+        self.start = D["<START>"]
+        self.end = D["<END>"]
 
     def __call__(self, a, ignore_index=None):   # a: 2D of ints
         for i in range(len(a)):
@@ -274,6 +276,10 @@ class PredCutter(object):
             fillzero = False
             for j in range(len(a[i])):
                 if not fillzero:
+                    if a[i, j] == self.start:
+                        a[i, j] = self.paropen
+                    elif a[i, j] == self.end:
+                        a[i, j] = self.parclose
                     if a[i, j] == self.paropen:
                         numpar += 1
                     elif a[i, j] == self.parclose:
@@ -1495,7 +1501,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
 
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0, time_average=True),
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0, time_average=False),
                          q.SeqElemAccuracy(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                          q.SeqAccuracy(ignore_index=0))
@@ -1521,7 +1527,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
 
     q.train(m).train_on(train_loader, losses) \
         .optimizer(optim) \
-        .clip_grad_norm(gradnorm) \
+        .clip_grad(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:])) \
         .valid_with(valid_m).valid_on(valid_loader, validlosses)\
         .cuda(cuda) \
