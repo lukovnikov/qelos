@@ -203,7 +203,7 @@ def seq_pack(x, mask):  # mask: (batsize, seqlen)
     sortedlens = sortedmsk.long().sum(1)
     sortedlens = list(sortedlens.cpu().data.numpy())
     packedseq = torch.nn.utils.rnn.pack_padded_sequence(sortedseq, sortedlens, batch_first=True)
-    packedmsk = torch.nn.utils.rnn.pack_padded_sequence(sortedmsk, sortedlens, batch_first=True)
+    # packedmsk = torch.nn.utils.rnn.pack_padded_sequence(sortedmsk, sortedlens, batch_first=True)
     return packedseq, unsorter
 
 
@@ -212,7 +212,7 @@ def seq_unpack(x, order, padding_value=0):
     mask = np.zeros((len(lens), max(lens)), dtype="int64")
     for i, l in enumerate(lens):
         mask[i, :l] = 1
-    mask = q.var(mask).cuda(x).v
+    mask = q.var(mask).cuda(unpacked).v
     out = torch.index_select(unpacked, 0, order)
     outmask = torch.index_select(mask, 0, order)
     return out, outmask
