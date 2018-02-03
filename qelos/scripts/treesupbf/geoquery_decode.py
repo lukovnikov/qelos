@@ -1344,6 +1344,177 @@ def run_some_tests():
     print("{} unique lins for tree".format(len(uniquelins)))
 
 
+def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
+                             wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
+                             embdim=-1,
+                             inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
+                             cuda=False, gpu=0,
+                             validontest=False):
+    settings = locals().copy()
+    logger = q.Logger(prefix="geoquery_s2s_realrepro")
+    logger.save_settings(**settings)
+    logger.update_settings(version="4")
+    logger.update_settings(completed=False)
+
+    if validontest:
+        print("VALIDATING ON TEST: WONG !!!")
+    print("SEQSEQ REAL REPRO")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    ttt = q.ticktock("test")
+    trainmats, testmats, inpD, outD = load_data(reverse_input=True)
+
+    if embdim > 0:
+        tt.msg("embdim overrides inpembdim and outembdim")
+        inpembdim, outembdim = embdim, embdim
+
+    inpemb = q.WordEmb(inpembdim, worddic=inpD)  # TODO glove embeddings
+    outemb = q.WordEmb(outembdim, worddic=outD)
+    linout = q.WordLinout(innerdim + innerdim, worddic=outD)
+
+    encoder = torch.nn.LSTM(inpembdim, innerdim, 1, batch_first=True)
+    decoder = torch.nn.LSTM(outembdim, innerdim, 1, batch_first=True)
+
+    mirror_decoder_cell = q.LSTMCell(outembdim, innerdim)
+    mirror_decoder_cell.nncell.weight_hh = decoder.weight_hh_l0
+    mirror_decoder_cell.nncell.weight_ih = decoder.weight_ih_l0
+    mirror_decoder_cell.nncell.bias_hh = decoder.bias_hh_l0
+    mirror_decoder_cell.nncell.bias_ih = decoder.bias_ih_l0
+
+    class EncDecAtt(torch.nn.Module):
+        def __init__(self, **kw):
+            super(EncDecAtt, self).__init__(**kw)
+            self.iemb, self.oemb, self.enc, self.dec, self.att \
+                = inpemb, outemb, encoder, decoder, None
+            self.dropout = q.Dropout(dropout)
+            self.linout = linout
+
+        def forward(self, inpseq, outseq):
+            inpembs, encmask = self.iemb(inpseq)
+            outembs, decmask = self.oemb(outseq)
+            inpembs = self.dropout(inpembs)
+            outembs = self.dropout(outembs)
+            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v,
+                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v)
+            encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
+
+            dec_init = (y_t, c_t)
+            decodings, _ = self.dec(outembs, dec_init)
+
+            mencmask = encmask.unsqueeze(-1).float()
+            mdecmask = decmask.unsqueeze(-1).float()
+            mencodings = encodings * mencmask
+            mdecodings = decodings * mdecmask
+            # (batsize, enclen, encdim) x (batsize, declen, decdim)
+            attweights = q.DotDistance()(mencodings, mdecodings)
+            attweights += torch.log(mencmask)
+            attweights = torch.nn.Softmax(1)(attweights)
+            # (numbats, inplen, outlen) x (numbats, inplen, dim)
+            # --> summaries of (numbats, outlen, indim)
+            mencodings = mencodings.unsqueeze(2)
+            attweights = attweights.unsqueeze(3)
+            bmf = mencodings * attweights
+            summaries = bmf.sum(1)
+            outvecs = torch.cat([mdecodings, summaries], 2)
+            outvecs = self.dropout(outvecs)
+            outscores = self.linout(outvecs)
+            return outscores
+
+    m = EncDecAtt()
+
+    valid_decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               linout, ctx2out=False)
+
+    valid_decoder_core = q.DecoderCore(outemb, mirror_decoder_cell)
+    valid_decoder_cell = q.ModularDecoderCell(valid_decoder_core, valid_decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    class ValidEncDecAtt(torch.nn.Module):
+        def __init__(self, **kw):
+            super(ValidEncDecAtt, self).__init__(**kw)
+            self.iemb, self.oemb, self.enc, self.dec, self.att \
+                = inpemb, outemb, encoder, valid_decoder, None
+
+        def forward(self, inpseq, outseq):
+            inpembs, encmask = self.iemb(inpseq)
+            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v,
+                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v)
+            encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
+
+            self.dec.set_init_states(c_t[0], y_t[0])
+            decstates = mirror_decoder_cell.get_states(inpseq.size(0))
+            decoding = self.dec(outseq,
+                                    ctx=encodings,
+                                    ctx_0=encodings[:, -1],
+                                    ctxmask=encmask)
+            return decoding
+
+    valid_m = ValidEncDecAtt()
+
+    if _opt_test:
+        assert(np.all(mirror_decoder_cell.nncell.weight_hh.cpu().data.numpy()
+                      == decoder.weight_hh_l0.cpu().data.numpy()))
+        test_x = q.var(trainmats[0][80:85]).v.long()
+        test_y = q.var(trainmats[1][80:85]).v.long()
+        m.eval()
+        valid_m.eval()
+        # valid_decoder_cell.set_runner(q.TeacherForcer())
+        test_o = m(test_x, test_y)
+        test_om = valid_m(test_x, test_y)
+        print(test_o.size())
+        print(test_om.size())
+        # valid_decoder_cell.set_runner(q.FreeRunner())
+
+    if validontest:
+        traindata = trainmats
+        validdata = testmats
+    else:
+        traindata, validdata = q.split(trainmats, random=True)
+    # q.embed()
+    train_loader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
+
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqElemAccuracy(ignore_index=0),
+                         q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
+                         q.SeqAccuracy(ignore_index=0))
+
+    rev_outD = {v: k for k, v in outD.items()}
+
+    def treeparser(x):  # 1D of output word ids
+        treestring = " ".join([rev_outD[xe] for xe in x if xe != 0])
+        tree = parse_query_tree(treestring)
+        return tree
+
+    validlosses = q.lossarray(  # q.SeqCrossEntropyLoss(ignore_index=0),
+        q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
+        q.SeqAccuracy(ignore_index=0),
+        TreeAccuracy(ignore_index=0, treeparser=treeparser))
+
+    logger.update_settings(optimizer="rmsprop")
+    optim = torch.optim.RMSprop(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
+
+    lrsched = torch.optim.lr_scheduler.ExponentialLR(optim, lrdecay)
+
+    q.train(m).train_on(train_loader, losses) \
+        .optimizer(optim) \
+        .clip_grad_norm(gradnorm) \
+        .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:])) \
+        .valid_with(valid_m).valid_on(valid_loader, validlosses)\
+        .cuda(cuda) \
+        .hook(logger) \
+        .hook(lrsched, verbose=False) \
+        .train(3)
+
+    assert(np.all(mirror_decoder_cell.nncell.weight_hh.cpu().data.numpy()
+                  == decoder.weight_hh_l0.cpu().data.numpy()))
+
+    logger.update_settings(completed=True)
+
+
+
 if __name__ == "__main__":
     # run_noisy_parse()
     # load_data_trees()
@@ -1351,4 +1522,5 @@ if __name__ == "__main__":
     # q.argprun(run_seq2seq_reproduction)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_realrepro)
