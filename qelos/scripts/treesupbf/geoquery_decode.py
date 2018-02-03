@@ -142,12 +142,12 @@ def load_data_trees(p="../../../datasets/geoquery/", trainp="train.txt", testp="
     return ism, tracker, numtrain
 
 
-def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.txt", reverse_input=False):
+def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.txt", reverse_input=False, use_start_end=False):
     tt = q.ticktock("dataloader")
     tt.tick("loading data")
     ism = q.StringMatrix()
     ism.tokenize = lambda x: x.split()
-    osm = q.StringMatrix(indicate_start=True, indicate_end=False)
+    osm = q.StringMatrix(indicate_start=False, indicate_end=False)
     osm.tokenize = lambda x: x.split()
 
     numtrain = 0
@@ -156,7 +156,11 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
             inp, out = line.split("\t")
             if reverse_input:
                 inp = " ".join(inp.split()[::-1])
-            out = "( {} )".format(out)
+            if use_start_end:
+                outf = "<START> {} <END>"
+            else:
+                outf = "( {} )"
+            out = outf.format(out)
             ism.add(inp)
             osm.add(out)
             numtrain += 1
@@ -166,7 +170,11 @@ def load_data(p="../../../datasets/geoquery/", trainp="train.txt", testp="test.t
             inp, out = line.split("\t")
             if reverse_input:
                 inp = " ".join(inp.split()[::-1])
-            out = "( {} )".format(out)
+            if use_start_end:
+                outf = "<START> {} <END>"
+            else:
+                outf = "( {} )"
+            out = outf.format(out)
             ism.add(inp)
             osm.add(out)
 
@@ -393,7 +401,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
 
     q.train(encdec).train_on(train_loader, losses)\
         .optimizer(optim)\
-        .clip_grad_norm(gradnorm) \
+        .clip_grad(gradnorm) \
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .valid_with(valid_encdec).valid_on(valid_loader, validlosses)\
         .cuda(cuda)\
@@ -1363,7 +1371,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    trainmats, testmats, inpD, outD = load_data(reverse_input=True)
+    trainmats, testmats, inpD, outD = load_data(reverse_input=True, use_start_end=True)
 
     if embdim > 0:
         tt.msg("embdim overrides inpembdim and outembdim")
@@ -1466,8 +1474,8 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     if _opt_test:
         assert(np.all(mirror_decoder_cell.nncell.weight_hh.cpu().data.numpy()
                       == decoder.weight_hh_l0.cpu().data.numpy()))
-        test_x = q.var(trainmats[0][80:85]).v.long()
-        test_y = q.var(trainmats[1][80:85]).v.long()
+        test_x = q.var(trainmats[0][80:100]).v.long()
+        test_y = q.var(trainmats[1][80:100]).v.long()
         m.eval()
         valid_m.eval()
         # valid_decoder_cell.set_runner(q.TeacherForcer())
@@ -1496,6 +1504,8 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
 
     def treeparser(x):  # 1D of output word ids
         treestring = " ".join([rev_outD[xe] for xe in x if xe != 0])
+        treestring = "<START> " + treestring
+        treestring = treestring.replace("<START>", "(").replace("<END>", ")")
         tree = parse_query_tree(treestring)
         return tree
 

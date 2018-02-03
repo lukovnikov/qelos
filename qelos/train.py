@@ -656,6 +656,10 @@ class train(object):
         self.hook(TrainerChainer(trainer))
         return self
 
+    def clip_grad(self, x):
+        self.hook(ClipGrad(x))
+        return self
+
     def clip_grad_norm(self, x):
         self.hook(ClipGradNorm(x))
         return self
@@ -923,6 +927,23 @@ class ClipGradNorm(AutoHooker):
             tgn = tgn.pow(1./2)
             tgn = tgn.data[0]
         return tgn
+
+
+class ClipGrad(AutoHooker):
+    def __init__(self, rng, **kw):
+        super(ClipGrad, self).__init__(**kw)
+        if not issequence(rng):
+            rng = (-rng, rng)
+        else:
+            assert(len(rng) == 2)
+        self._rng = rng
+
+    def get_hooks(self):
+        return {train.BEFORE_OPTIM_STEP: self.on_before_optim_step}
+
+    def on_before_optim_step(self, trainer, **kw):
+        for param in trainer.model.parameters():
+            param.grad = param.grad.clamp(self._rng[0], self._rng[1])
 
 
 class TrainerChainer(AutoHooker):
