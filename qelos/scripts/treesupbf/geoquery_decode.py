@@ -1397,7 +1397,12 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             outembs = self.dropout(outembs)
             enc_init = (q.var(torch.zeros(1, inpseq.size(0), innerdim)).cuda(inpseq).v,
                         q.var(torch.zeros(1, inpseq.size(0), innerdim)).cuda(inpseq).v)
-            encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
+
+            packedinpembs, unorder = q.seq_pack(inpembs, encmask)
+            packedencodings, (y_t, c_t) = self.enc(packedinpembs, enc_init)
+            encodings, encmask = q.seq_unpack(packedencodings, unorder)
+            y_t = torch.index_select(y_t, 1, unorder)
+            c_t = torch.index_select(c_t, 1, unorder)
 
             dec_init = (y_t, c_t)
             decodings, _ = self.dec(outembs, dec_init)
@@ -1417,7 +1422,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             bmf = mencodings * attweights
             summaries = bmf.sum(1)
             outvecs = torch.cat([mdecodings, summaries], 2)
-            outvecs = self.dropout(outvecs)
+            # outvecs = self.dropout(outvecs)
             outscores = self.linout(outvecs)
             return outscores
 
@@ -1441,7 +1446,12 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             inpembs, encmask = self.iemb(inpseq)
             enc_init = (q.var(torch.zeros(1, inpseq.size(0), innerdim)).cuda(inpseq).v,
                         q.var(torch.zeros(1, inpseq.size(0), innerdim)).cuda(inpseq).v)
-            encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
+
+            packedinpembs, unorder = q.seq_pack(inpembs, encmask)
+            packedencodings, (y_t, c_t) = self.enc(packedinpembs, enc_init)
+            encodings, encmask = q.seq_unpack(packedencodings, unorder)
+            y_t = torch.index_select(y_t, 1, unorder)
+            c_t = torch.index_select(c_t, 1, unorder)
 
             self.dec.set_init_states(c_t[0], y_t[0])
             decstates = mirror_decoder_cell.get_states(inpseq.size(0))
