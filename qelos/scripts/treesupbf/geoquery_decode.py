@@ -1495,7 +1495,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     valid_loader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     test_loader = q.dataload(*testmats, batch_size=batsize, shuffle=False)
 
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0, time_average=True),
                          q.SeqElemAccuracy(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=PredCutter(outD)),
                          q.SeqAccuracy(ignore_index=0))
