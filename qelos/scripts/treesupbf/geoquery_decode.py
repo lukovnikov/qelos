@@ -1507,14 +1507,14 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
         .cuda(cuda) \
         .hook(logger) \
         .hook(lrsched, verbose=False) \
-        .train(3)
+        .train(epochs)
 
     assert(np.all(mirror_decoder_cell.nncell.weight_hh.cpu().data.numpy()
                   == decoder.weight_hh_l0.cpu().data.numpy()))
 
     logger.update_settings(completed=True)
 
-    results = q.test(valid_encdec).on(test_loader, validlosses)\
+    results = q.test(valid_m).on(test_loader, validlosses)\
         .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
         .cuda(cuda).run()
 
