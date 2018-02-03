@@ -1353,7 +1353,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_realrepro")
     logger.save_settings(**settings)
-    logger.update_settings(version="4")
+    logger.update_settings(version="I")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -1512,6 +1512,10 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                   == decoder.weight_hh_l0.cpu().data.numpy()))
 
     logger.update_settings(completed=True)
+
+    results = q.test(valid_encdec).on(test_loader, validlosses)\
+        .set_batch_transformer(lambda x, y: (x, y[:, :-1], y[:, 1:]))\
+        .cuda(cuda).run()
 
 
 
