@@ -1394,8 +1394,8 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             outembs, decmask = self.oemb(outseq)
             inpembs = self.dropout(inpembs)
             outembs = self.dropout(outembs)
-            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v,
-                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v)
+            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).cuda(inpseq).v,
+                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).cuda(inpseq).v)
             encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
 
             dec_init = (y_t, c_t)
@@ -1438,8 +1438,8 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
 
         def forward(self, inpseq, outseq):
             inpembs, encmask = self.iemb(inpseq)
-            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v,
-                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).v)
+            enc_init = (q.var(torch.zeros(inpseq.size(0), 1, innerdim)).cuda(inpseq).v,
+                        q.var(torch.zeros(inpseq.size(0), 1, innerdim)).cuda(inpseq).v)
             encodings, (y_t, c_t) = self.enc(inpembs, enc_init)
 
             self.dec.set_init_states(c_t[0], y_t[0])
