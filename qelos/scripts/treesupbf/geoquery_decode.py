@@ -301,7 +301,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
-    logger.update_settings(version="4")
+    logger.update_settings(version="I")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -924,7 +924,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
     logger.save_settings(**settings)
-    logger.update_settings(version="2")
+    logger.update_settings(version="I")
     logger.update_settings(completed=False)
 
     if validontest:
@@ -1157,7 +1157,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
     logger.save_settings(**settings)
-    logger.update_settings(version="2")
+    logger.update_settings(version="I")
     logger.update_settings(completed=False)
 
     if validontest:
