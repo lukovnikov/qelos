@@ -294,7 +294,7 @@ class PredCutter(object):
 
 def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1,
+                             embdim=-1, edropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
                              validontest=False):
@@ -337,7 +337,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(0),
+                                               q.Dropout(edropout),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -350,7 +350,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
             super(EncDecAtt, self).__init__(**kwargs)
             self.encoder = _encoder
             self.decoder = _decoder
-            self.dropout = q.Dropout(0)
+            self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outinpseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -917,7 +917,7 @@ class BFTreePredCutter(object):
 
 def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1, oraclemode=OPT_ORACLEMODE,
+                             embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=1,
                              validontest=False):
@@ -986,7 +986,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(0),
+                                               q.Dropout(edropout),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -1002,7 +1002,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
             self.encoder = _encoder
             self.decoder = _decoder
             self.maxtime = maxtime
-            self.dropout = q.Dropout(0)
+            self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -1150,7 +1150,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
 
 def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                     embdim=-1,
+                     embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                      cuda=False, gpu=0, splitseed=1,
                      validontest=False):
@@ -1214,7 +1214,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(0),
+                                               q.Dropout(edropout),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -1232,7 +1232,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
             self.encoder = _encoder
             self.decoder = _decoder
             self.maxtime = maxtime
-            self.dropout = q.Dropout(0)
+            self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
