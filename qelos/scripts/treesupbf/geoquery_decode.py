@@ -1002,11 +1002,15 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
             self.encoder = _encoder
             self.decoder = _decoder
             self.maxtime = maxtime
+            self.dropout = q.Dropout(0)
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             maxtime = self.maxtime if maxtime is None else maxtime
             # self.decoder.set_init_states(None, final_encoding)
+            encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            self.decoder.set_init_states(*initstates)
             decoding = self.decoder(decstarts,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
@@ -1228,7 +1232,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
             self.encoder = _encoder
             self.decoder = _decoder
             self.maxtime = maxtime
-            self.dropout = q.Dropout(dropout)
+            self.dropout = q.Dropout(0)
 
         def forward(self, inpseq, outseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)

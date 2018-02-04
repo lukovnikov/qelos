@@ -232,12 +232,15 @@ def run_cvae(lr=0.001, epochs=10000):
         print(ypreds.data.numpy())
 
 
-def run_vgae(lr=0.001, epochs=1000, batsize=50):
-    xdata = np.random.randint(0, 5, (1000,), dtype="int64")
+def run_vgae(lr=0.001, epochs=2000, batsize=50):
+    vocsize = 15
+    embdim = 5
+    innerdim = 7
+    xdata = np.random.randint(0, vocsize, (1000,), dtype="int64")
     xloader = q.dataload(xdata, batch_size=batsize)
 
-    d = dict(zip([chr(i) for i in range(5)], range(5)))
-    xembs = q.WordEmb(5, worddic=d)
+    d = dict(zip([chr(i) for i in range(vocsize)], range(vocsize)))
+    xembs = q.WordEmb(embdim, worddic=d)
 
     z_dist = torch.distributions.Normal(torch.zeros(2), torch.ones(2))
 
@@ -245,13 +248,13 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
         def __init__(self, decoder):
             super(VAE, self).__init__()
             self.xembs = xembs
-            self.ff_mean = torch.nn.Linear(5, 2)
-            self.ff_sigma = torch.nn.Linear(5, 2)
+            self.ff_mean = torch.nn.Linear(embdim, 2)
+            self.ff_sigma = torch.nn.Linear(embdim, 2)
             self.decoder = decoder
             self.z_dist = z_dist
-            self.ff_inner = torch.nn.Sequential(q.Forward(2, 5, "relu"),
+            self.ff_inner = torch.nn.Sequential(q.Forward(2, innerdim, "relu"),
                                                 #q.Forward(5, 5, "relu"),
-                                                torch.nn.Linear(5, 2))
+                                                torch.nn.Linear(innerdim, 2))
             # self.ff_inner = None
 
         def forward(self, x):
@@ -269,7 +272,7 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
     class VAE_Decoder(torch.nn.Module):
         def __init__(self):
             super(VAE_Decoder, self).__init__()
-            self.ff_out = torch.nn.Linear(2, 5)
+            self.ff_out = torch.nn.Linear(2, vocsize)
             self.sm = torch.nn.Softmax(1)
 
         def forward(self, code):
@@ -279,10 +282,10 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
     class PriorDisc(torch.nn.Module):       # for getting posterior latent closer to prior latent
         def __init__(self):
             super(PriorDisc, self).__init__()
-            self.ff_disc = torch.nn.Sequential(q.Forward(2, 5, "relu"),
-                                               q.Forward(5, 5, "relu"),
-                                               q.Forward(5, 5, "relu"))
-            self.summ_disc = torch.nn.Linear(5, 1)
+            self.ff_disc = torch.nn.Sequential(q.Forward(2, innerdim, "relu"),
+                                               q.Forward(innerdim, innerdim, "relu"),
+                                               q.Forward(innerdim, innerdim, "relu"))
+            self.summ_disc = torch.nn.Linear(innerdim, 1)
 
         def forward(self, code):
             out = self.summ_disc(self.ff_disc(code)).squeeze(1)
@@ -291,10 +294,10 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
     class PriorGen(torch.nn.Module):
         def __init__(self):
             super(PriorGen, self).__init__()
-            self.ff_gen = torch.nn.Sequential(q.Forward(2, 5, "relu"),
-                                              q.Forward(5, 5, "relu"),
-                                              q.Forward(5, 5, "relu"),
-                                              torch.nn.Linear(5, 2))
+            self.ff_gen = torch.nn.Sequential(q.Forward(2, innerdim, "relu"),
+                                              q.Forward(innerdim, innerdim, "relu"),
+                                              q.Forward(innerdim, innerdim, "relu"),
+                                              torch.nn.Linear(innerdim, 2))
 
         def forward(self, prior):
             out = self.ff_gen(prior)
@@ -415,7 +418,7 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
 
 
 
-    posttrain = True
+    posttrain = False
     if posttrain:
         postepochs = 500
         print("training post")
@@ -459,7 +462,7 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
 
     # visualize latent space
     toplot = []
-    for i in range(5):
+    for i in range(vocsize):
         x = q.var(np.ones((100,), dtype="int64") * i).v
         _, _, _, sample = vae(x)
         toplot.append(sample.data.numpy())
@@ -469,6 +472,8 @@ def run_vgae(lr=0.001, epochs=1000, batsize=50):
     postsamples = postgen(z)
 
     pkl.dump((toplot, postsamples.data.numpy()), open("otm.npz", "w"))
+
+
 
 
 def plot_space(p="otm.npz"):
