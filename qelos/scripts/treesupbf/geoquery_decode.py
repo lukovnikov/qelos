@@ -337,7 +337,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(dropout),
+                                               q.Dropout(0),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -350,7 +350,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
             super(EncDecAtt, self).__init__(**kwargs)
             self.encoder = _encoder
             self.decoder = _decoder
-            self.dropout = q.Dropout(dropout)
+            self.dropout = q.Dropout(0)
 
         def forward(self, inpseq, outinpseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -986,7 +986,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(dropout),
+                                               q.Dropout(0),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
@@ -1214,7 +1214,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
               )
 
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(dropout),
+                                               q.Dropout(0),
                                                linout, ctx2out=False)
 
     decoder_core = q.DecoderCore(outemb, *layers)
