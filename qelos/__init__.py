@@ -42,7 +42,7 @@ from qelos.aiayn import MultiHeadAttention as MultiHeadAttention, \
     EncoderLayer as AynEncoderLayer
 
 from qelos.cnn import SeqConv
-from qelos.furnn import MemGRUCell, TwoStackCell, DynamicOracleRunner
+from qelos.furnn import MemGRUCell, TwoStackCell, DynamicOracleRunner, MultiTeacherForcer
 
 
 from qelos.util import ticktock, argprun, isnumber, issequence, iscollection, \

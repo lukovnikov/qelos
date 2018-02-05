@@ -330,7 +330,7 @@ def run_vgae(lr=0.001, epochs=2000, batsize=50):
     optim_postgen = torch.optim.Adam(q.paramgroups_of(postgen), lr=lr)
 
     disciters = 5
-    prioriters = 5
+    prioriters = 1
     grad_penalty_weight = 1.
 
     def infdataiter(loader):
@@ -350,6 +350,9 @@ def run_vgae(lr=0.001, epochs=2000, batsize=50):
             for j in range(prioriters):      # train discriminator
                 for k in range(disciters):
                     discbatch = q.var(next(infdata)[0]).v
+                    discbatch2 = q.var(next(infdata)[0]).v
+                    discbatch3 = q.var(next(infdata)[0]).v
+                    discbatch = torch.cat([discbatch, discbatch2, discbatch3], 0)
                     prob_y, means, logvar, priorsamplev = vae(discbatch)
                     priorsample = priorsamplev.data
                     optim_disc.zero_grad()
@@ -364,6 +367,10 @@ def run_vgae(lr=0.001, epochs=2000, batsize=50):
                     disc_loss.backward()
                     optim_disc.step()
                 priorbatch = q.var(next(infdata)[0]).v
+                priorbatch2 = q.var(next(infdata)[0]).v
+                priorbatch3 = q.var(next(infdata)[0]).v
+                priorbatch = torch.cat([priorbatch, priorbatch2, priorbatch3], 0)
+                # priorbatch = q.var(next(infdata)[0]).v
                 prob_y, means, logvar, priorsamplev = vae(priorbatch)
                 optim_vae.zero_grad()
                 priorloss = -disc(priorsamplev)

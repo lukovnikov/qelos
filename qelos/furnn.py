@@ -955,6 +955,89 @@ class DynamicOracleRunner(q.DecoderRunner):
         return inpargs, outkwargs
 
 
+class MultiTeacherForcer(q.DecoderRunner):
+    """ like dynamicoraclerunner except gold is decided before rec step thus can't sample from rec's out dist """
+    def __init__(self, tracker=None,
+                 inparggetter=lambda x: (x, {}),
+                 feed_x_tp1 = False,
+                 **kw):
+        super(MultiTeacherForcer, self).__init__(**kw)
+        self.inparggetter = inparggetter
+        self.feed_x_tp1 = feed_x_tp1
+        self.tracker = tracker
+
+        self.seqacc = []
+        self.goldacc = []
+
+    def reset(self):
+        self.seqacc = []
+        self.goldacc = []
+        self.tracker.reset()
+
+    def get_sequence(self):
+        ret = torch.stack(self.seqacc, 1)
+        return ret
+
+    def get_gold_sequence(self):
+        ret = torch.stack(self.goldacc, 1)
+
+    def forward(self, t=None, x=None, xkw=None, y_t=None):
+        outkwargs = {"t": t}
+        eids = xkw["eids"]        # must be given ids of examples
+        eids_np = eids.cpu().data.numpy()
+
+        if y_t is None:
+            assert (t == 0)
+            assert (len(self.seqacc) == 0)
+            if q.issequence(len(x) == 1):
+                assert (len(x) == 1)
+                x = x[0]
+            x_t = x
+        else:
+            x_t = self.seqacc[-1]
+
+        ymask_np = np.zeros(y_t.size(), dtype="float32")
+        for i, eid in enumerate(eids_np):
+            avalidnext = None
+            validnext = self.tracker.get_valid_next(eid)
+            if isinstance(validnext, tuple) and len(validnext) == 2:
+                validnext, avalidnext = validnext
+            ymask_np[i, list(validnext)] = 1.
+        ymask = q.var(ymask_np).cuda(y_t).v
+        gold_t = torch.distributions.Categorical(ymask).sample()
+
+        x_tp1 = gold_t
+
+        # store sampled
+        self.seqacc.append(x_tp1)
+        self.goldacc.append(gold_t)
+
+        # update tracker
+        for x_t_e, eid, gold_t_e in zip(x_tp1.cpu().data.numpy(), eids_np, gold_t.cpu().data.numpy()):
+            self.tracker.update(eid, x_t_e, alt_x=gold_t_e)
+
+        # termination
+        _terminates = [self.tracker.is_terminated(eid) for eid in eids_np]
+        _terminate = all(_terminates)
+
+        # return
+        if self.feed_x_tp1:
+            r = self.inparggetter(x_t, x_tp1)
+        else:
+            r = self.inparggetter(x_t)
+
+        if isinstance(r, tuple) and len(r) == 2 and isinstance(r[1], dict):
+            inpargs, kwupd = r
+            outkwargs.update(kwupd)
+        else:
+            inpargs = r
+
+        # DONE: if inpargs is a sequence, it will be handled by Decoder's forward (_get_inputs_t() return is inpargs)
+
+        if _terminate:
+            outkwargs.update({"_stop": _terminate})
+        return inpargs, outkwargs
+
 
 
 
