@@ -672,7 +672,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             self.encoder = encoder
             self.decoder = decoder
             self.dropout = q.Dropout(edropout)
-            self.translin = torch.nn.Linear(innerdim, innerdim//2)
+            self.translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+            self.translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -680,8 +681,9 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
-                initstates = [self.translin(initstate) for initstate in initstates]
-                self.decoder.set_init_states(*(initstates*2))
+                initstates1 = [self.translin1(initstate) for initstate in initstates]
+                initstates2 = [self.translin2(initstate) for initstate in initstates]
+                self.decoder.set_init_states(*(initstates1 + initstates2))
             elif decodermode == "single":
                 self.decoder.set_init_states(*initstates)
             # self.decoder.set_init_states(None)
@@ -693,15 +695,17 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
             self.dropout = q.Dropout(edropout)
-            self.translin = torch.nn.Linear(innerdim, innerdim//2)
+            self.translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+            self.translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
-                initstates = [self.translin(initstate) for initstate in initstates]
-                self.decoder.set_init_states(*(initstates*2))
+                initstates1 = [self.translin1(initstate) for initstate in initstates]
+                initstates2 = [self.translin2(initstate) for initstate in initstates]
+                self.decoder.set_init_states(*(initstates1 + initstates2))
             elif decodermode == "single":
                 self.decoder.set_init_states(*initstates)
             decoding = self.decoder(outinpseq, ctrlseq,
