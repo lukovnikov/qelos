@@ -940,7 +940,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                              embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                             cuda=False, gpu=0, splitseed=1,
+                             cuda=False, gpu=0, splitseed=1, useattention=True,
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
@@ -973,7 +973,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
         tt.msg("embdim overrides inpembdim and outembdim")
         inpembdim, outembdim = embdim, embdim
 
-    linoutdim = innerdim + innerdim
+    linoutdim = innerdim + (innerdim if useattention else 0)
 
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)  # TODO glove embeddings
 
@@ -1006,9 +1006,12 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=None),
               )
 
-    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(edropout),
-                                               linout, ctx2out=False)
+    if useattention:
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   q.Dropout(edropout),
+                                                   linout, ctx2out=False)
+    else:
+        decoder_top = q.DecoderTop(q.wire((0, 0)), q.Dropout(edropout), linout)
 
     decoder_core = q.DecoderCore(outemb, *layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -1017,6 +1020,26 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     # endregion
 
     # region ENCDEC ---------------------------------------
+    class EncDec(torch.nn.Module):
+        def __init__(self, enc, dec, maxtime=None):
+            super(EncDec, self).__init__()
+            self.enc = enc
+            self.dec = dec
+            self.dropout = q.Dropout(edropout)
+            self.maxtime = maxtime
+
+        def forward(self, inpseq, decstarts, eids=None, maxtime=None):
+            final_encoding, all_encoding, mask = self.enc(inpseq)
+            maxtime = self.maxtime if maxtime is None else maxtime
+            # self.decoder.set_init_states(None, final_encoding)
+            encoderstates = self.enc.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            self.dec.set_init_states(*initstates)
+            decoding = self.dec(decstarts,
+                                    eids=eids,
+                                    maxtime=maxtime)
+            return decoding
+
     class EncDecAtt(torch.nn.Module):
         def __init__(self, _encoder, _decoder, maxtime=None, **kwargs):
             super(EncDecAtt, self).__init__(**kwargs)
@@ -1040,9 +1063,12 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
                                     maxtime=maxtime)
             return decoding
 
-    encdec = EncDecAtt(encoder, decoder)
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
 
-    if _opt_test:
+    if _opt_test and False:
         ttt.tick("testing whole thing dry run")
         test_eids = q.var(np.arange(80, 83)).cuda(cuda).v
         test_start_symbols = q.var(np.ones((3,), dtype="int64") * linout.D["<START>"]).cuda(cuda).v
@@ -1126,7 +1152,11 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
-    valid_encdec = EncDecAtt(encoder, valid_decoder, maxtime=50)
+
+    if useattention:
+        valid_encdec = EncDecAtt(encoder, valid_decoder, maxtime=60)
+    else:
+        valid_encdec = EncDec(encoder, valid_decoder, maxtime=60)
 
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
@@ -1576,7 +1606,7 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    # q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
     # q.argprun(run_seq2seq_tf)
-    q.argprun(run_seq2seq_realrepro)
+    # q.argprun(run_seq2seq_realrepro)
