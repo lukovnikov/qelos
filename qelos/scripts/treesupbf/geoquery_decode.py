@@ -643,8 +643,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # region DECODER -------------------------------------
 
     if decodermode == "double":
-        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
-                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
+        layers = (q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout),
+                  q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout),
                   )
     elif decodermode == "single":
         layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=recdropout)
