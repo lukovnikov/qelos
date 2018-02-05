@@ -632,7 +632,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
-        q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
+        q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
     ).to_layer().return_final().return_mask().reverse()
     encoder = q.RecurrentStack(
         inpemb,
@@ -643,11 +643,11 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # region DECODER -------------------------------------
 
     if decodermode == "double":
-        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
-                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
+        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=dropout),
+                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=dropout),
                   )
     elif decodermode == "single":
-        layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=None)
+        layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=dropout)
     if useattention:
         tt.msg("Attention: YES!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
