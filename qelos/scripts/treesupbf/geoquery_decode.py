@@ -580,8 +580,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              embdim=-1, edropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
-                             decodermode="single", useattention=False,
-                             validontest=True):
+                             decodermode="single", useattention=True,
+                             validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
