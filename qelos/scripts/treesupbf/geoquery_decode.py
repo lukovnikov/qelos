@@ -662,9 +662,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     decoder_cell.set_runner(q.TeacherForcer())
     decoder = decoder_cell.to_decoder()
 
-    if decodermode == "double":
-        translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
-        translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+    translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+    translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
 
     # endregion
 
