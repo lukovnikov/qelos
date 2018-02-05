@@ -580,7 +580,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              embdim=-1, edropout=0., recdropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
-                             decodermode="single", useattention=True,
+                             decodermode="single", useattention=True, linoutmode="normal",
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
@@ -622,8 +622,9 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     outemb, linout, symbols2cores, symbols2ctrl \
         = make_outvecs(outembdim, linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
 
-    # linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
-    # assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
+    if linoutmode == "multi":
+        linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
+        assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
 
     outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     # endregion
