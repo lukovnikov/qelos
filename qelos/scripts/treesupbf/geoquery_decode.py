@@ -577,7 +577,7 @@ def make_outvecs(embdim, lindim, grouptracker=None, tie_weights=False, ttt=None)
 
 def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1, edropout=0.,
+                             embdim=-1, edropout=0., recdropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
                              decodermode="single", useattention=True,
@@ -586,7 +586,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="II")
+    logger.update_settings(version="III")
     # version "2": with strucSMO
     # verison "3": unchained strucSMO
 
@@ -643,11 +643,11 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # region DECODER -------------------------------------
 
     if decodermode == "double":
-        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=dropout),
-                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=dropout),
+        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
+                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
                   )
     elif decodermode == "single":
-        layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=dropout)
+        layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=recdropout)
     if useattention:
         tt.msg("Attention: YES!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
