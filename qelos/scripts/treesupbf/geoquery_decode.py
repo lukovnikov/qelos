@@ -632,7 +632,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
-        q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=dropout),
+        q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
     ).to_layer().return_final().return_mask().reverse()
     encoder = q.RecurrentStack(
         inpemb,
