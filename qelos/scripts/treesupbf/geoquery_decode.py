@@ -580,7 +580,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              embdim=-1, edropout=0., recdropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
-                             decodermode="single", useattention=True,
+                             decodermode="double", useattention=True,
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
@@ -643,8 +643,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # region DECODER -------------------------------------
 
     if decodermode == "double":
-        layers = (q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout),
-                  q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout),
+        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
+                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=recdropout),
                   )
     elif decodermode == "single":
         layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=recdropout)
@@ -672,6 +672,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             self.encoder = encoder
             self.decoder = decoder
             self.dropout = q.Dropout(edropout)
+            self.translin = torch.nn.Linear(innerdim, innerdim//2)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -679,6 +680,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
+                initstates = [self.translin(initstate) for initstate in initstates]
                 self.decoder.set_init_states(*(initstates*2))
             elif decodermode == "single":
                 self.decoder.set_init_states(*initstates)
@@ -691,12 +693,14 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
             self.dropout = q.Dropout(edropout)
+            self.translin = torch.nn.Linear(innerdim, innerdim//2)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
+                initstates = [self.translin(initstate) for initstate in initstates]
                 self.decoder.set_init_states(*(initstates*2))
             elif decodermode == "single":
                 self.decoder.set_init_states(*initstates)
