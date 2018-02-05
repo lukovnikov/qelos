@@ -310,7 +310,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    trainmats, testmats, inpD, outD = load_data(reverse_input=True)
+    trainmats, testmats, inpD, outD = load_data(reverse_input=True, use_start_end=True)
 
     if embdim > 0:
         tt.msg("embdim overrides inpembdim and outembdim")
@@ -392,6 +392,8 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
 
     def treeparser(x):  # 1D of output word ids
         treestring = " ".join([rev_outD[xe] for xe in x if xe != 0])
+        treestring = "<START> " + treestring
+        treestring = treestring.replace("<START>", "(").replace("<END>", ")")
         tree = parse_query_tree(treestring)
         return tree
 

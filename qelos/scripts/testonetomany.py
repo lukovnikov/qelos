@@ -481,6 +481,307 @@ def run_vgae(lr=0.001, epochs=2000, batsize=50):
     pkl.dump((toplot, postsamples.data.numpy()), open("otm.npz", "w"))
 
 
+def run_vgay(lr=0.001, epochs=1200, batsize=50):
+    vocsize = 4
+    embdim = 5
+    innerdim = 7
+    xdata = np.random.randint(0, vocsize, (1000,), dtype="int64")
+    xloader = q.dataload(xdata, batch_size=batsize)
+
+    d = dict(zip([chr(i) for i in range(vocsize)], range(vocsize)))
+    xembs = q.WordEmb(embdim, worddic=d)
+
+    z_dist = torch.distributions.Normal(torch.zeros(2), torch.ones(2))
+
+    class VAE(torch.nn.Module):
+        def __init__(self, decoder):
+            super(VAE, self).__init__()
+            self.xembs = xembs
+            self.decoder = decoder
+            self.z_dist = z_dist
+            self.ff_inner = torch.nn.Sequential(q.Forward(embdim+2, innerdim, "relu"),
+                                                q.Forward(innerdim, innerdim, "relu"),
+                                                torch.nn.Linear(innerdim, 2))
+            # self.ff_inner = None
+
+        def forward(self, x):
+            xvec, _ = self.xembs(x)
+            z = q.var(self.z_dist.sample_n(x.size(0))).v
+            xc = torch.cat([xvec, z], 1)
+            sample = self.ff_inner(xc)
+            # inner transform comes here
+            ret = self.decoder(sample)
+            return ret, None, None, sample
+
+    class VAE_Decoder(torch.nn.Module):
+        def __init__(self):
+            super(VAE_Decoder, self).__init__()
+            self.ff_out = torch.nn.Linear(2, vocsize)
+            self.sm = torch.nn.Softmax(1)
+
+        def forward(self, code):
+            ret = self.sm(self.ff_out(code))
+            return ret
+
+    class PriorDisc(torch.nn.Module):       # for getting posterior latent closer to prior latent
+        def __init__(self):
+            super(PriorDisc, self).__init__()
+            self.ff_disc = torch.nn.Sequential(q.Forward(2, innerdim, "relu"),
+                                               q.Forward(innerdim, innerdim, "relu"),
+                                               q.Forward(innerdim, innerdim, "relu"))
+            self.summ_disc = torch.nn.Linear(innerdim, 1)
+
+        def forward(self, code):
+            out = self.summ_disc(self.ff_disc(code)).squeeze(1)
+            return out
+
+    class PriorGen(torch.nn.Module):
+        def __init__(self):
+            super(PriorGen, self).__init__()
+            self.ff_gen = torch.nn.Sequential(q.Forward(2, innerdim, "relu"),
+                                              q.Forward(innerdim, innerdim, "relu"),
+                                              q.Forward(innerdim, innerdim, "relu"),
+                                              torch.nn.Linear(innerdim, 2))
+
+        def forward(self, prior):
+            out = self.ff_gen(prior)
+            return out
+
+    class EmpiricalKL(torch.nn.Module):
+        def __init__(self, prior=None):
+            super(EmpiricalKL, self).__init__()
+            self.prior_means = q.var(torch.zeros(2)).v
+            self.prior_sigmas = q.var(torch.ones(2)).v
+
+        def forward(self, samples):
+            samples_mean = samples.mean(0)
+            samples_sigmas = torch.mean((samples - samples_mean.unsqueeze(0))**2, 0)
+            logvar = torch.log(samples_sigmas)
+            kld = -.5 * torch.sum(1 + logvar - (samples_mean ** 2) - logvar.exp())
+            return kld
+
+    decoder = VAE_Decoder()
+    vae = VAE(decoder)
+    disc = PriorDisc()
+    empkld = EmpiricalKL()
+
+    optim_vae = torch.optim.Adam(q.paramgroups_of(vae), lr=lr)
+    optim_disc = torch.optim.Adam(q.paramgroups_of(disc), lr=lr)
+
+    postdisc = PriorDisc()
+    postgen = PriorGen()
+    optim_postdisc = torch.optim.Adam(q.paramgroups_of(postdisc), lr=lr)
+    optim_postgen = torch.optim.Adam(q.paramgroups_of(postgen), lr=lr)
+
+    disciters = 5
+    prioriters = 1
+    grad_penalty_weight = 1.
+
+    def infdataiter(loader):
+        while True:
+            for b in xloader:
+                yield b
+
+    infdata = infdataiter(xloader)
+
+    use_emp_kld = False
+    disc_loss = q.var(torch.zeros(1)).v
+
+    preepochs = 1000
+    for i in range(preepochs):
+        for k in range(disciters):
+            discbatch = q.var(next(infdata)[0]).v
+            discbatch2 = q.var(next(infdata)[0]).v
+            discbatch3 = q.var(next(infdata)[0]).v
+            discbatch = torch.cat([discbatch, discbatch2, discbatch3], 0)
+            prob_y, means, logvar, priorsamplev = vae(discbatch)
+            priorsample = priorsamplev.data
+            optim_disc.zero_grad()
+            realprior = z_dist.sample_n(priorsample.size(0))
+            interp_alpha = priorsample.new(priorsample.size(0), 1).uniform_(0, 1)
+            interp_points = q.var(interp_alpha * realprior + (1 - interp_alpha) * priorsample,
+                                  requires_grad=True).cuda(priorsample).v
+            disc_interp_grad, = torch.autograd.grad(disc(interp_points).sum(), interp_points, create_graph=True)
+            lip_grad_norm = disc_interp_grad.view(priorsample.size(0), -1).norm(2, 1)
+            lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2).mean()
+            core_loss = disc(priorsamplev.detach()) - disc(q.var(realprior).cuda(priorsamplev).v)
+            disc_loss = core_loss.mean() + lip_loss.mean()
+            disc_loss.backward()
+            optim_disc.step()
+        priorbatch = q.var(next(infdata)[0]).v
+        priorbatch2 = q.var(next(infdata)[0]).v
+        priorbatch3 = q.var(next(infdata)[0]).v
+        priorbatch = torch.cat([priorbatch, priorbatch2, priorbatch3], 0)
+        # priorbatch = q.var(next(infdata)[0]).v
+        prob_y, means, logvar, priorsamplev = vae(priorbatch)
+        optim_vae.zero_grad()
+        priorloss = -disc(priorsamplev)
+        priorloss.mean().backward()
+        optim_vae.step()
+        print(i, disc_loss.data[0])
+
+    j = 0
+    for i in range(epochs):
+        batch = next(infdata)
+        if vae.ff_inner is not None and not use_emp_kld:
+            for j in range(prioriters):      # train discriminator
+                for k in range(disciters):
+                    discbatch = q.var(next(infdata)[0]).v
+                    discbatch2 = q.var(next(infdata)[0]).v
+                    discbatch3 = q.var(next(infdata)[0]).v
+                    discbatch = torch.cat([discbatch, discbatch2, discbatch3], 0)
+                    prob_y, means, logvar, priorsamplev = vae(discbatch)
+                    priorsample = priorsamplev.data
+                    optim_disc.zero_grad()
+                    realprior = z_dist.sample_n(priorsample.size(0))
+                    interp_alpha = priorsample.new(priorsample.size(0), 1).uniform_(0, 1)
+                    interp_points = q.var(interp_alpha * realprior + (1 - interp_alpha) * priorsample, requires_grad=True).cuda(priorsample).v
+                    disc_interp_grad, = torch.autograd.grad(disc(interp_points).sum(), interp_points, create_graph=True)
+                    lip_grad_norm = disc_interp_grad.view(priorsample.size(0), -1).norm(2, 1)
+                    lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2).mean()
+                    core_loss = disc(priorsamplev.detach()) - disc(q.var(realprior).cuda(priorsamplev).v)
+                    disc_loss = core_loss.mean() + lip_loss.mean()
+                    disc_loss.backward()
+                    optim_disc.step()
+                priorbatch = q.var(next(infdata)[0]).v
+                priorbatch2 = q.var(next(infdata)[0]).v
+                priorbatch3 = q.var(next(infdata)[0]).v
+                priorbatch = torch.cat([priorbatch, priorbatch2, priorbatch3], 0)
+                # priorbatch = q.var(next(infdata)[0]).v
+                prob_y, means, logvar, priorsamplev = vae(priorbatch)
+                optim_vae.zero_grad()
+                priorloss = -disc(priorsamplev)
+                priorloss.mean().backward()
+                optim_vae.step()
+
+        gold = q.var(batch[0]).v
+        optim_vae.zero_grad()
+        probs, means, logvar, sample = vae(gold)
+        loss_recons = - torch.log(torch.gather(probs, 1, gold.unsqueeze(1))).squeeze(1)
+        vae_loss = loss_recons.mean()
+        #vae_loss += -disc(sample).mean()
+        vae_loss.backward()
+        optim_vae.step()
+        print(i, loss_recons.mean().data[0], disc_loss.data[0])
+
+        for k in range(prioriters):
+            for j in range(disciters):  # train discriminator
+                discbatch = q.var(next(infdata)[0]).v
+                _, _, _, realv = vae(discbatch)
+                # realv = realv.detach()
+                real = realv.data
+                optim_postdisc.zero_grad()
+                z = q.var(z_dist.sample_n(real.size(0))).v
+                fakev = postgen(z)
+                fake = fakev.data
+                interp_alpha = real.new(real.size(0), 1).uniform_(0, 1)
+                interp_points = q.var(interp_alpha * real + (1 - interp_alpha) * fake, requires_grad=True).cuda(real).v
+                disc_interp_grad, = torch.autograd.grad(postdisc(interp_points).sum(), interp_points, create_graph=True)
+                lip_grad_norm = disc_interp_grad.view(real.size(0), -1).norm(2, 1)
+                lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2)
+                core_loss = postdisc(fakev.detach()) - postdisc(realv.detach())
+                disc_loss = core_loss.mean() + lip_loss.mean()
+                disc_loss.backward()
+                optim_postdisc.step()
+            optim_postgen.zero_grad()
+            real = q.var(next(infdata)[0]).v
+            z = q.var(z_dist.sample_n(real.size(0))).v
+            gen_loss = -postdisc(postgen(z)).mean()
+            gen_loss.backward()
+            optim_postgen.step()
+        # print(i, core_loss.mean().data[0])
+            #
+    preepochs = 500
+    for i in range(preepochs):
+        for k in range(disciters):
+            discbatch = q.var(next(infdata)[0]).v
+            discbatch2 = q.var(next(infdata)[0]).v
+            discbatch3 = q.var(next(infdata)[0]).v
+            discbatch = torch.cat([discbatch, discbatch2, discbatch3], 0)
+            prob_y, means, logvar, priorsamplev = vae(discbatch)
+            priorsample = priorsamplev.data
+            optim_disc.zero_grad()
+            realprior = z_dist.sample_n(priorsample.size(0))
+            interp_alpha = priorsample.new(priorsample.size(0), 1).uniform_(0, 1)
+            interp_points = q.var(interp_alpha * realprior + (1 - interp_alpha) * priorsample,
+                                  requires_grad=True).cuda(priorsample).v
+            disc_interp_grad, = torch.autograd.grad(disc(interp_points).sum(), interp_points, create_graph=True)
+            lip_grad_norm = disc_interp_grad.view(priorsample.size(0), -1).norm(2, 1)
+            lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2).mean()
+            core_loss = disc(priorsamplev.detach()) - disc(q.var(realprior).cuda(priorsamplev).v)
+            disc_loss = core_loss.mean() + lip_loss.mean()
+            disc_loss.backward()
+            optim_disc.step()
+        priorbatch = q.var(next(infdata)[0]).v
+        priorbatch2 = q.var(next(infdata)[0]).v
+        priorbatch3 = q.var(next(infdata)[0]).v
+        priorbatch = torch.cat([priorbatch, priorbatch2, priorbatch3], 0)
+        # priorbatch = q.var(next(infdata)[0]).v
+        prob_y, means, logvar, priorsamplev = vae(priorbatch)
+        optim_vae.zero_grad()
+        priorloss = -disc(priorsamplev)
+        priorloss.mean().backward()
+        optim_vae.step()
+        print(i, disc_loss.data[0])
+
+
+
+    posttrain = False
+    if posttrain:
+        postepochs = 500
+        print("training post")
+        for i in range(postepochs):
+            for j in range(disciters):      # train discriminator
+                discbatch = q.var(next(infdata)[0]).v
+                _, _, _, realv = vae(discbatch)
+                real = realv.data
+                optim_postdisc.zero_grad()
+                z = q.var(z_dist.sample_n(real.size(0))).v
+                fakev = postgen(z)
+                fake = fakev.data
+                interp_alpha = real.new(real.size(0), 1).uniform_(0, 1)
+                interp_points = q.var(interp_alpha * real + (1 - interp_alpha) * fake, requires_grad=True).cuda(real).v
+                disc_interp_grad, = torch.autograd.grad(postdisc(interp_points).sum(), interp_points, create_graph=True)
+                lip_grad_norm = disc_interp_grad.view(real.size(0), -1).norm(2, 1)
+                lip_loss = grad_penalty_weight * ((lip_grad_norm - 1.).clamp(min=0) ** 2)
+                core_loss = postdisc(fakev.detach()) - postdisc(realv.detach())
+                disc_loss = core_loss.mean() + lip_loss.mean()
+                disc_loss.backward()
+                optim_postdisc.step()
+            optim_postgen.zero_grad()
+            real = q.var(next(infdata)[0]).v
+            z = q.var(z_dist.sample_n(real.size(0))).v
+            gen_loss = -postdisc(postgen(z)).mean()
+            gen_loss.backward()
+            optim_postgen.step()
+            print(i, core_loss.mean().data[0])
+
+
+    numsam = 30
+    np.set_printoptions(precision=3, suppress=True)
+    print("sampling {}".format(numsam))
+    for i in range(numsam):
+        sample = q.var(z_dist.sample_n(1)).v
+        if posttrain:
+            sample = postgen(sample)
+        preds = decoder(sample)
+        print(preds.data.numpy()[0])
+
+
+    # visualize latent space
+    toplot = []
+    for i in range(vocsize):
+        x = q.var(np.ones((100,), dtype="int64") * i).v
+        _, _, _, sample = vae(x)
+        toplot.append(sample.data.numpy())
+    z = q.var(z_dist.sample_n(500)).v
+    postsamples = z
+    # if posttrain:
+    postsamples = postgen(z)
+
+    pkl.dump((toplot, postsamples.data.numpy()), open("otm.npz", "w"))
+
+
 
 
 def plot_space(p="otm.npz"):
@@ -737,4 +1038,4 @@ def run_cgan(lr=0.001, epochs=1000):
 
 
 if __name__ == "__main__":
-    q.argprun(run_vgae)
+    q.argprun(run_vgay)
