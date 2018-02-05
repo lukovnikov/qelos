@@ -580,13 +580,13 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              embdim=-1, edropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
-                             decodermode="single", useattention=True,
-                             validontest=False):
+                             decodermode="single", useattention=False,
+                             validontest=True):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="I")
+    logger.update_settings(version="II")
     # version "2": with strucSMO
     # verison "3": unchained strucSMO
 
@@ -632,7 +632,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # encoder = make_encoder(inpemb, inpembdim, innerdim//2, dropout, ttt=ttt)/
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
-        q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
+        q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
     ).to_layer().return_final().return_mask().reverse()
     encoder = q.RecurrentStack(
         inpemb,
@@ -643,11 +643,11 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     # region DECODER -------------------------------------
 
     if decodermode == "double":
-        layers = (q.LSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
-                  q.LSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
+        layers = (q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
+                  q.CatLSTMCell(outembdim, innerdim//2, dropout_in=dropout, dropout_rec=None),
                   )
     elif decodermode == "single":
-        layers = q.LSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=None)
+        layers = q.CatLSTMCell(outembdim*2, innerdim, dropout_in=dropout, dropout_rec=None)
     if useattention:
         tt.msg("Attention: YES!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
