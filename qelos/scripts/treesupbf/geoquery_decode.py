@@ -1203,7 +1203,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                      embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                     cuda=False, gpu=0, splitseed=1,
+                     cuda=False, gpu=0, splitseed=1, useattention=True,
                      validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
@@ -1214,6 +1214,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     if validontest:
         print("VALIDATING ON TEST: WONG !!!")
     print("SEQ2SEQ TF")
+    print("Attention: {}".format(useattention))
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
@@ -1236,7 +1237,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
         tt.msg("embdim overrides inpembdim and outembdim")
         inpembdim, outembdim = embdim, embdim
 
-    linoutdim = innerdim + innerdim
+    linoutdim = innerdim + (innerdim if useattention else 0)
 
     inpemb = q.WordEmb(inpembdim, worddic=ism.D)  # TODO glove embeddings
 
@@ -1264,9 +1265,12 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     layers = (q.LSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=None),
               )
 
-    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(edropout),
-                                               linout, ctx2out=False)
+    if useattention:
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   q.Dropout(edropout),
+                                                   linout, ctx2out=False)
+    else:
+        decoder_top = q.DecoderTop(q.wire((0, 0)), q.Dropout(edropout), linout)
 
     decoder_core = q.DecoderCore(outemb, *layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -1277,6 +1281,23 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     # endregion
 
     # region ENCDEC ---------------------------------------
+    class EncDec(torch.nn.Module):
+        def __init__(self, enc, dec, maxtime=None):
+            super(EncDec, self).__init__()
+            self.enc = enc
+            self.dec = dec
+            self.maxtime = maxtime
+            self.dropout = q.Dropout(edropout)
+
+        def forward(self, inpseq, outseq):
+            final_encoding, all_encoding, mask = self.enc(inpseq)
+            # self.decoder.set_init_states(None, final_encoding)
+            encoderstates = self.enc.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            self.dec.set_init_states(*initstates)
+            decoding = self.dec(outseq)
+            return decoding
+
     class EncDecAtt(torch.nn.Module):
         def __init__(self, _encoder, _decoder, maxtime=None, **kwargs):
             super(EncDecAtt, self).__init__(**kwargs)
@@ -1297,7 +1318,10 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                                     ctxmask=mask)
             return decoding
 
-    encdec = EncDecAtt(encoder, decoder)
+    if useattention:
+        encdec = EncDecAtt(encoder, decoder)
+    else:
+        encdec = EncDec(encoder, decoder)
     # endregion
     # endregion
 
@@ -1320,7 +1344,11 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     valid_decoder_cell.set_runner(freerunner)
     valid_decoder = valid_decoder_cell.to_decoder()
-    valid_encdec = EncDecAtt(encoder, valid_decoder)
+
+    if useattention:
+        valid_encdec = EncDecAtt(encoder, valid_decoder)
+    else:
+        valid_encdec = EncDec(encoder, valid_decoder)
 
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          # q.SeqNLLLoss(ignore_index=0),
@@ -1606,7 +1634,7 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_realrepro)
