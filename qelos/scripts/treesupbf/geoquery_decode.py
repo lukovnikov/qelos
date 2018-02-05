@@ -580,7 +580,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              embdim=-1, edropout=0., recdropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
-                             decodermode="double", useattention=True,
+                             decodermode="single", useattention=True,
                              validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
@@ -662,6 +662,10 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     decoder_cell.set_runner(q.TeacherForcer())
     decoder = decoder_cell.to_decoder()
 
+    if decodermode == "double":
+        translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+        translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+
     # endregion
 
     # region ENCDEC ---------------------------------------
@@ -672,8 +676,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             self.encoder = encoder
             self.decoder = decoder
             self.dropout = q.Dropout(edropout)
-            self.translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
-            self.translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+            self.translin1 = translin1
+            self.translin2 = translin2
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
@@ -695,8 +699,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
             self.dropout = q.Dropout(edropout)
-            self.translin1 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
-            self.translin2 = torch.nn.Linear(innerdim*2, innerdim, bias=False)
+            self.translin1 = translin1
+            self.translin2 = translin2
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
