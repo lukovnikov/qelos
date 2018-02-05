@@ -17,9 +17,9 @@ OPT_WREG = 0.000001
 OPT_DROPOUT = 0.5
 OPT_GRADNORM = 5.
 
-OPT_INPEMBDIM = 200
-OPT_OUTEMBDIM = 200
-OPT_INNERDIM = 200
+OPT_INPEMBDIM = 150
+OPT_OUTEMBDIM = 150
+OPT_INNERDIM = 150
 
 OPT_ORACLEMODE = "esample"       # "sample" or "uniform" or ...
 
@@ -577,7 +577,7 @@ def make_outvecs(embdim, lindim, grouptracker=None, tie_weights=False, ttt=None)
 
 def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1,
+                             embdim=-1, edropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
                              decodermode="single", useattention=True,
@@ -586,7 +586,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="2")
+    logger.update_settings(version="I")
     # version "2": with strucSMO
     # verison "3": unchained strucSMO
 
@@ -651,11 +651,11 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     if useattention:
         tt.msg("Attention: YES!")
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(dropout),
+                                               q.Dropout(edropout),
                                                linout, ctx2out=False)
     else:
         tt.msg("Attention: NO")
-        decoder_top = q.DecoderTop(q.wire((0, 0)), q.Dropout(dropout), linout)
+        decoder_top = q.DecoderTop(q.wire((0, 0)), q.Dropout(edropout), linout)
 
     decoder_core = ParentStackCell(outemb, layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
@@ -671,18 +671,18 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             super(EncDec, self).__init__(**kw)
             self.encoder = encoder
             self.decoder = decoder
+            self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
+            encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
-                self.decoder.set_init_states(None,
-                                             final_encoding[:, :final_encoding.size(1) // 2],
-                                             None,
-                                             final_encoding[:, final_encoding.size(1) // 2:])
+                self.decoder.set_init_states(*(initstates*2))
             elif decodermode == "single":
-                self.decoder.set_init_states(None, final_encoding)
-            self.decoder.set_init_states(None)
+                self.decoder.set_init_states(*initstates)
+            # self.decoder.set_init_states(None)
             decoding = self.decoder(outinpseq, ctrlseq)
             return decoding
 
@@ -690,9 +690,16 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
         def __init__(self, encoder, decoder, **kw):
             super(EncDecAtt, self).__init__(**kw)
             self.encoder, self.decoder = encoder, decoder
+            self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
             final_encoding, all_encoding, mask = self.encoder(inpseq)
+            encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
+            initstates = [self.dropout(initstate) for initstate in encoderstates]
+            if decodermode == "double":
+                self.decoder.set_init_states(*(initstates*2))
+            elif decodermode == "single":
+                self.decoder.set_init_states(*initstates)
             decoding = self.decoder(outinpseq, ctrlseq,
                                     ctx=all_encoding,
                                     ctx_0=final_encoding,
