@@ -1207,7 +1207,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                      embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                     cuda=False, gpu=0, splitseed=1, useattention=True,
+                     cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False,
                      validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
@@ -1228,7 +1228,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     psm.set_dictionary(tracker.D)
     psm.tokenize = lambda x: x.split()
     for tree in tracker.trackables:
-        treestring = tree.pp(arbitrary=False, _remove_order=True)
+        treestring = tree.pp(arbitrary=arbitrary, _remove_order=True)
         assert (Node.parse(treestring) == tree)
         psm.add("<ROOT> " + treestring)
     psm.finalize()
@@ -1638,7 +1638,7 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    q.argprun(run_seq2seq_oracle)
+    # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_realrepro)
