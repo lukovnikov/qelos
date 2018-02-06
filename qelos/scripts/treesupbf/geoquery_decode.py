@@ -938,7 +938,7 @@ class BFTreePredCutter(object):
 
 def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1, edropout=0., oraclemode="uniform-argmax",
+                             embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=1, useattention=True,
                              validontest=False):
@@ -1207,7 +1207,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                      embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                     cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False,
+                     cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=True,
                      validontest=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")

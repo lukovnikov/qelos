@@ -183,8 +183,19 @@ class Node(Trackable):
     def pp(self, mode="ann", arbitrary=False, _rec_arg=None, _top_rec=True, _remove_order=False):
         assert(mode in "ann tree dfpar dfann".split())
         children = list(self.children)
+
         if arbitrary:
-            random.shuffle(children)
+            # randomly shuffle children while keeping children with order in positions they were in
+            fillthis = [child if child._order is not None else None for child in children]
+            if None in fillthis:
+                pass
+            children_without_order = [child for child in children if child._order is None]
+            random.shuffle(children_without_order)
+            for i in range(len(fillthis)):
+                if fillthis[i] is None:
+                    fillthis[i] = children_without_order[0]
+                    children_without_order = children_without_order[1:]
+            children = fillthis
 
         # children = sorted(children, key=lambda x: x.order if x.order is not None else np.infty)
         if mode == "dfpar":     # depth-first with parentheses
@@ -295,6 +306,8 @@ class Node(Trackable):
         return names, labels
 
     def __eq__(self, other):
+        if other is None:
+            return False
         return self._eq_rec(other)
 
     def _eq_rec(self, other, _self_pos_in_list=None, _other_pos_in_list=None):
