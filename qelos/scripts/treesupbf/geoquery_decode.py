@@ -297,7 +297,7 @@ def run_seq2seq_reproduction(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS,
                              embdim=-1, edropout=0.,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
-                             validontest=False, tag=None):
+                             validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_repro")
     logger.save_settings(**settings)
@@ -581,7 +581,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
                              decodermode="single", useattention=True, linoutmode="normal",
-                             validontest=False, tag=None):
+                             validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
@@ -941,7 +941,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
                              embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=1, useattention=True,
-                             validontest=False, tag=None):
+                             validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
     logger.save_settings(**settings)
@@ -1208,7 +1208,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                      cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False,
-                     validontest=False, tag=None):
+                     validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
     logger.save_settings(**settings)
@@ -1450,7 +1450,7 @@ def run_seq2seq_realrepro(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                              embdim=-1,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0,
-                             validontest=False, tag=None):
+                             validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_realrepro")
     logger.save_settings(**settings)
