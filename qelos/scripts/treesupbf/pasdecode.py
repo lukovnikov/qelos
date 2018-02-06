@@ -103,16 +103,24 @@ def load_synth_trees(n=1000, inplin="bf"):      # inplin: "df" or "bf" or "dfpar
 
 class TreeAccuracy(q.DiscreteLoss):
     def __init__(self, size_average=True, ignore_index=None,
-                 treeparser=None, **kw):
-        """ needs a treeparser that transforms sequences of integer ids to tree objects that support equality """
+                 treeparser=None, goldgetter=None, **kw):
+        """ needs a treeparser that transforms sequences of integer ids to tree objects that support equality
+            * treeparser is applied both on x prob's preds (greedy argmax) and the given gold idxs (also when goldgetter is used)
+            * goldgetter overrides provided gold with other gold (gets pred probs and provided gold)
+        """
         super(TreeAccuracy, self).__init__(size_average=size_average, ignore_index=ignore_index, **kw)
         self.treeparser = treeparser
+        self.goldgetter = goldgetter
 
     def forward(self, x, gold, mask=None):
         if mask is not None and mask.data[0, 1] > 1:  # batchable sparse
             mask = q.batchablesparse2densemask(mask)
         if mask is not None:
             x = x + torch.log(mask.float())
+
+        if self.goldgetter is not None:
+            gold = self.goldgetter(x, gold)
+
         ignoremask = self._get_ignore_mask(gold)
         maxes, best = torch.max(x, 2)
         same = torch.ByteTensor(best.size(0))

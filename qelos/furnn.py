@@ -5,6 +5,7 @@ from qelos.qutils import name2fn
 from qelos.basic import Forward
 import qelos as q
 import numpy as np
+import re
 
 
 class MemGRUCell(GRUCell):
@@ -814,7 +815,7 @@ class DynamicOracleRunner(q.DecoderRunner):
     def __init__(self, tracker=None,
                  inparggetter=lambda x: (x, {}),        # tranforms from output symbol to input symbols
                  scores2probs=q.Softmax(),
-                 mode="sample",  # "sample" or "argmax" or "uniform" or "esample"
+                 mode="sample",  # "sample" or "argmax" or "uniform" or "esample" or "X-Y" (gold-next)
                  eps=0.2,
                  explore=0.,
                  **kw):
@@ -825,6 +826,12 @@ class DynamicOracleRunner(q.DecoderRunner):
         self.inparggetter = inparggetter        # transforms from output symbols to input symbols
         self.scores2probs = scores2probs
         self.mode = mode
+        modere = re.compile("(\w+)-(\w+)")
+        m = re.match(modere, mode)
+        if m:
+            self.gold_mode, self.next_mode = m.group(1), m.group(2)
+        else:
+            self.gold_mode, self.next_mode = mode, mode
         self.eps = eps
         self.explore = explore
         #
@@ -861,7 +868,8 @@ class DynamicOracleRunner(q.DecoderRunner):
             x_t = x
             gold_t = x_t
         else:
-            mode = "argmax" if self._argmax_in_eval and not self.training else self.mode
+            next_mode = "argmax" if self._argmax_in_eval and not self.training else self.next_mode
+            gold_mode = self.gold_mode
             if q.issequence(y_t):
                 assert(len(y_t) == 1)
                 y_t = y_t[0]
@@ -882,43 +890,57 @@ class DynamicOracleRunner(q.DecoderRunner):
             ymask = q.var(ymask_np).cuda(y_t).v
             ymask_expl = q.var(ymask_expl_np).cuda(y_t).v if use_expl_mask else None
 
-            if self.explore > 0:
-                _y_t = y_t + torch.log(ymask_expl) if ymask_expl is not None else y_t
-                unmaskedprobs = self.scores2probs(_y_t)
-                if mode == "sample":
-                    x_t = torch.distributions.Categorical(unmaskedprobs).sample()
-                    # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
-                elif mode == "uniform":
-                    expl_probs = ymask_expl if ymask_expl is not None else q.var(torch.ones(y_t.size())).cuda(y_t).v
-                    x_t = torch.distributions.Categorical(expl_probs).sample()
-                elif mode == "argmax":
-                    _, x_t = torch.max(unmaskedprobs, 1)
-                else:
-                    raise q.SumTingWongException("unsupported mode: {}".format(mode))
-
             # get probs
             _y_t = y_t + torch.log(ymask)
             goldprobs, _ = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
 
             # sample gold from probs
-            if mode == "sample":
+            if gold_mode == "sample":
                 gold_t = torch.distributions.Categorical(goldprobs).sample()
                 # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
-            elif mode == "uniform":
+            elif gold_mode == "uniform":
                 gold_t = torch.distributions.Categorical(ymask).sample()
-            elif mode == "esample":
+            elif gold_mode == "esample":
                 gold_t = torch.distributions.Categorical(goldprobs).sample()
                 alt_gold_t = torch.distributions.Categorical(ymask).sample()
                 _epsprobs = (q.var(torch.rand(gold_t.size())).cuda(gold_t).v < self.eps).long()
                 gold_t = torch.gather(torch.stack([gold_t, alt_gold_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
-            elif mode == "argmax":
+            elif gold_mode == "argmax":
                 _, gold_t = torch.max(goldprobs, 1)
             else:
-                raise q.SumTingWongException("unsupported mode: {}".format(mode))
+                raise q.SumTingWongException("unsupported gold_mode: {}".format(gold_mode))
 
             if self.explore == 0:
-                x_t = gold_t
+                if self.next_mode == self.gold_mode:
+                    x_t = gold_t
+                else:
+                    if next_mode == "sample":
+                        x_t = torch.distributions.Categorical(goldprobs).sample()
+                        # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
+                    elif next_mode == "uniform":
+                        x_t = torch.distributions.Categorical(ymask).sample()
+                    elif next_mode == "esample":
+                        x_t = torch.distributions.Categorical(goldprobs).sample()
+                        alt_x_t = torch.distributions.Categorical(ymask).sample()
+                        _epsprobs = (q.var(torch.rand(x_t.size())).cuda(x_t).v < self.eps).long()
+                        x_t = torch.gather(torch.stack([x_t, alt_x_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
+                    elif next_mode == "argmax":
+                        _, x_t = torch.max(goldprobs, 1)
+                    else:
+                        raise q.SumTingWongException("unsupported next_mode: {}".format(next_mode))
             else:
+                _y_t = y_t + torch.log(ymask_expl) if ymask_expl is not None else y_t
+                unmaskedprobs = self.scores2probs(_y_t)
+                if next_mode == "sample":
+                    x_t = torch.distributions.Categorical(unmaskedprobs).sample()
+                    # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
+                elif next_mode == "uniform":
+                    expl_probs = ymask_expl if ymask_expl is not None else q.var(torch.ones(y_t.size())).cuda(y_t).v
+                    x_t = torch.distributions.Categorical(expl_probs).sample()
+                elif next_mode == "argmax":
+                    _, x_t = torch.max(unmaskedprobs, 1)
+                else:
+                    raise q.SumTingWongException("unsupported mode: {}".format(next_mode))
                 if self.explore < 1:  # mixture
                     mixmask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
                     mixidx = mixmask.long()

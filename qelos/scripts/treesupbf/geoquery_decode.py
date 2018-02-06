@@ -891,7 +891,7 @@ def make_oracle(tracker, symbols2cores, symbols2ctrl, mode=OPT_ORACLEMODE, witha
             goldtree = Node.parse(tracker.pp(golds[i].cpu().data.numpy()))
             predtree = Node.parse(tracker.pp(seqs[i].cpu().data.numpy()))
             exptree = trees[test_eids.cpu().data.numpy()[i]]
-            assert (exptree == goldtree)
+            # assert (exptree == goldtree)
             assert (exptree == predtree)
 
         # try loss
@@ -938,7 +938,7 @@ class BFTreePredCutter(object):
 
 def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
                              wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
-                             embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
+                             embdim=-1, edropout=0., oraclemode="uniform-argmax",
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=1, useattention=True,
                              validontest=False):
@@ -1161,12 +1161,16 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                         # TreeAccuracy(ignore_index=0,
+                         #              treeparser=lambda x: Node.parse(tracker.pp(x)),
+                         #              goldgetter=lambda x, _: torch.stack(oracle.seqacc, 1))
+                         )
 
     validlosses = q.lossarray(  # q.SeqCrossEntropyLoss(ignore_index=0),
         q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
         q.SeqAccuracy(ignore_index=0),
-        TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+        TreeAccuracy(ignore_index=0,
+                     treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
@@ -1634,7 +1638,7 @@ if __name__ == "__main__":
     # load_data_trees()
     # run_some_tests()
     # q.argprun(run_seq2seq_reproduction)
-    # q.argprun(run_seq2seq_oracle)
+    q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_realrepro)
