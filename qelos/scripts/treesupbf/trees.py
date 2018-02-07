@@ -184,13 +184,26 @@ class Node(Trackable):
         assert(mode in "ann tree dfpar dfann".split())
         children = list(self.children)
 
-        if arbitrary:
+        if arbitrary is True:
             # randomly shuffle children while keeping children with order in positions they were in
             fillthis = [child if child._order is not None else None for child in children]
             if None in fillthis:
                 pass
             children_without_order = [child for child in children if child._order is None]
             random.shuffle(children_without_order)
+            for i in range(len(fillthis)):
+                if fillthis[i] is None:
+                    fillthis[i] = children_without_order[0]
+                    children_without_order = children_without_order[1:]
+            children = fillthis
+        elif arbitrary is "alphabetical":
+            # randomly shuffle children while keeping children with order in positions they were in
+            fillthis = [child if child._order is not None else None for child in children]
+            if None in fillthis:
+                pass
+            children_without_order = [child for child in children if child._order is None]
+            children_without_order = sorted(children_without_order, key=lambda x: x.name)
+            # random.shuffle(children_without_order)
             for i in range(len(fillthis)):
                 if fillthis[i] is None:
                     fillthis[i] = children_without_order[0]

@@ -1207,7 +1207,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      wreg=OPT_WREG, dropout=OPT_DROPOUT, gradnorm=OPT_GRADNORM,
                      embdim=-1, edropout=0.,
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
-                     cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False,
+                     cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False, ordermode="alphabetical",
                      validontest=False, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
@@ -1227,8 +1227,14 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
     psm.tokenize = lambda x: x.split()
+
+    if ordermode != "default":
+        _ordermode = ordermode
+    else:
+        _ordermode = arbitrary
+
     for tree in tracker.trackables:
-        treestring = tree.pp(arbitrary=arbitrary, _remove_order=True)
+        treestring = tree.pp(arbitrary=_ordermode, _remove_order=True)
         assert (Node.parse(treestring) == tree)
         psm.add("<ROOT> " + treestring)
     psm.finalize()
