@@ -95,10 +95,10 @@ def load_data_trees(p="../../../datasets/geoquery/", trainp="train.txt", testp="
     ism.finalize()
     tracker = GroupTracker(trees)
 
-    print(ism[0])
-    print(tracker[0].root.pptree())
-
-    print(tracker[:5][0].root.pptree())
+    # print(ism[0])
+    # print(tracker[0].root.pptree())
+    #
+    # print(tracker[:5][0].root.pptree())
 
     # check number of different linearizations
     first = True
@@ -995,7 +995,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     # validation with freerunner
     inparggetter = symbol2corenctrl
 
-    if _opt_test:
+    if _opt_test and False:
         # test that produced cores consistent with outemb's D
         test_x = psm.matrix[80:85]
         revdin = {v: k for k, v in outemb.D.items()}
