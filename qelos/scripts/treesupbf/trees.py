@@ -216,11 +216,11 @@ class Node(Trackable):
         elif arbitrary in ("heavy", "light"):
             # randomly shuffle children while keeping children with order in positions they were in
             fillthis = [child if child._order is not None else None for child in children]
-            if None in fillthis:
-                pass
             children_without_order = [child for child in children if child._order is None]
             sortreverse = True if arbitrary == "heavy" else False
             children_without_order = sorted(children_without_order, key=lambda x: x.size, reverse=sortreverse)
+            if None in fillthis:
+                pass
             # random.shuffle(children_without_order)
             for i in range(len(fillthis)):
                 if fillthis[i] is None:
