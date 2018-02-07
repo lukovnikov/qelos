@@ -159,6 +159,10 @@ class Node(Trackable):
     def num_children(self):
         return len(self.children)
 
+    @property
+    def size(self):
+        return 1 + sum([child.size for child in self.children])
+
     def __str__(self):  return self.pp()
     def __repr__(self): return self.symbol(with_label=True, with_annotation=True, with_order=True)
 
@@ -196,13 +200,27 @@ class Node(Trackable):
                     fillthis[i] = children_without_order[0]
                     children_without_order = children_without_order[1:]
             children = fillthis
-        elif arbitrary is "alphabetical":
+        elif arbitrary == "alphabetical":
             # randomly shuffle children while keeping children with order in positions they were in
             fillthis = [child if child._order is not None else None for child in children]
             if None in fillthis:
                 pass
             children_without_order = [child for child in children if child._order is None]
             children_without_order = sorted(children_without_order, key=lambda x: x.name)
+            # random.shuffle(children_without_order)
+            for i in range(len(fillthis)):
+                if fillthis[i] is None:
+                    fillthis[i] = children_without_order[0]
+                    children_without_order = children_without_order[1:]
+            children = fillthis
+        elif arbitrary in ("heavy", "light"):
+            # randomly shuffle children while keeping children with order in positions they were in
+            fillthis = [child if child._order is not None else None for child in children]
+            if None in fillthis:
+                pass
+            children_without_order = [child for child in children if child._order is None]
+            sortreverse = True if arbitrary == "heavy" else False
+            children_without_order = sorted(children_without_order, key=lambda x: x.size, reverse=sortreverse)
             # random.shuffle(children_without_order)
             for i in range(len(fillthis)):
                 if fillthis[i] is None:
