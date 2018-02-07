@@ -795,6 +795,179 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
         return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
 
 
+class SimpleParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
+    """ Works with two single-state cells (GRU or CatLSTM).
+        Can be used as a core in ModularDecoderCell
+        ===
+        Maintains a stack of stacks of parent states and symbols,
+        one outer stack for each parent level
+        and one inner stack for parent level parents' states and symbols
+
+        Frat init is always from parent
+    """
+    def __init__(self, emb, cell, branchtransform, **kw):
+        """ * emb is one or two embedders
+            * cell is one reccable cell for fraternal breadth-first generation
+            * branchtransform is (learnable) function that takes the states of cell and ancestral embedding
+                and produces new states for cell"""
+        super(SimpleParentStackCell, self).__init__(**kw)
+        self.state_stacks = None
+        self.symbol_stacks = None
+
+        self._init_frat_states = None
+
+        self.cell = cell
+        self.branchtransform = branchtransform
+
+        if isinstance(emb, tuple):
+            assert (len(emb) == 2)
+            self.ancemb = emb[0]
+            self.fratemb = emb[1]
+        else:
+            self.ancemb = emb
+            self.fratemb = emb
+
+        fratstartsym = self.fratemb.D["<START>"]
+        self.y_f_0 = q.val(torch.LongTensor(1, )).v
+        self.y_f_0.data.fill_(fratstartsym)
+
+    @property
+    def state_spec(self):
+        return self.cell.state_spec
+
+    def reset_state(self):
+        self.cell.reset_state()
+        self.state_stacks = None
+        self.symbol_stacks = None
+        self._init_frat_states = None
+
+    def set_init_states(self, *states):
+        self.cell.set_init_states(*states)
+
+    def read_states_from_cell(self, batsize):
+        frat_states = self.cell.get_states(batsize)
+        return frat_states
+
+    def set_states_of_cells(self, frat_states):
+        self.cell.set_states(*frat_states)
+
+    @property
+    def initialized(self):
+        return self.state_stacks is not None
+
+    def init_all(self, batsize):
+        self.state_stacks =  tuple([[[]] for _ in range(batsize)])
+        self.symbol_stacks = tuple([[[]] for _ in range(batsize)])
+
+    def forward(self, y_tm1, ctrl_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
+        batsize = y_tm1.size(0)
+
+        hf_tm1 = self.read_states_from_cell(batsize)
+        ance_states = zip(*[torch.split(ha_tm1_e, 1, 0) for ha_tm1_e in ha_tm1])
+        ance_symbols = list(torch.split(y_tm1, 1, 0))     # must be overwritten with symbols from stack
+        frat_states = zip(*[torch.split(hf_tm1_e, 1, 0) for hf_tm1_e in hf_tm1])
+        frat_symbols = list(torch.split(y_tm1, 1, 0))  # when y_tm1 is root, initial frat symbols must be <START>
+        # !!: overriding frat line can be more efficient
+
+        if not self.initialized:
+            self.init_all(batsize)          # initial parent state will be set because first symbol is a root*LS --> ha_tm1 (initial ancestral part of rec states) is pushed onto stack
+            # set previous frat symbols to init frat symbols
+            ha_tm1 = [q.var(torch.zeros(hf_tm1_e.size())).cuda(hf_tm1_e).v
+                      for hf_tm1_e in hf_tm1]
+            # TODO: push into stack
+            # ASSUMES: y_0 is <START> or at least has siblings and no children
+            assert((ctrl_tm1 - 2).norm().cpu().data[0] == 0)  # all controls are initially *NC
+
+        # mask used to mix between parent states and previous frat states to get actual frat states
+        mixmask = q.var(torch.zeros(y_tm1.size(0))).cuda(y_tm1).v
+
+        # region update stacks
+        for i in range(ctrl_tm1.size(0)):
+            ctrl = ctrl_tm1.data[i]
+            state_stack = self.state_stacks[i]
+            symbol_stack = self.symbol_stacks[i]
+            if ctrl == 0 or len(state_stack) == 0:       # masked
+                continue
+            else:
+                pass
+
+            previous_was_last = ctrl == 3 or ctrl == 4
+            previous_was_leaf = ctrl == 2 or ctrl == 4
+
+            if not previous_was_leaf:   # no children --> ancestral data not queued
+                                        # --> queue ancestral data for next level deeper
+                state_stack[-1].append(ance_states[i])
+                symbol_stack[-1].append(y_tm1[i])
+
+            if previous_was_last:
+                mixmask.data[i] = 1.
+                # pop parent queue
+                if len(state_stack) > 1:    # should only be false at init
+                    del state_stack[-2][0]
+                    del symbol_stack[-2][0]
+                    # pop stack until empty or next non-finished
+                    if len(state_stack[-2]) == 0:   # all parents have been consumed
+                        del state_stack[-2]
+                        del symbol_stack[-2]
+                # pop or push last stack
+                if len(state_stack) < 2 or len(state_stack[-2]) == 0:
+                    if len(state_stack) == 0:
+                        print("empty stack")
+                    if len(state_stack[-1]) == 0:   # no next depth level needed -> terminate
+                        del state_stack[-1]
+                        del symbol_stack[-1]
+                    else:
+                        state_stack.append([])    # new depth level
+                        symbol_stack.append([])
+
+                # reset frat symbol
+                frat_symbols[i] = self.y_f_0
+        # endregion
+
+        # region make cell update
+        for i, state_stack, symbol_stack in zip(range(len(self.state_stacks)),
+                                                self.state_stacks, self.symbol_stacks):
+            # get
+            if len(state_stack) > 0:
+                ance_states[i] = state_stack[-2][0]
+                ance_symbols[i] = symbol_stack[-2][0]
+            else:       # terminated
+                ance_states[i] = [q.var(torch.zeros(ance_states_i_e.size())).cuda(ance_states_i_e).v for ance_states_i_e in ance_states[i]]
+                frat_states[i] = [q.var(torch.zeros(frat_states_i_e.size())).cuda(frat_states_i_e).v for frat_states_i_e in frat_states[i]]
+                ance_symbols[i] = q.var(torch.zeros(ance_symbols[i].size()).long()).cuda(ance_symbols[i]).v
+                frat_symbols[i] = q.var(torch.zeros(frat_symbols[i].size()).long()).cuda(frat_symbols[i]).v
+        # ance_states = [state_stack[-2][0] for state_stack in self.state_stacks]
+        # ance_symbols = [symbol_stack[-2][0] for symbol_stack in self.symbol_stacks]
+
+        ance_states = [torch.cat(l, 0) for l in zip(*ance_states)]
+        frat_states = [torch.cat(l, 0) for l in zip(*frat_states)]
+
+        self.set_states_of_cells(ance_states, frat_states)
+
+        y_a_tm1 = torch.cat(ance_symbols, 0)
+        y_f_tm1 = torch.cat(frat_symbols, 0)
+        y_a_tm1_emb, _ = self.ancemb(y_a_tm1)
+        y_f_tm1_emb, _ = self.fratemb(y_f_tm1)
+
+        if len(self.cells) == 2:
+            cellinprouterout = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            if len(cellinprouterout) == 2:
+                x_a_t, x_f_t = cellinprouterout
+            else:
+                x_a_t, x_f_t = cellinprouterout, cellinprouterout
+            ance_cell_out = self.cells[0].forward(x_a_t, t=t, **kw)
+            frat_cell_out = self.cells[1].forward(x_f_t, t=t, **kw)
+            # cell_out = torch.cat([ance_cell_out, frat_cell_out], 1)
+            cell_out = q.intercat([ance_cell_out, frat_cell_out])   # in case split attention is used later
+            # TODO: check that intercatted is not fed back in here again
+        else:
+            x_t = self.cell_inp_router(y_a_tm1_emb, y_f_tm1_emb, ctx_t)
+            cell_out = self.cells[0].forward(x_t, t=t, **kw)
+        # endregion
+        return cell_out, {"t": t, "x_t_emb": torch.cat([y_a_tm1_emb, y_f_tm1_emb], 1), "ctx_t": ctx_t, "mask": outmask_t}
+
+
+
 class DynamicOracleRunner(q.DecoderRunner):
     """
     Runs a decoder using the provided dynamic tracker.

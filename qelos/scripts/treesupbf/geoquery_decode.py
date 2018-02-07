@@ -1239,8 +1239,8 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
         assert (Node.parse(treestring) == tree)
         psm.add("<ROOT> " + treestring)
     psm.finalize()
-    print(ism[0])
-    print(psm[0])
+    print(ism[80])
+    print(psm[80])
 
     # region MODEL --------------------------------
     # EMBEDDINGS ----------------------------------

@@ -200,13 +200,14 @@ class Node(Trackable):
                     fillthis[i] = children_without_order[0]
                     children_without_order = children_without_order[1:]
             children = fillthis
-        elif arbitrary == "alphabetical":
+        elif arbitrary in ("alphabetical", "psychical", "omegal"):    # psychical and omegal are both reverse alphabetical
             # randomly shuffle children while keeping children with order in positions they were in
             fillthis = [child if child._order is not None else None for child in children]
             if None in fillthis:
                 pass
             children_without_order = [child for child in children if child._order is None]
-            children_without_order = sorted(children_without_order, key=lambda x: x.name)
+            sortreverse = True if arbitrary in ("psychical", "omegal") else False
+            children_without_order = sorted(children_without_order, key=lambda x: x.name, reverse=sortreverse)
             # random.shuffle(children_without_order)
             for i in range(len(fillthis)):
                 if fillthis[i] is None:
