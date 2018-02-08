@@ -1340,22 +1340,24 @@ def headify_tree(x, headtoken="<HEAD>"):
 
 
 def unheadify_tree(x, headtoken="<HEAD>"):
+    """ unheadifies tree """
     if x.num_children > 0:
-        if x.name != headtoken:
-            raise q.SumTingWongException("first child must be head token")
-        original_head = x.children[0]
+        if x.name == headtoken:
+            original_head = x.children[0]
 
-        # assert(original_head.order == 0)
-        original_children = x.children[1:]
-        unheadified_children = [unheadify_tree(child) for child in original_children]
-        minorder = np.infty
-        for unheadified_child in unheadified_children:
-            if unheadified_child.order is not None:
-                unheadified_child.order -= 1
-                minorder = min(minorder, unheadified_child.order)
-        assert(minorder == 0 or minorder == np.infty)
-        new_head = Node(original_head.name, label=original_head.label, order=x.order, children=unheadified_children)
-        return new_head
+            # assert(original_head.order == 0)
+            original_children = x.children[1:]
+            unheadified_children = [unheadify_tree(child, headtoken=headtoken) for child in original_children]
+            minorder = np.infty
+            for unheadified_child in unheadified_children:
+                if unheadified_child.order is not None:
+                    unheadified_child.order -= 1
+                    minorder = min(minorder, unheadified_child.order)
+            assert(minorder == 0 or minorder == np.infty)
+            new_head = Node(original_head.name, label=original_head.label, order=x.order, children=unheadified_children)
+            return new_head
+        else:
+            raise q.SumTingWongException("first child must be head token")
     else:
         return x
 
@@ -1369,7 +1371,9 @@ def test_headify():
     print(headifiedtree.pp())
     print(headifiedtree.pptree())
     unheadifiedtree = unheadify_tree(headifiedtree)
+    unheadifiedoriginaltree = unheadify_tree(originaltree)
     assert(originaltree == unheadifiedtree)
+    assert(originaltree == unheadifiedoriginaltree)
 
 
 if __name__ == "__main__":

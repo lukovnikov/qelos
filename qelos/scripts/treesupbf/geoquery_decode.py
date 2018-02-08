@@ -1043,13 +1043,11 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                          #q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0))
-    treetransf = lambda x: x
-    if headify:
-        treetransf = lambda x: unheadify_tree(x, headtoken="<RARE>")
+
     validlosses = q.lossarray(#q.SeqCrossEntropyLoss(ignore_index=0),
                               q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                               q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: treetransf(Node.parse(tracker.pp(x)))))
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
