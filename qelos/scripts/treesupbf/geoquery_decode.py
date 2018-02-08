@@ -823,7 +823,8 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                              cuda=False, gpu=0, splitseed=14567,
                              useattention=True, linoutmode="normal",
                              arbitrary=False, ordermode="default",
-                             validontest=False, tag="none", encskip=False, headify=False):
+                             validontest=False, tag="none", encskip=False,
+                             branchtmode="lstm", headify=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2simpletree_tf")
     logger.save_settings(**settings)
@@ -897,9 +898,9 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
 
     btlayer = q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout)
 
-    class BranchTransform(torch.nn.Module):
+    class BranchTransformLSTM(torch.nn.Module):
         def __init__(self):
-            super(BranchTransform, self).__init__()
+            super(BranchTransformLSTM, self).__init__()
             self.layer = btlayer
 
         def forward(self, yaemb, hatm1, hftm1):
@@ -921,7 +922,10 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             out = hatm1[0] * y + hftm1[0] * (1 - y)
             return [out]
 
-    branchtransform = BranchTransformGate()
+    if branchtmode == "gate":
+        branchtransform = BranchTransformGate()
+    else:
+        branchtransform = BranchTransformLSTM()
 
     if useattention:
         tt.msg("Attention: YES!")
