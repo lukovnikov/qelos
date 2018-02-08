@@ -912,7 +912,7 @@ class SimpleParentStackCell(RecStatefulContainer):      # breadth-first tree dec
                     symbol_stack[-1].append(y_tm1[i])
 
                 if previous_was_last:
-                    mixmask.data[i] = 1.      # TODO: uncomment
+                    mixmask.data[i] = 1.
                     # pop parent queue
                     if len(state_stack) > 1:    # should only be false at init
                         del state_stack[-2][0]

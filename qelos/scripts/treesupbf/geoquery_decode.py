@@ -581,7 +581,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=14567,
                              decodermode="single", useattention=True, linoutmode="normal",
-                             validontest=False, tag="none"):
+                             validontest=False, tag="none", encskip=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2tree_tf")
     logger.save_settings(**settings)
@@ -596,7 +596,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, numtrain = load_data_trees(reverse_input=False)
+    ism, tracker, numtrain = load_data_trees(reverse_input=True)
     eids = np.arange(0, len(ism), dtype="int64")
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
@@ -634,10 +634,11 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
         q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
-    ).to_layer().return_final().return_mask().reverse()
+    ).to_layer().return_final().return_mask()
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
+        q.wire((-1, 0), (-1, 1), (-1, 2), (-2, 0))
     )
     # endregion
 
@@ -680,7 +681,7 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             self.translin2 = translin2
 
         def forward(self, inpseq, outinpseq, ctrlseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, _ = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
@@ -703,7 +704,9 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
             self.translin2 = translin2
 
         def forward(self, inpseq, outinpseq, ctrlseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, allinpembs = self.encoder(inpseq)
+            if encskip:
+                all_encoding = all_encoding + allinpembs
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             if decodermode == "double":
@@ -820,7 +823,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                              cuda=False, gpu=0, splitseed=14567,
                              useattention=True, linoutmode="normal",
                              arbitrary=False, ordermode="default",
-                             validontest=False, tag="none"):
+                             validontest=False, tag="none", encskip=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2simpletree_tf")
     logger.save_settings(**settings)
@@ -835,7 +838,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, numtrain = load_data_trees(reverse_input=False)
+    ism, tracker, numtrain = load_data_trees(reverse_input=True)
     eids = np.arange(0, len(ism), dtype="int64")
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
@@ -879,10 +882,11 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
         q.CatLSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
-    ).to_layer().return_final().return_mask().reverse()
+    ).to_layer().return_final().return_mask()
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
+        q.wire((-1, 0), (-1, 1), (-1, 2), (-2, 0))
     )
     # endregion
 
@@ -930,7 +934,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, _ = self.encoder(inpseq)
             # self.decoder.block.decoder_top.set_ctx(final_encoding)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
@@ -946,7 +950,9 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
             self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outinpseq, ctrlseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, allinpembs = self.encoder(inpseq)
+            if encskip:
+                all_encoding = all_encoding + allinpembs
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
             self.decoder.set_init_states(*initstates)
@@ -1176,7 +1182,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
                              embdim=-1, edropout=0., oraclemode=OPT_ORACLEMODE,
                              inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                              cuda=False, gpu=0, splitseed=1, useattention=True,
-                             validontest=False, tag="none"):
+                             validontest=False, tag="none", encskip=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_oracle")
     logger.save_settings(**settings)
@@ -1189,7 +1195,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ttt = q.ticktock("test")
-    ism, tracker, numtrain = load_data_trees(reverse_input=False)
+    ism, tracker, numtrain = load_data_trees(reverse_input=True)
     eids = np.arange(0, len(ism), dtype="int64")
     psm = q.StringMatrix()
     psm.set_dictionary(tracker.D)
@@ -1222,10 +1228,11 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
     encoderstack = q.RecStack(
         q.wire((0, 0), mask_t=(0, {"mask_t"}), t=(0, {"t"})),
         q.LSTMCell(inpembdim, innerdim, dropout_in=dropout, dropout_rec=None),
-    ).to_layer().return_final().return_mask().reverse()
+    ).to_layer().return_final().return_mask()
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
+        q.wire((-1, 0), (-1, 1), (-1, 2), (-2, 0))
     )
     # endregion
 
@@ -1264,7 +1271,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
             self.maxtime = maxtime
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
-            final_encoding, all_encoding, mask = self.enc(inpseq)
+            final_encoding, all_encoding, mask, _ = self.enc(inpseq)
             maxtime = self.maxtime if maxtime is None else maxtime
             # self.decoder.set_init_states(None, final_encoding)
             encoderstates = self.enc.layers[1].cell.get_states(inpseq.size(0))
@@ -1284,7 +1291,9 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
             self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, decstarts, eids=None, maxtime=None):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, allinpembs = self.encoder(inpseq)
+            if encskip:
+                all_encoding = all_encoding + allinpembs
             maxtime = self.maxtime if maxtime is None else maxtime
             # self.decoder.set_init_states(None, final_encoding)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
@@ -1444,7 +1453,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                      inpembdim=OPT_INPEMBDIM, outembdim=OPT_OUTEMBDIM, innerdim=OPT_INNERDIM,
                      cuda=False, gpu=0, splitseed=1, useattention=True, arbitrary=False,
                      ordermode="default",
-                     validontest=False, tag="none"):
+                     validontest=False, tag="none", encskip=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2s_tf")
     logger.save_settings(**settings)
@@ -1501,6 +1510,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
     encoder = q.RecurrentStack(
         inpemb,
         encoderstack,
+        q.wire((-1, 0), (-1, 1), (-1, 2), (-2, 0))
     )
     # endregion
 
@@ -1536,7 +1546,7 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
             self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outseq):
-            final_encoding, all_encoding, mask = self.enc(inpseq)
+            final_encoding, all_encoding, mask, _ = self.enc(inpseq)
             # self.decoder.set_init_states(None, final_encoding)
             encoderstates = self.enc.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
@@ -1553,7 +1563,9 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
             self.dropout = q.Dropout(edropout)
 
         def forward(self, inpseq, outseq):
-            final_encoding, all_encoding, mask = self.encoder(inpseq)
+            final_encoding, all_encoding, mask, allinpembs = self.encoder(inpseq)
+            if encskip:
+                all_encoding = all_encoding + allinpembs
             # self.decoder.set_init_states(None, final_encoding)
             encoderstates = self.encoder.layers[1].cell.get_states(inpseq.size(0))
             initstates = [self.dropout(initstate) for initstate in encoderstates]
