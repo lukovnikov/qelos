@@ -871,7 +871,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
         linout, _symbols2cores, _symbols2ctrl = make_multilinout(linoutdim, grouptracker=tracker, tie_weights=False, ttt=ttt)
         assert(np.all(symbols2cores == _symbols2cores) and np.all(symbols2ctrl == _symbols2ctrl))
 
-    outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
+    # outemb = q.WordEmb(outembdim, worddic=tracker.D_in)
     # endregion
 
     # region ENCODER -------------------------------------
@@ -984,13 +984,13 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     def symbol2corenctrl(s):
         _cores = torch.index_select(symbols2cores, 0, s)
         _ctrl = torch.index_select(symbols2ctrl, 0, s)
-        return _cores, _ctrl
+        return s, _ctrl
 
     def inbtf(a, b, g):
         bflat = b.view(-1)
         _cores, _ctrl = symbol2corenctrl(bflat)
         _cores, _ctrl = _cores.view(b.size()), _ctrl.view(b.size())
-        return a, _cores, _ctrl, g
+        return a, b, _ctrl, g
 
     # validation with freerunner
     inparggetter = symbol2corenctrl

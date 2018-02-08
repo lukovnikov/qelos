@@ -320,7 +320,7 @@ class Softmax(nn.Module):
             mask = q.batchablesparse2densemask(mask).float()
             if maskshape is not None:
                 maskshape = maskshape[:-1] + (mask.size(-1),)
-        x = x / temperature
+        x = x / q.v(temperature)
         if mask is not None:
             x = x + torch.log(mask)
         # if mask is None:
