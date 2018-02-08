@@ -1,7 +1,7 @@
 import torch
 import qelos as q
 import numpy as np
-from qelos.scripts.treesupbf.trees import Node, GroupTracker
+from qelos.scripts.treesupbf.trees import Node, GroupTracker, headify_tree, unheadify_tree
 from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 from qelos.furnn import ParentStackCell
 import random
@@ -823,7 +823,7 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                              cuda=False, gpu=0, splitseed=14567,
                              useattention=True, linoutmode="normal",
                              arbitrary=False, ordermode="default",
-                             validontest=False, tag="none", encskip=False):
+                             validontest=False, tag="none", encskip=False, headify=False):
     settings = locals().copy()
     logger = q.Logger(prefix="geoquery_s2simpletree_tf")
     logger.save_settings(**settings)
@@ -850,6 +850,8 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
         _ordermode = arbitrary
 
     for tree in tracker.trackables:
+        if headify:
+            tree = headify_tree(tree, headtoken="<RARE>")
         treestring = tree.pp(arbitrary=_ordermode, _remove_order=True)
         assert(Node.parse(treestring) == tree)
         psm.add("<START> " + treestring)
@@ -893,20 +895,33 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     # region DECODER -------------------------------------
     layer = q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout)
 
-    btlayer = q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout, dropout_rec=recdropout)
+    btlayer = q.CatLSTMCell(outembdim, innerdim, dropout_in=dropout)
 
     class BranchTransform(torch.nn.Module):
         def __init__(self):
             super(BranchTransform, self).__init__()
             self.layer = btlayer
 
-        def forward(self, yaemb, hftm1):
-            self.layer.set_states(*hftm1)
+        def forward(self, yaemb, hatm1, hftm1):
+            self.layer.set_states(*hatm1)
             self.layer(yaemb)
             retstates = self.layer.get_states(yaemb.size(0))
             return retstates
 
-    branchtransform = BranchTransform()
+    gate = q.Forward(innerdim * 4 + outembdim, innerdim * 2, "sigmoid")
+
+    class BranchTransformGate(torch.nn.Module):
+        def __init__(self):
+            super(BranchTransformGate, self).__init__()
+            self.gate = gate
+
+        def forward(self, yaemb, hatm1, hftm1):
+            x = torch.cat([yaemb, hatm1[0], hftm1[0]], 1)
+            y = self.gate(x)
+            out = hatm1[0] * y + hftm1[0] * (1 - y)
+            return [out]
+
+    branchtransform = BranchTransformGate()
 
     if useattention:
         tt.msg("Attention: YES!")
@@ -1028,10 +1043,13 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
                          #q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0))
+    treetransf = lambda x: x
+    if headify:
+        treetransf = lambda x: unheadify_tree(x, headtoken="<RARE>")
     validlosses = q.lossarray(#q.SeqCrossEntropyLoss(ignore_index=0),
                               q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                               q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: treetransf(Node.parse(tracker.pp(x)))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)

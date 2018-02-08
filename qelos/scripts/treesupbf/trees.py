@@ -34,6 +34,7 @@ class Trackable(object):
 
 
 class Node(Trackable):
+    """ !!! If mixed order children, children order is ordered children first, then unordered ones"""
     leaf_suffix = "NC"
     last_suffix = "LS"
     none_symbol = "<NONE>"
@@ -1321,8 +1322,59 @@ def test_treegen():
     print(outdic["N2"], outdic["N2*NC"], outdic["N2*LS"], outdic["N2*NC*LS"])
 
 
+def headify_tree(x, headtoken="<HEAD>"):
+    """ replaces every head with headtoken and pushes down original head as first sibling """
+    if x.num_children > 0:  # has children --> headify
+        headified_children = [headify_tree(child, headtoken=headtoken) for child in x.children]
+        minorder = 0
+        for headified_child in headified_children:
+            if headified_child.order is not None:
+                minorder = min(minorder, headified_child.order)
+                headified_child.order = headified_child.order + 1
+        assert(minorder == 0)
+        x_aschild = Node(x.name, label=x._label, order=0)
+        x_replacement = Node(headtoken, order=x._order, children=[x_aschild]+headified_children)
+        return x_replacement
+    else:
+        return x
+
+
+def unheadify_tree(x, headtoken="<HEAD>"):
+    if x.num_children > 0:
+        if x.name != headtoken:
+            raise q.SumTingWongException("first child must be head token")
+        original_head = x.children[0]
+
+        # assert(original_head.order == 0)
+        original_children = x.children[1:]
+        unheadified_children = [unheadify_tree(child) for child in original_children]
+        minorder = np.infty
+        for unheadified_child in unheadified_children:
+            if unheadified_child.order is not None:
+                unheadified_child.order -= 1
+                minorder = min(minorder, unheadified_child.order)
+        assert(minorder == 0 or minorder == np.infty)
+        new_head = Node(original_head.name, label=original_head.label, order=x.order, children=unheadified_children)
+        return new_head
+    else:
+        return x
+
+
+def test_headify():
+    treestr = "BIN*LS BIN1 BIN2*LS UNI UNI*LS LEAF1*NC LEAF2*NC*LS LEAF3*NC*LS LEAF4*NC*LS BIN LEAF <STOP>"
+    originaltree = Node.parse(treestr)
+    print(originaltree.pp())
+    print(originaltree.pptree())
+    headifiedtree = headify_tree(originaltree)
+    print(headifiedtree.pp())
+    print(headifiedtree.pptree())
+    unheadifiedtree = unheadify_tree(headifiedtree)
+    assert(originaltree == unheadifiedtree)
+
+
 if __name__ == "__main__":
-    run_node()
+    # run_node()
     # test_treegen()
     # test_overcomplete_trees()
     # q.argprun(run_unique_node)
+    test_headify()

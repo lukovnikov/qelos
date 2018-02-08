@@ -808,7 +808,7 @@ class SimpleParentStackCell(RecStatefulContainer):      # breadth-first tree dec
     def __init__(self, emb, cell, branchtransform, **kw):
         """ * emb is one or two embedders
             * cell is one reccable cell for fraternal breadth-first generation
-            * branchtransform is (learnable) function that takes the states of cell and ancestral embedding
+            * branchtransform is (learnable) function that takes the parent states of cell, previous states of cell and ancestral embedding
                 and produces new states for cell"""
         super(SimpleParentStackCell, self).__init__(**kw)
         self.state_stacks = None
@@ -955,7 +955,7 @@ class SimpleParentStackCell(RecStatefulContainer):      # breadth-first tree dec
         ha_tm1 = [torch.cat(l, 0) for l in zip(*ance_states)]
 
         # apply parent transform and mixmask to get new frat states based on ance states and frat states
-        ha_tm1_transformed = self.branchtransform(y_a_tm1_emb, ha_tm1)
+        ha_tm1_transformed = self.branchtransform(y_a_tm1_emb, ha_tm1, hf_tm1)
         mixmask = mixmask.unsqueeze(1)
         hf_tm1_mix = [mixmask * ha_tm1_transformed_i + (1 - mixmask) * hf_tm1_i
                       for ha_tm1_transformed_i, hf_tm1_i in zip(ha_tm1_transformed, hf_tm1)]
