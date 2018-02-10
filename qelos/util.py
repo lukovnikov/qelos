@@ -296,6 +296,7 @@ class StringMatrix():
         self._dictionary.update(d)
         self._next_available_id = max(self._dictionary.values()) + 1
         self._wordcounts_original = dict(zip(list(self._dictionary.keys()), [0]*len(self._dictionary)))
+        self._rd = {v: k for k, v in self._dictionary.items()}
 
     @property
     def RD(self):
@@ -381,7 +382,7 @@ class StringMatrix():
             return None
 
 
-def tokenize(s, preserve_patterns=None):
+def tokenize(s, preserve_patterns=None, extrasubs=True):
     if not isinstance(s, unicode):
         s = s.decode("utf-8")
     s = unidecode.unidecode(s)
@@ -397,7 +398,8 @@ def tokenize(s, preserve_patterns=None):
             return repl
         for preserve_pattern in preserve_patterns:
             s = re.sub(preserve_pattern, _tokenize_preserve_repl, s)
-    s = re.sub("[-_\{\}/]", " ", s)
+    if extrasubs:
+        s = re.sub("[-_\{\}/]", " ", s)
     s = s.lower()
     tokens = nltk.word_tokenize(s)
     if repldic is not None:
