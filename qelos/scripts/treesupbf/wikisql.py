@@ -209,7 +209,7 @@ def create_mats(p="../../../datasets/wikisql/"):
             uwidmat[i, j] = gwidtouwid[rD[k]]
         gtoudics.append(gwidtouwid)
 
-    uwidD = dict(zip(["<MASK>"] + ["UWID{}".format(i+1) for i in range(len(pedics)-1)], range(len(pedics))))
+    uwidD = dict(zip(["<MASK>"] + ["UWID{}".format(i+1) for i in range(pedics.shape[1]-1)], range(pedics.shape[1])))
 
     osm = q.StringMatrix()
     osm.tokenize = lambda x: x.split()
@@ -401,6 +401,47 @@ class DynamicWordLinout(WordLinoutBase):
         return ret, rmask
 
 
+class BFLOL(DynamicWordLinout):
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None):
+        super(BFLOL, self).__init__(computer=computer, worddic=worddic)
+        self.inppos2uwid = None
+        self.inpenc = None
+        self.ismD = ismD
+        self.inp_trans = inp_trans
+
+    def prepare(self, inpseq, inpenc, *xdata):
+        super(BFLOL, self).prepare(*xdata)
+        inppos2uwid = q.var(torch.zeros(inpseq.size(0), inpseq.size(1), len(self.ismD))).cuda(inpseq).v
+        inppos2uwid.data.scatter_(2, inpseq.unsqueeze(2).data, 1)
+        inppos2uwid.data[:, :, 0] = 0
+        # inppos2uwid = torch.log(inppos2uwid)+1
+        self.inppos2uwid = inppos2uwid
+        self.inpenc = inpenc
+
+    def _forward(self, x):
+        ret, rmask = super(BFLOL, self)._forward(x)
+
+        xshape = x.size()
+        if len(xshape) == 2:
+            x = x.unsqueeze(1)
+        scores = torch.bmm(x, self.inpenc.transpose(2, 1))
+        offset = (torch.min(scores) - 1000).data[0]
+        umask = (self.inppos2uwid == 0).float()
+        uwid_scores = scores.transpose(2, 1) * self.inppos2uwid
+        uwid_scores = uwid_scores + offset * umask
+        uwid_scores, _ = torch.max(uwid_scores, 1)
+        uwid_scores_mask = (self.inppos2uwid.sum(1) > 0).float()        # (batsize, #uwid)
+        sel_uwid_scores = uwid_scores.index_select(1, self.inp_trans)
+        sel_uwid_scores_mask = uwid_scores_mask.index_select(1, self.inp_trans)
+        # the zeros in seluwid mask for those uwids should already be there in rmask
+        rret = ret * (1 - sel_uwid_scores_mask) + sel_uwid_scores_mask * sel_uwid_scores
+        if len(xshape) == 2:
+            rret = rret.squeeze(1)
+        # assert(((rret != 0.).float() - rmask.float()).norm().cpu().data[0] == 0)
+        return rret, rmask
+
+
+
 def make_inp_emb(dim, ism, psm):
     _baseemb = q.WordEmb(dim=dim, worddic=psm.D)
     gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
@@ -414,7 +455,7 @@ def make_inp_emb(dim, ism, psm):
         def forward(self, x, data):
             transids = torch.gather(data, 1, x)
             # _pp = psm.pp(transids[:5].cpu().data.numpy())
-            _embs, mask = self.baseemb(transids.unsqueeze(0).repeat(data.size(0), 1))
+            _embs, mask = self.baseemb(transids)
             return _embs
 
     emb = DynamicWordEmb(computer=Computer(), worddic=ism.D)
@@ -524,7 +565,7 @@ def build_subdics(osm):
     return synD, inpD, colD, syn_trans, inp_trans, col_trans
 
 
-def make_out_vec(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, what=None):
+def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
     # base embedder for input tokens        # TODO might want to think about reusing encoding
     if inpbaseemb is None:
         _baseemb = q.WordEmb(dim=dim, worddic=psm.D)
@@ -543,17 +584,20 @@ def make_out_vec(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, what=None
 
     colencoder = ColnameEncoder(dim, colbaseemb, nocolid=csm.D["nonecolumnnonecolumnnonecolumn"])
     computer = OutVecComputer(syn_emb, syn_trans, inpbaseemb, inp_trans, colencoder, col_trans, osm.D)
-
-    emb = what(computer=computer, worddic=osm.D)
-    return emb
+    return computer
 
 
 def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
-    return make_out_vec(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, what=DynamicWordEmb)
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb)
+    return DynamicWordEmb(computer=comp, worddic=osm.D)
 
 
-def make_out_lin(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
-    return make_out_vec(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, what=DynamicWordLinout)
+def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
+    # TODO: replace probabilities for words using proper Pointer network thing
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb)
+    inp_trans = comp.inp_trans      # to index
+    out = BFLOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
+    return out
 
 # endregion
 
@@ -577,7 +621,7 @@ def run_seq2seq_tf(lr=0.1, batsize=5, epochs=100,
 
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm)
     outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb)
-    outlin = make_out_lin(outlindim, osm, psm, csm)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm)
 
     class DummyModel(torch.nn.Module):
         def __init__(self):
@@ -588,13 +632,17 @@ def run_seq2seq_tf(lr=0.1, batsize=5, epochs=100,
 
         def forward(self, inpseq, outseq, inpseqmaps, colnames):
             self.inpemb.prepare(inpseqmaps)
+            _inpembs, _inpmask = self.inpemb(inpseq)
+            _inpenc = _inpembs      # TODO encoder
+
             self.outemb.prepare(inpseqmaps, colnames)
-            self.outlin.prepare(inpseqmaps, colnames)
+            self.outlin.prepare(inpseq, _inpenc, inpseqmaps, colnames)
             _outembs = self.outemb(outseq)
 
             testvec = q.var(torch.randn(5, outlindim)).cuda(inpseq).v
 
             test_scores = self.outlin(testvec)
+            return None
 
 
 
