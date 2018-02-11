@@ -4,7 +4,9 @@ from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \
     BidirLSTMLayer, Recurrent, Reccable, PositionwiseForward, \
-    TimesharedDropout, CatLSTMCell, ReccableLambda, RecurrentLambda, RecDropout
+    TimesharedDropout, CatLSTMCell, ReccableLambda, RecurrentLambda, RecDropout, \
+    FastLSTMEncoderLayer, FastGRUEncoder, FastGRUEncoderLayer, FastLSTMEncoder, \
+    FastestGRUEncoder, FastestGRUEncoderLayer, FastestLSTMEncoder, FastestLSTMEncoderLayer
 
 from qelos.loss import SeqNLLLoss, SeqAccuracy, SeqElemAccuracy, \
     RankingLoss, SeqRankingLoss, CrossEntropyLoss, \
