@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import codecs
 import json
 import pickle as pkl
@@ -10,6 +11,9 @@ import torch
 
 import qelos as q
 from qelos.scripts.treesupbf.trees import Node
+from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
+import random
+from unidecode import unidecode
 
 
 # region DATA
@@ -216,7 +220,7 @@ def create_mats(p="../../../datasets/wikisql/"):
 
     uwidD = dict(zip(["<MASK>"] + ["UWID{}".format(i+1) for i in range(pedics.shape[1]-1)], range(pedics.shape[1])))
 
-    osm = q.StringMatrix()
+    osm = q.StringMatrix(indicate_start=True, indicate_end=True)
     osm.tokenize = lambda x: x.split()
     i = 0
     for _, query, columns in trainlines+devlines+testlines:
@@ -240,10 +244,15 @@ def create_mats(p="../../../datasets/wikisql/"):
             j += 1
         i += 1
 
-    csm = q.StringMatrix()
-    for columnname in uniquecolnames.keys():
+    csm = q.StringMatrix(indicate_start=False, indicate_end=False)
+    for i, columnname in enumerate(uniquecolnames.keys()):
+        if columnname == u'№':
+            columnname = u'number'
         csm.add(columnname)
     csm.finalize()
+    # idx 3986 is zero because it's u'№' and unidecode makes it empty string, has 30+ occurrences !!! --> REPLACE
+
+    assert(len(np.argwhere(csm.matrix[:, 0] == 0)) == 0)
 
     with open(p+"matcache.mats", "w") as f:
         np.savez(f, ism=uwidmat, osm=osm.matrix, csm=csm.matrix, pedics=pedics, e2cn=e2cn)
@@ -361,13 +370,14 @@ class DynamicWordEmb(WordEmbBase):
 
 
 class DynamicWordLinout(WordLinoutBase):
-    def __init__(self, computer=None, worddic=None):
+    def __init__(self, computer=None, worddic=None, selfsm=True):
         super(DynamicWordLinout, self).__init__(worddic)
         self.computer = computer
         maskid = worddic[self.masktoken] if self.masktoken in worddic else None
         self.maskid = maskid
         self.outdim = max(worddic.values()) + 1
         self.saved_data = None
+        self.sm = q.LogSoftmax() if selfsm else None
 
     def prepare(self, *xdata):
         assert(isinstance(self.computer, DynamicVecPreparer))
@@ -386,6 +396,8 @@ class DynamicWordLinout(WordLinoutBase):
                 ret = ret + torch.log(mask.float())
             else:
                 ret = ret * mask.float()
+        if self.sm is not None:
+            ret = self.sm(ret)
         return ret
 
     def _forward(self, x):
@@ -430,12 +442,13 @@ class BFLOL(DynamicWordLinout):
         if len(xshape) == 2:
             x = x.unsqueeze(1)
         scores = torch.bmm(x, self.inpenc.transpose(2, 1))
+        inppos2uwid = self.inppos2uwid[:, :scores.size(-1), :]      # in case input matrix shrank because of seq packing
         offset = (torch.min(scores) - 1000).data[0]
-        umask = (self.inppos2uwid == 0).float()
-        uwid_scores = scores.transpose(2, 1) * self.inppos2uwid
+        umask = (inppos2uwid == 0).float()
+        uwid_scores = scores.transpose(2, 1) * inppos2uwid
         uwid_scores = uwid_scores + offset * umask
         uwid_scores, _ = torch.max(uwid_scores, 1)
-        uwid_scores_mask = (self.inppos2uwid.sum(1) > 0).float()        # (batsize, #uwid)
+        uwid_scores_mask = (inppos2uwid.sum(1) > 0).float()        # (batsize, #uwid)
         sel_uwid_scores = uwid_scores.index_select(1, self.inp_trans)
         sel_uwid_scores_mask = uwid_scores_mask.index_select(1, self.inp_trans)
         # the zeros in seluwid mask for those uwids should already be there in rmask
@@ -446,11 +459,11 @@ class BFLOL(DynamicWordLinout):
         return rret, rmask
 
 
-
-def make_inp_emb(dim, ism, psm):
-    _baseemb = q.WordEmb(dim=dim, worddic=psm.D)
-    gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
-    baseemb = _baseemb.override(gloveemb)
+def make_inp_emb(dim, ism, psm, useglove=True):
+    baseemb = q.WordEmb(dim=dim, worddic=psm.D)
+    if useglove:
+        gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
+        baseemb = baseemb.override(gloveemb)
 
     class Computer(DynamicVecComputer):
         def __init__(self):
@@ -534,7 +547,7 @@ class OutVecComputer(DynamicVecPreparer):
 
         # _col_mask = (x > 0).float() - _inp_mask.float() - _syn_mask.float()
 
-        ret = _syn_embs * _syn_mask.float().unsqueeze(2) \
+        ret =   _syn_embs * _syn_mask.float().unsqueeze(2) \
               + _inp_embs * _inp_mask.float().unsqueeze(2) \
               + _col_embs * _col_mask.float().unsqueeze(2)
 
@@ -543,7 +556,7 @@ class OutVecComputer(DynamicVecPreparer):
 
 
 def build_subdics(osm):
-    # split dictionary for syntax, col names and input tokens
+    # split dictionary for SQL syntax, col names and input tokens
     synD = {"<MASK>": 0}
     colD = {}
     inpD = {"<MASK>": 0}
@@ -570,18 +583,20 @@ def build_subdics(osm):
     return synD, inpD, colD, syn_trans, inp_trans, col_trans
 
 
-def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
+def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
     # base embedder for input tokens        # TODO might want to think about reusing encoding
     if inpbaseemb is None:
-        _baseemb = q.WordEmb(dim=dim, worddic=psm.D)
-        gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
-        inpbaseemb = _baseemb.override(gloveemb)
+        inpbaseemb = q.WordEmb(dim=dim, worddic=psm.D)
+        if useglove:
+            gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
+            inpbaseemb = inpbaseemb.override(gloveemb)
 
     # base embedder for column names
     if colbaseemb is None:
-        _colbaseemb = q.WordEmb(dim, worddic=csm.D)
-        gloveemb = q.PretrainedWordEmb(dim, worddic=csm.D)
-        colbaseemb = _colbaseemb.override(gloveemb)
+        colbaseemb = q.WordEmb(dim, worddic=csm.D)
+        if useglove:
+            gloveemb = q.PretrainedWordEmb(dim, worddic=csm.D)
+            colbaseemb = colbaseemb.override(gloveemb)
 
     synD, inpD, colD, syn_trans, inp_trans, col_trans = build_subdics(osm)
 
@@ -592,14 +607,14 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
     return computer
 
 
-def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb)
+def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, useglove=useglove)
     return DynamicWordEmb(computer=comp, worddic=osm.D)
 
 
-def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None):
+def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
     # TODO: replace probabilities for words using proper Pointer network thing
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb)
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, useglove=useglove)
     inp_trans = comp.inp_trans      # to index
     out = BFLOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
     return out
@@ -643,7 +658,10 @@ class SqlNode(Node):
             if head == "<QUERY>":
                 children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
                 ret = SqlNode(head, children=children)
-                return ret
+                break
+            elif head == "<END>":
+                ret = siblings, []
+                break
             elif head in jumpers:
                 if _rec_arg in jumpers[head]:
                     children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
@@ -655,17 +673,26 @@ class SqlNode(Node):
                     if len(tail) > 0:
                         head, tail = tail[0], tail[1:]
                     else:
-                        return siblings, tail
+                        ret = siblings, tail
+                        break
                 else:
-                    return siblings, [head] + tail
+                    ret = siblings, [head] + tail
+                    break
             else:
                 node = SqlNode(head)
                 siblings.append(node)
                 if len(tail) > 0:
                     head, tail = tail[0], tail[1:]
                 else:
-                    return siblings, tail
-        return siblings, tail
+                    ret = siblings, tail
+                    break
+        if isinstance(ret, tuple):
+            if _toprec:
+                raise q.SumTingWongException("didn't parse SQL in .parse_sql()")
+            else:
+                return ret
+        else:
+            return ret
 
     @classmethod
     def parse(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
@@ -686,6 +713,12 @@ class SqlNode(Node):
         else:
             return super(SqlNode, cls).parse(tokens, _rec_arg=_rec_arg, _toprec=_toprec)
 
+    # def symbol(self, with_label=True, with_annotation=True, with_order=True):
+    #     s = super(SqlNode, self).symbol(with_order=with_order, with_label=with_label, with_annotation=with_annotation)
+    #     if isinstance(s, unicode):
+    #         s = unidecode(s)
+    #     return s
+
 
 def make_tracker(osm):
     tt = q.ticktock("tree tracker maker"); tt.tick("flushing trees"); trees = []
@@ -698,9 +731,20 @@ def make_tracker(osm):
     tracker = SqlGroupTracker(trees, osm.D, xD)
 
     if True:    # TEST
-        vnt = tracker.get_valid_next(0)
-        tracker.update(0, list(vnt)[0])
-        vnt = tracker.get_valid_next(0)
+        accs = set()
+        for j in range(200):
+            acc = u""
+            tracker.reset()
+            for i in range(25):
+                vnt = tracker.get_valid_next(0)
+                sel = random.choice(vnt)
+                acc += u" " + tracker.rD[sel]
+                tracker.update(0, sel)
+            accs.add(acc)
+        print("number of unique linearizations for example 0", len(accs))
+        for acc in accs:
+            pacc = SqlNode.parse(unidecode(acc))
+            print(pacc.pptree())
 
     tt.tock("trees flushed")
     return tracker
@@ -717,12 +761,13 @@ class SqlGroupTracker(object):
         for xe in self.trackables:
             tracker = xe.track()
             self.trackers.append(tracker)
+        self._dirty_ids = set()
 
     def get_valid_next(self, eid):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:
-            nvt = {u"<MASK>"}
+            nvt = {u"<RARE>"}
         _nvt = set()
         for x in nvt:
             x = x.replace(u"*NC", u"")
@@ -732,6 +777,7 @@ class SqlGroupTracker(object):
 
     def update(self, eid, x, altx=None):
         tracker = self.trackers[eid]
+        self._dirty_ids.add(eid)
         nvt = tracker._nvt
         if len(nvt) == 0:
             pass
@@ -740,21 +786,29 @@ class SqlGroupTracker(object):
             xsplits = x.split(u"*")
             core, suffix = xsplits[0], u""
             if len(xsplits) > 1:
-                suffix = xsplits[1]
+                suffix = u"*" + xsplits[1]
             if core not in u"<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
-                suffix = u"*NC" + u"*" + suffix
-            x = core + u"*" + suffix
+                suffix = u"*NC" + suffix
+            x = core + suffix
             tracker.nxt(x)
 
     def is_terminated(self, eid):
         return self.trackers[eid].is_terminated()
 
-    def reset(self):
-        for tracker in self.trackers:
-            tracker.reset()
+    def reset(self, *which, **kw):
+        force = q.getkw(kw, "force", default=False)
+        if len(which) > 0:
+            for w in which:
+                self.trackers[w].reset()
+        else:
+            if not force and len(self._dirty_ids) > 0:
+                self.reset(*list(self._dirty_ids))
+            else:
+                for tracker in self.trackers:
+                    tracker.reset()
 
 
-def make_multilinout(lindim, baselinout, coreD, outD, tie_weights=False, chained=False, ttt=None):
+def make_struct_linout(lindim, baselinout, coreD, outD, tie_weights=False, chained=False, ttt=None):
     ttt = q.ticktock("linout test") if ttt is None else ttt
 
     for k, v in sorted(outD.items(), key=lambda (x, y): y):
@@ -812,8 +866,10 @@ def make_multilinout(lindim, baselinout, coreD, outD, tie_weights=False, chained
 # endregion
 
 
-def run_seq2seq_tf(lr=0.1, batsize=5, epochs=100,
-                   inpembdim=50, outembdim=50, outlindim=50,
+def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1,
+                   dropout=0.2, edropout=0., wreg=0.00000000001,
+                   gradnorm=5., useglove=True,
                    cuda=False, gpu=0):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
@@ -827,47 +883,89 @@ def run_seq2seq_tf(lr=0.1, batsize=5, epochs=100,
     ism, osm, csm, psm, splits, e2cn = load_matrices()
     psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
 
-    tracker = make_tracker(osm)     # TODO: only for bf
+    # tracker = make_tracker(osm)     # TODO: only for bf
 
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")
 
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm)
+    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
+
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove)
+    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove)
+
+    # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    # has to be compatible with outlin dim
+    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers), bidir=True)   # TODO: dropouts ?! weight dropouts
 
     # TODO: below is for bf-based scripts, move
-    mlinout = make_multilinout(outlindim, outlin, tracker.coreD, tracker.D, chained=True)
+    # mlinout = make_struct_linout(outlindim, outlin, tracker.coreD, tracker.D, chained=True)
 
-    class DummyModel(torch.nn.Module):
-        def __init__(self):
-            super(DummyModel, self).__init__()
+    class EncDec(torch.nn.Module):
+        def __init__(self, dec):
+            super(EncDec, self).__init__()
             self.inpemb = inpemb
             self.outemb = outemb
             self.outlin = outlin
-            self.mlinout = mlinout      # TODO: only for bf
+            self.encoder = encoder
+            self.decoder = dec
 
         def forward(self, inpseq, outseq, inpseqmaps, colnames):
             self.inpemb.prepare(inpseqmaps)
+
             _inpembs, _inpmask = self.inpemb(inpseq)
-            _inpenc = _inpembs      # TODO encoder
+            _inpenc = self.encoder(_inpembs, mask=_inpmask)
+            inpmask = _inpmask[:, :_inpenc.size(1)]
+            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
+            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
 
             self.outemb.prepare(inpseqmaps, colnames)
-            self.outlin.prepare(inpseq, _inpenc, inpseqmaps, colnames)
-            _outembs = self.outemb(outseq)
+            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
-            testvec = q.var(torch.randn(5, outlindim)).cuda(inpseq).v
+            decoding = self.decoder(outseq,
+                                    ctx=ctx,
+                                    ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
+                                    ctxmask=inpmask)
+            return decoding
 
-            test_scores = self.mlinout(testvec)
-            return None
+    # region decoders and models
+    # train decoder with teacher forcing, valid decoder with freerunning
+    decdims = [outembdim] + [innerdim] * numlayers
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=None) for i in range(1, len(decdims))]
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(edropout),
+                                               outlin, ctx2out=False)
 
-    m = DummyModel()
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
 
+    m = EncDec(decoder)
 
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    valid_m = EncDec(valid_decoder)
+    # endregion
+
+    # region data splits
     traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
+    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
     trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # endregion
 
-    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0))
+    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+
+    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
     optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
@@ -877,22 +975,33 @@ def run_seq2seq_tf(lr=0.1, batsize=5, epochs=100,
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b[:, :-1], c, colnames, b[:, 1:]
 
-    q.train(m).train_on(trainloader, losses).optimizer(optim)\
+    q.train(m).train_on(trainloader, losses)\
+        .optimizer(optim)\
+        .clip_grad_norm(gradnorm)\
         .set_batch_transformer(inp_bt)\
+        .valid_with(valid_m).valid_on(validloader, validlosses)\
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)
 
+    logger.update_settings(completed=True)
 
+
+def run_seq2seq_tf_bf():
+    pass        # TODO
+
+
+def run_seq2seq_oracle():
+    pass        # TODO
 
 
 
 if __name__ == "__main__":
     # q.argprun(prepare_data)
-    # q.argprun(create_mats)
+    # create_mats()
     # q.argprun(load_matrices)
     q.argprun(run_seq2seq_tf)
-    # tree = SqlNode.parse_sql("<SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID1 UWID2 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL>")
+    # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID1 UWID2 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # print(tree.pptree())
     # treestr = tree.pp()
     # treestr = treestr.replace("*NC", "")

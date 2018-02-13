@@ -1172,19 +1172,21 @@ class FastLSTMEncoder(torch.nn.Module):
         !! every layer packs and unpacks a PackedSequence --> might be inefficient
         Access to states is provided through .y_n, .y_0, .c_n and .c_0 (bottom layer first) """
     def __init__(self, indim, *dims, **kw):
-        bidir = q.getkw(kw, "bidir", default=False)
-        dropout = q.getkw(kw, "dropout_in", default=0.)
-        bias = q.getkw(kw, "bias", default=True)
+        self.bidir = q.getkw(kw, "bidir", default=False)
+        self.dropout = q.getkw(kw, "dropout_in", default=0.)
+        self.bias = q.getkw(kw, "bias", default=True)
         super(FastLSTMEncoder, self).__init__(**kw)
         if not q.issequence(dims):
             dims = (dims,)
         dims = (indim,) + dims
         self.dims = dims
         self.layers = torch.nn.ModuleList()
-        for i in range(1, len(dims)):
-            layer = FastLSTMEncoderLayer(indim=dims[i-1] * (1 if not bidir or i == 1 else 2),
-                                         dim=dims[i],
-                                  bidir=bidir, dropout_in=dropout, bias=bias)
+        self.make_layers()
+
+    def make_layers(self):
+        for i in range(1, len(self.dims)):
+            layer = FastLSTMEncoderLayer(indim=self.dims[i-1] * (1 if not self.bidir or i == 1 else 2),
+                                        dim=self.dims[i], bidir=self.bidir, dropout_in=self.dropout, bias=self.bias)
             self.layers.append(layer)
 
     # region state management

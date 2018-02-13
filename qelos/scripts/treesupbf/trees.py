@@ -7,6 +7,7 @@ import random
 import re
 import sys
 from collections import OrderedDict
+from unidecode import unidecode
 
 
 class Tracker(object):
@@ -274,6 +275,8 @@ class Node(Trackable):
                     return _lines
 
                 parent = self.symbol(with_label=True, with_annotation=False, with_order=not _remove_order)
+                if isinstance(parent, unicode):
+                    parent = unidecode(parent)
                 up_children, down_children = children[:len(children)//2], children[len(children)//2:]
                 up_lines = print_children(up_children, "up")
                 down_lines = print_children(down_children, "down")
@@ -285,7 +288,10 @@ class Node(Trackable):
                 lines += [downlineprefix + " " * len(parent) + down_line for down_line in down_lines]
             else:
                 connector = '┌' if direction == "up" else '└' if direction == "down" else '├' if direction == "middle" else ""
-                lines = [connector + self.symbol(with_annotation=False, with_label=True, with_order=not _remove_order)]
+                s = self.symbol(with_annotation=False, with_label=True, with_order=not _remove_order)
+                if isinstance(s, unicode):
+                    s = unidecode(s)
+                lines = [connector + s]
             if not _top_rec:
                 return lines
             ret = "\n".join(lines)

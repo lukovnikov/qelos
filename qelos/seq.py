@@ -27,9 +27,9 @@ class AttentionGenerator(nn.Module):
             if mask is not None and mask.dim() == 2:
                 mask = mask.unsqueeze(1).repeat(1, scores.size(1), 1)
         if mask is not None:
-            assert(mask.size() == scores.size(), "mask should be same size as scores")
+            assert(mask.size() == scores.size())    #, "mask should be same size as scores")
             infmask = var(torch.zeros(mask.size())).cuda(mask).v
-            infmask.data.masked_fill_((-1 * mask + 1).byte().data, -float("inf"))
+            infmask.data.masked_fill_((-1 * mask.float() + 1).byte().data, -float("inf"))
             scores = scores + infmask
             # scores.data.masked_fill_((-1*mask+1).byte().data, -float("inf"))
         if self.scale != 1.:

@@ -157,8 +157,19 @@ class NLLLoss(DiscreteLoss):
             weights = self.weight[gold]
             logprobs = logprobs * weights
 
-        if ignoremask is not None:
-            logprobs = logprobs * ignoremask.float()
+        if ignoremask is not None:      # GATHER solution
+            _logprobs_cpy = q.var(torch.zeros(logprobs.size())).cuda(logprobs).v
+            _c_logprobs = torch.stack([_logprobs_cpy, logprobs], 1)
+            logprobs = _c_logprobs.gather(1, ignoremask.unsqueeze(1).long())
+
+            # SELVEC solution:
+            # selvec = torch.masked_select(logprobs, ignoremask)
+            # _logprobs_bak = logprobs + 0.
+            # logprobs.data.fill_(0.)
+            # logprobs.masked_scatter_(ignoremask, selvec)
+
+            # MUL solution creates NaNs if any original probs had inf for masked elements
+            # logprobs = logprobs * ignoremask.float()
 
         return logprobs, ignoremask
 
