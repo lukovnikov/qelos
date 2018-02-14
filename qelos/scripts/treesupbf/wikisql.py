@@ -1007,7 +1007,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+                         #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
+                         )
 
     validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
