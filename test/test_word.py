@@ -198,6 +198,24 @@ class TestGlove(TestCase):
                 self.assertTrue(np.allclose(subclonemb, gloveemb))
         pass
 
+    def test_partially_loaded(self):
+        D = "<MASK> <RARE> cat dog person arizonaiceteaa".split()
+        D = dict(zip(D, range(len(D))))
+        baseemb = q.WordEmb(dim=50, worddic=D)
+        baseemb = baseemb.override(self.glove)
+
+        q.PartiallyPretrainedWordEmb.defaultpath = "../data/glove/miniglove.%dd"
+
+        plemb = q.PartiallyPretrainedWordEmb(dim=50, worddic=D, value=baseemb.base.embedding.weight.data.numpy())
+
+        x = q.var(np.asarray([0, 1, 2, 3, 4, 5]).astype("int64")).v
+        base_out, base_mask = baseemb(x)
+        pl_out, mask = plemb(x)
+
+        self.assertTrue(np.allclose(base_out[2:].data.numpy(), pl_out[2:].data.numpy()))
+
+        print(base_out - pl_out)
+
 
 class TestComputedWordEmb(TestCase):
     def setUp(self):

@@ -608,6 +608,15 @@ class train(object):
         self.tt = ticktock("trainer")
         # events
         self._event_callbacks = {}
+        # do automatically attached hooks (gradfrac)
+        self._hook_gradfracs()
+
+    def _hook_gradfracs(self):
+        def gradfrac_applier(subm):
+            return lambda x: subm.apply_gradfrac()
+        for submodule in self.model.modules():
+            if hasattr(submodule, "apply_gradfrac"):
+                self.hook(gradfrac_applier(submodule), train.BEFORE_OPTIM_STEP)
 
     def hook(self, f, *es, **kw):
         """ f to be called when e happens. Returns deleter for bound f

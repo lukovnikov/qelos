@@ -456,6 +456,38 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
         return ret
 
 
+class PartiallyPretrainedWordEmb(WordEmb, PretrainedWordVec):
+    def __init__(self, dim=50, worddic=None, path=None, gradfracs=(1., 1.), **kw):
+        super(PartiallyPretrainedWordEmb, self).__init__(dim=dim, worddic=worddic, **kw)
+        path = self._get_path(dim, path=path)
+        value, wdic = self.loadvalue(path, dim, indim=None,
+                                     worddic=None, maskid=None,
+                                     rareid=None)
+        value = q.val(value).v
+        self.mixmask = q.val(np.zeros((len(self.D),), dtype="float32")).v
+        for k, v in self.D.items():
+            if k in wdic:
+                self.embedding.weight.data[v, :] = value.data[wdic[k], :]
+                self.mixmask.data[v] = 1
+
+        self.gradfrac_vanilla, self.gradfrac_pretrained = gradfracs
+
+    def apply_gradfrac(self):
+        if self.embedding.weight.grad is None:
+            return None
+        if self.gradfrac_vanilla != 1.:
+            self.embedding.weight.grad.data = self.embedding.weight.grad.data \
+                                              * (1 - self.mixmask.data.unsqueeze(1)) * self.gradfrac_vanilla
+        if self.gradfrac_pretrained != 1.:
+            self.embedding.weight.grad.data = self.embedding.weight.grad.data \
+                                              * self.mixmask.data.unsqueeze(1) * self.gradfrac_pretrained
+        return True
+
+
+
+
+
+
 class WordLinoutBase(WordVecBase, nn.Module):
     def __init__(self, worddic, **kw):
         super(WordLinoutBase, self).__init__(worddic, **kw)

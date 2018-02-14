@@ -752,8 +752,10 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None):
     embdim = gdim if gdim is not None else dim
     baseemb = q.WordEmb(dim=embdim, worddic=psm.D)
     if useglove:
-        gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
-        baseemb = baseemb.override(gloveemb)
+        baseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., 0.05))
+    # if useglove:
+    #     gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
+    #     baseemb = baseemb.override(gloveemb)
 
     class Computer(DynamicVecComputer):
         def __init__(self):
@@ -888,15 +890,17 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     if inpbaseemb is None:
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
         if useglove:
-            gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
-            inpbaseemb = inpbaseemb.override(gloveemb)
+            inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., 0.05))
+            # gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
+            # inpbaseemb = inpbaseemb.override(gloveemb)
 
     # base embedder for column names
     if colbaseemb is None:
         colbaseemb = q.WordEmb(embdim, worddic=csm.D)
         if useglove:
-            gloveemb = q.PretrainedWordEmb(embdim, worddic=csm.D)
-            colbaseemb = colbaseemb.override(gloveemb)
+            colbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=csm.D, gradfracs=(1., 0.05))
+            # gloveemb = q.PretrainedWordEmb(embdim, worddic=csm.D)
+            # colbaseemb = colbaseemb.override(gloveemb)
 
     synD, inpD, colD, syn_trans, inp_trans, col_trans = build_subdics(osm)
 

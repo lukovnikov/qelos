@@ -29,7 +29,7 @@ from qelos.containers import ModuleList
 
 from qelos.word import WordEmb, PretrainedWordEmb, ComputedWordEmb, \
     WordLinout, PretrainedWordLinout, ComputedWordLinout, ZeroWordEmb, \
-    ZeroWordLinout
+    ZeroWordLinout, PartiallyPretrainedWordEmb
 
 from qelos.gan import GANTrainer
 
