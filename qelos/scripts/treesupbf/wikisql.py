@@ -315,6 +315,295 @@ def ppq(i, ism, psm):
 # endregion
 # endregion
 
+# region SQL TREES
+class SqlNode(Node):
+    name2ctrl = {
+        "<SELECT>": "A",
+        "<WHERE>":  "A",
+        "<COND>":   "A",
+        "COL\d+":   "NC",
+        "AGG\d+":   "NC",
+        "OP\d+":    "NC",
+        "<VAL>":    "A",
+        "<ENDVAL>": "NC",
+        "UWID\d+":  "NC",
+    }
+
+    def __init__(self, name, order=None, children=tuple(), **kw):
+        super(SqlNode, self).__init__(name, order=order, children=children, **kw)
+
+    @classmethod
+    def parse_sql(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
+        if len(inp) == 0:
+            return []
+        tokens = inp
+        parent = _rec_arg
+        if _toprec:
+            tokens = tokens.replace("  ", " ").strip().split()
+        head = tokens[0]
+        tail = tokens[1:]
+
+        siblings = []
+        jumpers = {"<SELECT>": {"<QUERY>"},
+                   "<WHERE>": {"<QUERY>"},
+                   "<COND>": {"<WHERE>"},
+                   "<VAL>": {"<COND>"},}
+        while True:
+            if head == "<QUERY>":
+                children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
+                ret = SqlNode(head, children=children)
+                break
+            elif head == "<END>":
+                ret = siblings, []
+                break
+            elif head in jumpers:
+                if _rec_arg in jumpers[head]:
+                    children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
+                    if head == "<VAL>":
+                        for i, child in enumerate(children):
+                            child.order = i
+                    node = SqlNode(head, children=children)
+                    siblings.append(node)
+                    if len(tail) > 0:
+                        head, tail = tail[0], tail[1:]
+                    else:
+                        ret = siblings, tail
+                        break
+                else:
+                    ret = siblings, [head] + tail
+                    break
+            else:
+                node = SqlNode(head)
+                siblings.append(node)
+                if len(tail) > 0:
+                    head, tail = tail[0], tail[1:]
+                else:
+                    ret = siblings, tail
+                    break
+        if isinstance(ret, tuple):
+            if _toprec:
+                raise q.SumTingWongException("didn't parse SQL in .parse_sql()")
+            else:
+                return ret
+        else:
+            return ret
+
+    @classmethod
+    def parse(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
+        tokens = inp
+        if _toprec:
+            tokens = tokens.replace("  ", " ").strip().split()
+            for i in range(len(tokens)):
+                splits = tokens[i].split("*")
+                if len(splits) == 1:
+                    token, suffix = splits[0], ""
+                else:
+                    token, suffix = splits[0], "*"+splits[1]
+                if token not in "<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
+                    suffix = "*NC" + suffix
+                tokens[i] = token + suffix
+            ret = super(SqlNode, cls).parse(" ".join(tokens), _rec_arg=None, _toprec=True)
+            return ret
+        else:
+            return super(SqlNode, cls).parse(tokens, _rec_arg=_rec_arg, _toprec=_toprec)
+
+    # def symbol(self, with_label=True, with_annotation=True, with_order=True):
+    #     s = super(SqlNode, self).symbol(with_order=with_order, with_label=with_label, with_annotation=with_annotation)
+    #     if isinstance(s, unicode):
+    #         s = unidecode(s)
+    #     return s
+
+
+def make_tracker(osm):
+    tt = q.ticktock("tree tracker maker"); tt.tick("flushing trees"); trees = []
+    for i in range(len(osm.matrix)):
+        tree = SqlNode.parse_sql(osm[i])
+        trees.append(tree)
+    xD = {}
+    xD.update(osm.D)
+    xD.update(dict([(k+"*LS", v+len(osm.D)) for k, v in osm.D.items()]))
+    tracker = SqlGroupTracker(trees, osm.D, xD)
+
+    if True:    # TEST
+        accs = set()
+        for j in range(200):
+            acc = u""
+            tracker.reset()
+            for i in range(25):
+                vnt = tracker.get_valid_next(0)
+                sel = random.choice(vnt)
+                acc += u" " + tracker.rD[sel]
+                tracker.update(0, sel)
+            accs.add(acc)
+        print("number of unique linearizations for example 0", len(accs))
+        for acc in accs:
+            pacc = SqlNode.parse(unidecode(acc))
+            print(pacc.pptree())
+
+    tt.tock("trees flushed")
+    return tracker
+
+
+class SqlGroupTracker(object):
+    def __init__(self, trackables, coreD, outD):
+        super(SqlGroupTracker, self).__init__()
+        self.trackables = trackables
+        self.D = outD
+        self.coreD = coreD
+        self.rD = {v: k for k, v in self.D.items()}
+        self.trackers = []
+        for xe in self.trackables:
+            tracker = xe.track()
+            self.trackers.append(tracker)
+        self._dirty_ids = set()
+
+    def get_valid_next(self, eid):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt
+        if len(nvt) == 0:
+            nvt = {u"<RARE>"}
+        _nvt = set()
+        for x in nvt:
+            x = x.replace(u"*NC", u"")
+            _nvt.add(x)
+        nvt = map(lambda x: self.D[x], _nvt)
+        return nvt
+
+    def update(self, eid, x, altx=None):
+        tracker = self.trackers[eid]
+        self._dirty_ids.add(eid)
+        nvt = tracker._nvt
+        if len(nvt) == 0:
+            pass
+        else:
+            x = self.rD[x]
+            xsplits = x.split(u"*")
+            core, suffix = xsplits[0], u""
+            if len(xsplits) > 1:
+                suffix = u"*" + xsplits[1]
+            if core not in u"<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
+                suffix = u"*NC" + suffix
+            x = core + suffix
+            tracker.nxt(x)
+
+    def is_terminated(self, eid):
+        return self.trackers[eid].is_terminated()
+
+    def reset(self, *which, **kw):
+        force = q.getkw(kw, "force", default=False)
+        if len(which) > 0:
+            for w in which:
+                self.trackers[w].reset()
+        else:
+            if not force and len(self._dirty_ids) > 0:
+                self.reset(*list(self._dirty_ids))
+            else:
+                for tracker in self.trackers:
+                    tracker.reset()
+
+
+def make_struct_linout(lindim, baselinout, coreD, outD, tie_weights=False, chained=False, ttt=None):
+    ttt = q.ticktock("linout test") if ttt is None else ttt
+
+    for k, v in sorted(outD.items(), key=lambda (x, y): y):
+        ksplits = k.split("*")
+        if len(ksplits) == 2:
+            assert(ksplits[1] == "LS")
+            assert(coreD[ksplits[0]] == (v - len(coreD)))
+        else:
+            assert(coreD[ksplits[0]] == v)
+    assert(baselinout.D == coreD)
+
+    class StrucSMO(torch.nn.Module):
+        def __init__(self, indim, corelinout, worddic=None, chained=True, **kw):
+            super(StrucSMO, self).__init__(**kw)
+            self.dim = indim
+            self.D = worddic
+            self.chained = chained
+            self.corelinout = corelinout
+
+            annD = {"A": 0, "LS": 1}
+            self.annout = q.WordLinout(self.dim + 2, worddic=annD, bias=False)
+
+            self.coreemb = q.WordEmb(self.dim, worddic=coreD)
+            self.coreemb.embedding.weight.data.fill_(0)
+
+            appendix = torch.zeros(1, len(coreD), 2)
+            if self.chained:
+                appendix[:, :, 1] = 1.    # LS
+            self.appendix = q.val(appendix).v
+
+        def forward(self, x):
+            # predict core:
+            coreprobs = self.corelinout(x)      # (batsize, coreD)
+            coreprobs = torch.nn.LogSoftmax(1)(coreprobs).unsqueeze(2)
+
+            # prepare predict LS
+            appendix = self.appendix.repeat(x.size(0), 1, 1)
+            addition = self.coreemb.embedding.weight.unsqueeze(0)
+            if not self.chained:
+                addition = q.var(torch.zeros(addition.size())).cuda(addition).v
+            predvec = torch.cat([appendix, x.unsqueeze(1) + addition], 2)
+
+            # predict LS
+            ctrlprobs = self.annout(predvec)
+            ctrlprobs = torch.nn.LogSoftmax(2)(ctrlprobs)
+
+            # merge and flatten
+            allprobs = coreprobs + ctrlprobs
+            outprobs = torch.cat([allprobs[:, :, 0], allprobs[:, :, 1]], 1)
+            return outprobs
+
+    ret = StrucSMO(lindim, baselinout, worddic=outD, chained=chained)
+    # TODO TEST
+    return ret
+
+
+def make_struct_emb(embdim, baseemb, coreD, outD, ttt=None):
+    ttt = q.ticktock("struct emb test") if ttt is None else ttt
+
+    for k, v in sorted(outD.items(), key=lambda (x, y): y):
+        ksplits = k.split("*")
+        if len(ksplits) == 2:
+            assert(ksplits[1] == "LS")
+            assert(coreD[ksplits[0]] == (v - len(coreD)))
+        else:
+            assert(coreD[ksplits[0]] == v)
+    assert(baseemb.D == coreD)
+
+    to_cores = np.arange((len(coreD),), dtype="int64")
+    to_cores = np.stack([to_cores, to_cores], 0)
+    to_ls = np.zeros((len(outD),), dtype="int64")
+    to_ls[len(coreD):] = 1
+
+    class StructEmb(torch.nn.Module):
+        def __init__(self, indim, coreemb, worddic=None, **kw):
+            super(StructEmb, self).__init__(**kw)
+            self.dim = indim
+            self.D = worddic
+            self.base = coreemb
+
+            self.to_cores = q.val(to_cores).v
+            self.to_ls = q.val(to_ls).v
+
+            annD = {"A": 0, "LS": 1}
+            self.annemb = q.WordEmb(self.dim, worddic=annD)
+            self.annemb.embedding.weight.fill_(0)
+
+        def forward(self, x):   # input is indexes in outD
+            x_cores = self.to_cores[x]
+            x_ls = self.to_ls[x]
+            coreembs, mask = self.base(x_cores)
+            lsembs = self.annemb(x_ls)
+            # additive ls emb
+            embs = coreembs + lsembs
+            return embs, mask
+
+    ret = StructEmb(embdim, baseemb, worddic=outD)
+    # TODO TEST
+    return ret
+# endregion
+
 # region DYNAMIC VECTORS
 
 from qelos.word import WordEmbBase, WordLinoutBase
@@ -621,250 +910,6 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
 
 # endregion
 
-# region SQL TREES
-class SqlNode(Node):
-    name2ctrl = {
-        "<SELECT>": "A",
-        "<WHERE>":  "A",
-        "<COND>":   "A",
-        "COL\d+":   "NC",
-        "AGG\d+":   "NC",
-        "OP\d+":    "NC",
-        "<VAL>":    "A",
-        "<ENDVAL>": "NC",
-        "UWID\d+":  "NC",
-    }
-
-    def __init__(self, name, order=None, children=tuple(), **kw):
-        super(SqlNode, self).__init__(name, order=order, children=children, **kw)
-
-    @classmethod
-    def parse_sql(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
-        if len(inp) == 0:
-            return []
-        tokens = inp
-        parent = _rec_arg
-        if _toprec:
-            tokens = tokens.replace("  ", " ").strip().split()
-        head = tokens[0]
-        tail = tokens[1:]
-
-        siblings = []
-        jumpers = {"<SELECT>": {"<QUERY>"},
-                   "<WHERE>": {"<QUERY>"},
-                   "<COND>": {"<WHERE>"},
-                   "<VAL>": {"<COND>"},}
-        while True:
-            if head == "<QUERY>":
-                children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
-                ret = SqlNode(head, children=children)
-                break
-            elif head == "<END>":
-                ret = siblings, []
-                break
-            elif head in jumpers:
-                if _rec_arg in jumpers[head]:
-                    children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
-                    if head == "<VAL>":
-                        for i, child in enumerate(children):
-                            child.order = i
-                    node = SqlNode(head, children=children)
-                    siblings.append(node)
-                    if len(tail) > 0:
-                        head, tail = tail[0], tail[1:]
-                    else:
-                        ret = siblings, tail
-                        break
-                else:
-                    ret = siblings, [head] + tail
-                    break
-            else:
-                node = SqlNode(head)
-                siblings.append(node)
-                if len(tail) > 0:
-                    head, tail = tail[0], tail[1:]
-                else:
-                    ret = siblings, tail
-                    break
-        if isinstance(ret, tuple):
-            if _toprec:
-                raise q.SumTingWongException("didn't parse SQL in .parse_sql()")
-            else:
-                return ret
-        else:
-            return ret
-
-    @classmethod
-    def parse(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
-        tokens = inp
-        if _toprec:
-            tokens = tokens.replace("  ", " ").strip().split()
-            for i in range(len(tokens)):
-                splits = tokens[i].split("*")
-                if len(splits) == 1:
-                    token, suffix = splits[0], ""
-                else:
-                    token, suffix = splits[0], "*"+splits[1]
-                if token not in "<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
-                    suffix = "*NC" + suffix
-                tokens[i] = token + suffix
-            ret = super(SqlNode, cls).parse(" ".join(tokens), _rec_arg=None, _toprec=True)
-            return ret
-        else:
-            return super(SqlNode, cls).parse(tokens, _rec_arg=_rec_arg, _toprec=_toprec)
-
-    # def symbol(self, with_label=True, with_annotation=True, with_order=True):
-    #     s = super(SqlNode, self).symbol(with_order=with_order, with_label=with_label, with_annotation=with_annotation)
-    #     if isinstance(s, unicode):
-    #         s = unidecode(s)
-    #     return s
-
-
-def make_tracker(osm):
-    tt = q.ticktock("tree tracker maker"); tt.tick("flushing trees"); trees = []
-    for i in range(len(osm.matrix)):
-        tree = SqlNode.parse_sql(osm[i])
-        trees.append(tree)
-    xD = {}
-    xD.update(osm.D)
-    xD.update(dict([(k+"*LS", v+len(osm.D)) for k, v in osm.D.items()]))
-    tracker = SqlGroupTracker(trees, osm.D, xD)
-
-    if True:    # TEST
-        accs = set()
-        for j in range(200):
-            acc = u""
-            tracker.reset()
-            for i in range(25):
-                vnt = tracker.get_valid_next(0)
-                sel = random.choice(vnt)
-                acc += u" " + tracker.rD[sel]
-                tracker.update(0, sel)
-            accs.add(acc)
-        print("number of unique linearizations for example 0", len(accs))
-        for acc in accs:
-            pacc = SqlNode.parse(unidecode(acc))
-            print(pacc.pptree())
-
-    tt.tock("trees flushed")
-    return tracker
-
-
-class SqlGroupTracker(object):
-    def __init__(self, trackables, coreD, outD):
-        super(SqlGroupTracker, self).__init__()
-        self.trackables = trackables
-        self.D = outD
-        self.coreD = coreD
-        self.rD = {v: k for k, v in self.D.items()}
-        self.trackers = []
-        for xe in self.trackables:
-            tracker = xe.track()
-            self.trackers.append(tracker)
-        self._dirty_ids = set()
-
-    def get_valid_next(self, eid):
-        tracker = self.trackers[eid]
-        nvt = tracker._nvt
-        if len(nvt) == 0:
-            nvt = {u"<RARE>"}
-        _nvt = set()
-        for x in nvt:
-            x = x.replace(u"*NC", u"")
-            _nvt.add(x)
-        nvt = map(lambda x: self.D[x], _nvt)
-        return nvt
-
-    def update(self, eid, x, altx=None):
-        tracker = self.trackers[eid]
-        self._dirty_ids.add(eid)
-        nvt = tracker._nvt
-        if len(nvt) == 0:
-            pass
-        else:
-            x = self.rD[x]
-            xsplits = x.split(u"*")
-            core, suffix = xsplits[0], u""
-            if len(xsplits) > 1:
-                suffix = u"*" + xsplits[1]
-            if core not in u"<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
-                suffix = u"*NC" + suffix
-            x = core + suffix
-            tracker.nxt(x)
-
-    def is_terminated(self, eid):
-        return self.trackers[eid].is_terminated()
-
-    def reset(self, *which, **kw):
-        force = q.getkw(kw, "force", default=False)
-        if len(which) > 0:
-            for w in which:
-                self.trackers[w].reset()
-        else:
-            if not force and len(self._dirty_ids) > 0:
-                self.reset(*list(self._dirty_ids))
-            else:
-                for tracker in self.trackers:
-                    tracker.reset()
-
-
-def make_struct_linout(lindim, baselinout, coreD, outD, tie_weights=False, chained=False, ttt=None):
-    ttt = q.ticktock("linout test") if ttt is None else ttt
-
-    for k, v in sorted(outD.items(), key=lambda (x, y): y):
-        ksplits = k.split("*")
-        if len(ksplits) == 2:
-            assert(ksplits[1] == "LS")
-            assert(coreD[ksplits[0]] == (v - len(coreD)))
-        else:
-            assert(coreD[ksplits[0]] == v)
-    assert(baselinout.D == coreD)
-
-    class StrucSMO(torch.nn.Module):
-        def __init__(self, indim, corelinout, worddic=None, chained=True, **kw):
-            super(StrucSMO, self).__init__(**kw)
-            self.dim = indim
-            self.D = worddic
-            self.chained = chained
-            self.corelinout = corelinout
-
-            annD = {"A": 0, "LS": 1}
-            self.annout = q.WordLinout(self.dim + 2, worddic=annD, bias=False)
-
-            self.coreemb = q.WordEmb(self.dim, worddic=coreD)
-            self.coreemb.embedding.weight.data.fill_(0)
-
-            appendix = torch.zeros(1, len(coreD), 2)
-            if self.chained:
-                appendix[:, :, 1] = 1.    # LS
-            self.appendix = q.val(appendix).v
-
-        def forward(self, x):
-            # predict core:
-            coreprobs = self.corelinout(x)      # (batsize, coreD)
-            coreprobs = torch.nn.LogSoftmax(1)(coreprobs).unsqueeze(2)
-
-            # prepare predict LS
-            appendix = self.appendix.repeat(x.size(0), 1, 1)
-            addition = self.coreemb.embedding.weight.unsqueeze(0)
-            if not self.chained:
-                addition = q.var(torch.zeros(addition.size())).cuda(addition).v
-            predvec = torch.cat([appendix, x.unsqueeze(1) + addition], 2)
-
-            # predict LS
-            ctrlprobs = self.annout(predvec)
-            ctrlprobs = torch.nn.LogSoftmax(2)(ctrlprobs)
-
-            # merge and flatten
-            allprobs = coreprobs + ctrlprobs
-            outprobs = torch.cat([allprobs[:, :, 0], allprobs[:, :, 1]], 1)
-            return outprobs
-
-    ret = StrucSMO(lindim, baselinout, worddic=outD, chained=chained)
-    # TODO TEST
-    return ret
-# endregion
-
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1,
@@ -987,11 +1032,11 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     logger.update_settings(completed=True)
 
 
-def run_seq2seq_tf_bf():
+def run_seq2seq_tf_bf():        # TODO: same as above but should be using BF-lin from trees and the struct linout
     pass        # TODO
 
 
-def run_seq2seq_oracle():
+def run_seq2seq_oracle():       # TODO: uses BF-lin and struct linout like previous but uses oracle instead of teacherforcer
     pass        # TODO
 
 

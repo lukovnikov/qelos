@@ -1375,8 +1375,9 @@ class FastestLSTMEncoderLayer(torch.nn.Module):
         Provides a more convenient interface.
         State is stored in .h_n (initial state in .h_0).
         !!! Dropout_in, dropout_rec are shared among all examples in a batch (and across timesteps) !!!"""
-    def __init__(self, indim, dim, bidir=False, dropout_in=0., dropout_rec=0., bias=True, **kw):
+    def __init__(self, indim, dim, bidir=False, dropout_in=0., dropout_rec=0., bias=True, skipper=False, **kw):
         super(FastestLSTMEncoderLayer, self).__init__(**kw)
+        self.skipper = skipper      # TODO
         this = self
 
         class LSTMOverride(torch.nn.LSTM):
@@ -1450,13 +1451,14 @@ class FastestLSTMEncoder(FastLSTMEncoder):
         Access to states of layer is provided through .h_0 and .h_n (bottom layers first) """
     def __init__(self, indim, *dims, **kw):
         self.dropout_rec = q.getkw(kw, "dropout_rec", default=0.)
+        self.skipper = q.getkw(kw, "skipper", default=False)
         super(FastestLSTMEncoder, self).__init__(indim, *dims, **kw)
 
     def make_layers(self):
         for i in range(1, len(self.dims)):
             layer = FastestLSTMEncoderLayer(indim=self.dims[i-1] * (1 if not self.bidir or i == 1 else 2),
                                         dim=self.dims[i], bidir=self.bidir, dropout_in=self.dropout,
-                                        dropout_rec=self.dropout_rec, bias=self.bias)
+                                        dropout_rec=self.dropout_rec, bias=self.bias, skipper=self.skipper)
             self.layers.append(layer)
 
     def forward(self, x, mask=None, batsize=None):
