@@ -748,21 +748,25 @@ class BFLOL(DynamicWordLinout):
         return rret, rmask
 
 
-def make_inp_emb(dim, ism, psm, useglove=True):
-    baseemb = q.WordEmb(dim=dim, worddic=psm.D)
+def make_inp_emb(dim, ism, psm, useglove=True, gdim=None):
+    embdim = gdim if gdim is not None else dim
+    baseemb = q.WordEmb(dim=embdim, worddic=psm.D)
     if useglove:
-        gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
+        gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
         baseemb = baseemb.override(gloveemb)
 
     class Computer(DynamicVecComputer):
         def __init__(self):
             super(Computer, self).__init__()
             self.baseemb = baseemb
+            self.trans = torch.nn.Linear(embdim, dim, bias=False) if embdim != dim else None
 
         def forward(self, x, data):
             transids = torch.gather(data, 1, x)
             # _pp = psm.pp(transids[:5].cpu().data.numpy())
             _embs, mask = self.baseemb(transids)
+            if self.trans is not None:
+                _embs = self.trans(_embs)
             return _embs
 
     emb = DynamicWordEmb(computer=Computer(), worddic=ism.D)
@@ -773,8 +777,9 @@ class ColnameEncoder(torch.nn.Module):
     def __init__(self, dim, colbaseemb, nocolid=None):
         super(ColnameEncoder, self).__init__()
         self.emb = colbaseemb
+        self.embdim = colbaseemb.vecdim
         self.dim = dim
-        self.enc = torch.nn.LSTM(dim, dim, 1, batch_first=True)
+        self.enc = torch.nn.LSTM(self.embdim, self.dim, 1, batch_first=True)
         self.nocolid = nocolid
 
     def forward(self, x):
@@ -806,6 +811,8 @@ class OutVecComputer(DynamicVecPreparer):
         self.col_trans = col_trans
         self.D = worddic
         self.colzero_to_inf = colzero_to_inf
+        self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False) \
+            if self.inp_emb.vecdim != self.syn_emb.vecdim else None
 
     def prepare(self, inpmaps, colnames):
         x = q.var(torch.arange(0, len(self.D))).cuda(inpmaps).v.long()
@@ -817,6 +824,8 @@ class OutVecComputer(DynamicVecPreparer):
         _inp_ids = self.inp_trans[x]
         transids = torch.gather(inpmaps, 1, _inp_ids.unsqueeze(0).repeat(batsize, 1))
         _inp_embs, _inp_mask = self.inp_emb(transids)
+        if self.inpemb_trans is not None:
+            _inp_embs = self.inpemb_trans(_inp_embs)
 
         _colencs, _col_mask = self.col_enc(colnames)
         _col_ids = self.col_trans[x]
@@ -872,19 +881,21 @@ def build_subdics(osm):
     return synD, inpD, colD, syn_trans, inp_trans, col_trans
 
 
-def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
+def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
+                          useglove=True, gdim=None):
     # base embedder for input tokens        # TODO might want to think about reusing encoding
+    embdim = gdim if gdim is not None else dim
     if inpbaseemb is None:
-        inpbaseemb = q.WordEmb(dim=dim, worddic=psm.D)
+        inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
         if useglove:
-            gloveemb = q.PretrainedWordEmb(dim=dim, worddic=psm.D)
+            gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
             inpbaseemb = inpbaseemb.override(gloveemb)
 
     # base embedder for column names
     if colbaseemb is None:
-        colbaseemb = q.WordEmb(dim, worddic=csm.D)
+        colbaseemb = q.WordEmb(embdim, worddic=csm.D)
         if useglove:
-            gloveemb = q.PretrainedWordEmb(dim, worddic=csm.D)
+            gloveemb = q.PretrainedWordEmb(embdim, worddic=csm.D)
             colbaseemb = colbaseemb.override(gloveemb)
 
     synD, inpD, colD, syn_trans, inp_trans, col_trans = build_subdics(osm)
@@ -896,14 +907,15 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
     return computer
 
 
-def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, useglove=useglove)
+def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None):
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+                                 useglove=useglove, gdim=gdim)
     return DynamicWordEmb(computer=comp, worddic=osm.D)
 
 
-def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True):
-    # TODO: replace probabilities for words using proper Pointer network thing
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, useglove=useglove)
+def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None):
+    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+                                 useglove=useglove, gdim=gdim)
     inp_trans = comp.inp_trans      # to index
     out = BFLOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
     return out
@@ -912,8 +924,8 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
 
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
-                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1,
-                   dropout=0.2, edropout=0., wreg=0.00000000001,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
+                   dropout=0.2, rdropout=0.1, edropout=0., wreg=0.00000000001,
                    gradnorm=5., useglove=True,
                    cuda=False, gpu=0, tag="none"):
     settings = locals().copy()
@@ -921,6 +933,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="0.1")
+
+    if gdim < 0:
+        gdim = None
 
     if dim > 0:
         innerdim = dim
@@ -940,9 +955,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove)
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim)
+    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -982,7 +997,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # region decoders and models
     # train decoder with teacher forcing, valid decoder with freerunning
     decdims = [outembdim] + [innerdim] * numlayers
-    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=None) for i in range(1, len(decdims))]
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout) for i in range(1, len(decdims))]
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                q.Dropout(edropout),
                                                outlin, ctx2out=False)

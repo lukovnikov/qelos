@@ -256,6 +256,7 @@ class OverriddenWordVecBase(WordVecBase, nn.Module):
         super(OverriddenWordVecBase, self).__init__(base.D)
         self.base = base
         self.over = override.adapt(base.D)
+        self.vecdim = self.base.vecdim
         assert(not (which is not None and whichnot is not None))
         numout = max(base.D.values()) + 1
         whichnot = set()
