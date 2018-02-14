@@ -959,6 +959,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
+    # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
     outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
     outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
