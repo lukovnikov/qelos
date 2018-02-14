@@ -457,6 +457,7 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
 
 class PartiallyPretrainedWordEmb(WordEmb, PretrainedWordVec):
+    """ !!! Don't forget to call .apply_gradfrac() before doing optim step when not using qelos training loop !!! """
     def __init__(self, dim=50, worddic=None, path=None, gradfracs=(1., 1.), **kw):
         super(PartiallyPretrainedWordEmb, self).__init__(dim=dim, worddic=worddic, **kw)
         path = self._get_path(dim, path=path)
@@ -472,15 +473,20 @@ class PartiallyPretrainedWordEmb(WordEmb, PretrainedWordVec):
 
         self.gradfrac_vanilla, self.gradfrac_pretrained = gradfracs
 
-    def apply_gradfrac(self):
+    def get_hooks(self):
+        return {q.train.BEFORE_OPTIM_STEP: self.apply_gradfrac}
+
+    def apply_gradfrac(self, *args, **kw):
         if self.embedding.weight.grad is None:
             return None
         if self.gradfrac_vanilla != 1.:
             self.embedding.weight.grad.data = self.embedding.weight.grad.data \
-                                              * (1 - self.mixmask.data.unsqueeze(1)) * self.gradfrac_vanilla
+                                              * (1 - self.mixmask.data.unsqueeze(1)) \
+                                              * q.v(self.gradfrac_vanilla)
         if self.gradfrac_pretrained != 1.:
             self.embedding.weight.grad.data = self.embedding.weight.grad.data \
-                                              * self.mixmask.data.unsqueeze(1) * self.gradfrac_pretrained
+                                              * self.mixmask.data.unsqueeze(1) \
+                                              * q.v(self.gradfrac_pretrained)
         return True
 
 

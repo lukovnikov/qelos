@@ -609,14 +609,14 @@ class train(object):
         # events
         self._event_callbacks = {}
         # do automatically attached hooks (gradfrac)
-        self._hook_gradfracs()
+        self.autohook_modules()
 
-    def _hook_gradfracs(self):
-        def gradfrac_applier(subm):
-            return lambda x: subm.apply_gradfrac()
+    def autohook_modules(self):
+        if hasattr(self.model, "get_hooks"):
+            self.hook(self.model)
         for submodule in self.model.modules():
-            if hasattr(submodule, "apply_gradfrac"):
-                self.hook(gradfrac_applier(submodule), train.BEFORE_OPTIM_STEP)
+            if hasattr(submodule, "get_hooks"):
+                self.hook(submodule)
 
     def hook(self, f, *es, **kw):
         """ f to be called when e happens. Returns deleter for bound f
@@ -632,7 +632,7 @@ class train(object):
             return self.hook(_ReduceLROnPlateauAutoHooker(f, es[0]))
         # normal hooking
         else:
-            if isinstance(f, AutoHooker):
+            if isinstance(f, AutoHooker) or hasattr(f, "get_hooks"):
                 if len(es) > 0:
                     raise q.SumTingWongException("can't hook autohooker explicitly on hooks")
                 hookdic = f.get_hooks()

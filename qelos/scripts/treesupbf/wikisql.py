@@ -748,11 +748,11 @@ class BFLOL(DynamicWordLinout):
         return rret, rmask
 
 
-def make_inp_emb(dim, ism, psm, useglove=True, gdim=None):
+def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
     embdim = gdim if gdim is not None else dim
     baseemb = q.WordEmb(dim=embdim, worddic=psm.D)
     if useglove:
-        baseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., 0.05))
+        baseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
     # if useglove:
     #     gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
     #     baseemb = baseemb.override(gloveemb)
@@ -884,13 +884,13 @@ def build_subdics(osm):
 
 
 def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                          useglove=True, gdim=None):
+                          useglove=True, gdim=None, gfrac=0.1):
     # base embedder for input tokens        # TODO might want to think about reusing encoding
     embdim = gdim if gdim is not None else dim
     if inpbaseemb is None:
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
         if useglove:
-            inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., 0.05))
+            inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
             # gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
             # inpbaseemb = inpbaseemb.override(gloveemb)
 
@@ -898,7 +898,7 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     if colbaseemb is None:
         colbaseemb = q.WordEmb(embdim, worddic=csm.D)
         if useglove:
-            colbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=csm.D, gradfracs=(1., 0.05))
+            colbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=csm.D, gradfracs=(1., gfrac))
             # gloveemb = q.PretrainedWordEmb(embdim, worddic=csm.D)
             # colbaseemb = colbaseemb.override(gloveemb)
 
@@ -911,15 +911,15 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     return computer
 
 
-def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None):
+def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None, gfrac=0.1):
     comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                 useglove=useglove, gdim=gdim)
+                                 useglove=useglove, gdim=gdim, gfrac=gfrac)
     return DynamicWordEmb(computer=comp, worddic=osm.D)
 
 
-def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None):
+def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None, gfrac=0.1):
     comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                 useglove=useglove, gdim=gdim)
+                                 useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
     out = BFLOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
     return out
@@ -929,14 +929,14 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
-                   dropout=0.2, rdropout=0.1, edropout=0., wreg=0.00000000001,
-                   gradnorm=5., useglove=True,
+                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
+                   wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="0.1")
+    logger.update_settings(version="1.0")
 
     if gdim < 0:
         gdim = None
@@ -959,14 +959,15 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim)
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers), bidir=True)   # TODO: dropouts ?! weight dropouts
+    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+                                   dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     # TODO: below is for bf-based scripts, move
     # mlinout = make_struct_linout(outlindim, outlin, tracker.coreD, tracker.D, chained=True)
@@ -1020,6 +1021,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     valid_m = EncDec(valid_decoder)
     # endregion
 
+    # devstart = 50
+    # teststart = 100
+
     # region data splits
     traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
     validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
@@ -1055,6 +1059,36 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .train(epochs)
 
     logger.update_settings(completed=True)
+
+    # region final numbers
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+
+    validresults = q.test(valid_m) \
+        .on(validloader, finalvalidlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    print("DEV RESULTS:")
+    print(validresults)
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+
+    testresults = q.test(valid_m) \
+        .on(testloader, testlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
+    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
+
+    print("TEST RESULTS:")
+    print(testresults)
+    # endregion
+
 
 
 def run_seq2seq_tf_bf():        # TODO: same as above but should be using BF-lin from trees and the struct linout
