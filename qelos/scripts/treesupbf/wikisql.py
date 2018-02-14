@@ -912,15 +912,20 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
 
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
-                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1,
                    dropout=0.2, edropout=0., wreg=0.00000000001,
                    gradnorm=5., useglove=True,
-                   cuda=False, gpu=0):
+                   cuda=False, gpu=0, tag="none"):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="0.1")
+
+    if dim > 0:
+        innerdim = dim
+        inpembdim = dim // 2
+        outembdim = inpembdim
 
     print("Seq2Seq + TF")
     if cuda:    torch.cuda.set_device(gpu)
