@@ -784,8 +784,8 @@ class ColnameEncoder(torch.nn.Module):
         xshape = x.size()
         flatx = x.contiguous().view(-1, x.size(-1))
         embx, mask = self.emb(flatx)
-        c_0 = q.var(torch.zeros(flatx.size(0), self.dim)).cuda(x).v
-        y_0 = c_0 + 0.
+        c_0 = q.var(torch.zeros(1, flatx.size(0), self.dim)).cuda(x).v
+        y_0 = c_0
         packedx, order = q.seq_pack(embx, mask)
         _y_t, (y_T, c_T) = self.enc(packedx, (y_0, c_0))
         y_T = y_T[0][order]
