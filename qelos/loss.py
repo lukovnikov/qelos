@@ -24,7 +24,12 @@ class Loss(nn.Module):
         else:
             total = y.size(0)
 
-        loss = y.sum()
+        try:
+            loss = y.sum()
+        except Exception as e:
+            print(y)
+            print(gold)
+            print(self.__class__.__name__)
         if self.size_average:
             loss /= total
         return loss
