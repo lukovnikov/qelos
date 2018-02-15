@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 import qelos as q
-from qelos.scripts.treesupbf.trees import Node
+from qelos.scripts.treesupbf.trees import Node, NodeTrackerDF
 from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 from unidecode import unidecode
@@ -707,16 +707,16 @@ class DynamicWordLinout(WordLinoutBase):
         return ret, rmask
 
 
-class BFLOL(DynamicWordLinout):
+class BFOL(DynamicWordLinout):
     def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None):
-        super(BFLOL, self).__init__(computer=computer, worddic=worddic)
+        super(BFOL, self).__init__(computer=computer, worddic=worddic)
         self.inppos2uwid = None
         self.inpenc = None
         self.ismD = ismD
         self.inp_trans = inp_trans
 
     def prepare(self, inpseq, inpenc, *xdata):
-        super(BFLOL, self).prepare(*xdata)
+        super(BFOL, self).prepare(*xdata)
         inppos2uwid = q.var(torch.zeros(inpseq.size(0), inpseq.size(1), len(self.ismD))).cuda(inpseq).v
         inppos2uwid.data.scatter_(2, inpseq.unsqueeze(2).data, 1)
         inppos2uwid.data[:, :, 0] = 0
@@ -725,7 +725,7 @@ class BFLOL(DynamicWordLinout):
         self.inpenc = inpenc
 
     def _forward(self, x):
-        ret, rmask = super(BFLOL, self)._forward(x)
+        ret, rmask = super(BFOL, self)._forward(x)
 
         xshape = x.size()
         if len(xshape) == 2:
@@ -765,7 +765,7 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
 
         def forward(self, x, data):
             transids = torch.gather(data, 1, x)
-            # _pp = psm.pp(transids[:5].cpu().data.numpy())
+            _pp = psm.pp(transids[:5].cpu().data.numpy())
             _embs, mask = self.baseemb(transids)
             if self.trans is not None:
                 _embs = self.trans(_embs)
@@ -921,22 +921,203 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
     comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFLOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
     return out
 
 # endregion
+
+def order_adder_wikisql(parse):
+    # add order:
+    def order_adder_rec(y):
+        for i, ychild in enumerate(y.children):
+            if y.name == "<VAL>":
+                ychild.order = i
+            order_adder_rec(ychild)
+
+    order_adder_rec(parse)
+    return parse
 
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none"):
+                   cuda=False, gpu=0, tag="none", test=False):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="1.0")
+
+    if gdim < 0:
+        gdim = None
+
+    if dim > 0:
+        innerdim = dim
+        inpembdim = dim // 2
+        outembdim = inpembdim
+
+    print("Seq2Seq + TF")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    ism, osm, csm, psm, splits, e2cn = load_matrices()
+    psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
+
+    # tracker = make_tracker(osm)     # TODO: only for bf
+
+    devstart, teststart = splits
+    eids = np.arange(0, len(ism), dtype="int64")
+
+    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
+
+    # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+
+    # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    # has to be compatible with outlin dim
+    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+                                   dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
+
+    # TODO: below is for bf-based scripts, move
+    # mlinout = make_struct_linout(outlindim, outlin, tracker.coreD, tracker.D, chained=True)
+
+    class EncDec(torch.nn.Module):
+        def __init__(self, dec):
+            super(EncDec, self).__init__()
+            self.inpemb = inpemb
+            self.outemb = outemb
+            self.outlin = outlin
+            self.encoder = encoder
+            self.decoder = dec
+
+        def forward(self, inpseq, outseq, inpseqmaps, colnames):
+            self.inpemb.prepare(inpseqmaps)
+
+            _inpembs, _inpmask = self.inpemb(inpseq)
+            _inpenc = self.encoder(_inpembs, mask=_inpmask)
+            inpmask = _inpmask[:, :_inpenc.size(1)]
+            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
+            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+
+            self.outemb.prepare(inpseqmaps, colnames)
+            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
+
+            decoding = self.decoder(outseq,
+                                    ctx=ctx,
+                                    ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
+                                    ctxmask=inpmask)
+            return decoding
+
+    # region decoders and models
+    # train decoder with teacher forcing, valid decoder with freerunning
+    decdims = [outembdim] + [innerdim] * numlayers
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout) for i in range(1, len(decdims))]
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(edropout),
+                                               outlin, ctx2out=False)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    m = EncDec(decoder)
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    valid_m = EncDec(valid_decoder)
+    # endregion
+
+    if test:
+        devstart = 50
+        teststart = 100
+
+    # region data splits
+    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
+    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
+    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # endregion
+
+    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
+                         )
+
+    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    logger.update_settings(optimizer="adam")
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+
+    def inp_bt(a, b, c, colnameids):
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b[:, :-1], c, colnames, b[:, 1:]
+
+    q.train(m).train_on(trainloader, losses)\
+        .optimizer(optim)\
+        .clip_grad_norm(gradnorm)\
+        .set_batch_transformer(inp_bt)\
+        .valid_with(valid_m).valid_on(validloader, validlosses)\
+        .cuda(cuda)\
+        .hook(logger)\
+        .train(epochs)
+
+    logger.update_settings(completed=True)
+
+    # region final numbers
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    validresults = q.test(valid_m) \
+        .on(validloader, finalvalidlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    print("DEV RESULTS:")
+    print(validresults)
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    testresults = q.test(valid_m) \
+        .on(testloader, testlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
+    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
+
+    print("TEST RESULTS:")
+    print(testresults)
+    # endregion
+
+
+
+# TODO: same as above but should be using BF-lin from trees and the struct linout
+def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
+                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
+                   wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
+                   cuda=False, gpu=0, tag="none"):
+    settings = locals().copy()
+    logger = q.Logger(prefix="wikisql_s2s_tf_bf")
+    logger.save_settings(**settings)
+    logger.update_settings(completed=False)
+    logger.update_settings(version="0.9")
 
     if gdim < 0:
         gdim = None
@@ -1092,12 +1273,29 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
 
 
-def run_seq2seq_tf_bf():        # TODO: same as above but should be using BF-lin from trees and the struct linout
-    pass        # TODO
-
 
 def run_seq2seq_oracle():       # TODO: uses BF-lin and struct linout like previous but uses oracle instead of teacherforcer
     pass        # TODO
+
+
+def test_df_lins(tree):
+    tracker = NodeTrackerDF(tree)
+    accs = set()
+    for i in range(1000):
+        acc = u""
+        tracker.reset()
+        for j in range(25):
+            vnt = tracker._nvt
+            if len(vnt) == 0:
+                break
+            sel = random.choice(list(vnt))
+            acc += u" " + sel
+            tracker.nxt(sel)
+        accs.add(acc)
+    print("number of unique linearizations for toy example: ", len(accs))
+    for acc in accs:
+        pacc = SqlNode.parse(unidecode(acc))
+        print(pacc.pptree())
 
 
 
@@ -1106,7 +1304,8 @@ if __name__ == "__main__":
     # create_mats()
     # q.argprun(load_matrices)
     q.argprun(run_seq2seq_tf)
-    # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID1 UWID2 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
+    # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
+    # test_df_lins(tree)
     # print(tree.pptree())
     # treestr = tree.pp()
     # treestr = treestr.replace("*NC", "")

@@ -545,4 +545,5 @@ def run(lr=0.1):
 
 
 if __name__ == "__main__":
-    q.argprun(run)
+    test_tracker()
+    # q.argprun(run)

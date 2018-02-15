@@ -792,7 +792,8 @@ def run_seq2tree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=
     validlosses = q.lossarray(#q.SeqCrossEntropyLoss(ignore_index=0),
                               q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                               q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_geo(Node.parse(tracker.pp(x)))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
@@ -1051,7 +1052,8 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
     validlosses = q.lossarray(#q.SeqCrossEntropyLoss(ignore_index=0),
                               q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                               q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_geo(Node.parse(tracker.pp(x)))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
@@ -1195,6 +1197,18 @@ class BFTreePredCutter(object):
             except Exception as e:
                 a[i, :] = ignore_index
         return a
+
+
+def order_adder_geo(parse):
+    # add order:
+    def order_adder_rec(y):
+        for i, ychild in enumerate(y.children):
+            if not y.name in "and or".split():
+                ychild.order = i
+            order_adder_rec(ychild)
+
+    order_adder_rec(parse)
+    return parse
 
 
 def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=OPT_BATSIZE,
@@ -1434,7 +1448,7 @@ def run_seq2seq_oracle(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsi
         q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
         q.SeqAccuracy(ignore_index=0),
         TreeAccuracy(ignore_index=0,
-                     treeparser=lambda x: Node.parse(tracker.pp(x))))
+                     treeparser=lambda x: order_adder_geo(Node.parse(tracker.pp(x)))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
@@ -1632,13 +1646,15 @@ def run_seq2seq_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, batsize=O
                          # q.SeqNLLLoss(ignore_index=0),
                          q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
                          q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                         TreeAccuracy(ignore_index=0,
+                                      treeparser=lambda x: order_adder_geo(Node.parse(tracker.pp(x)))))
 
 
     validlosses = q.lossarray(  # q.SeqCrossEntropyLoss(ignore_index=0),
         q.MacroBLEU(ignore_index=0, predcut=BFTreePredCutter(tracker)),
         q.SeqAccuracy(ignore_index=0),
-        TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+        TreeAccuracy(ignore_index=0,
+                     treeparser=lambda x: order_adder_geo(Node.parse(tracker.pp(x)))))
 
     logger.update_settings(optimizer="rmsprop")
     optim = torch.optim.RMSprop(q.paramgroups_of(encdec), lr=lr, weight_decay=wreg)
@@ -1914,6 +1930,6 @@ if __name__ == "__main__":
     # q.argprun(run_seq2seq_reproduction)
     # q.argprun(run_seq2seq_oracle)
     # q.argprun(run_seq2tree_tf)
-    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_realrepro)
-    q.argprun(run_seq2simpletree_tf)
+    # q.argprun(run_seq2simpletree_tf)
