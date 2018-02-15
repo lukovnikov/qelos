@@ -362,8 +362,8 @@ class SqlNode(Node):
 
     @classmethod
     def parse_sql(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
-        """ ONLY FOR CANONICAL LIN WITH THE RIGHT ORDERS, FOR NORMAL DF USE .parse_df()
-        automatically assigns order to children of <VAL> !!! """
+        """ ONLY FOR ORIGINAL LIN, FOR NORMAL DF WITH ANNOTATIONS USE .parse_df()
+            * Automatically assigns order to children of <VAL> !!! """
         if len(inp) == 0:
             return []
         tokens = inp
@@ -503,7 +503,8 @@ class SqlGroupTracker(object):
         tracker = self.trackers[eid]
         nvt = tracker._nvt
         if len(nvt) == 0:
-            nvt = {u"<RARE>"}
+            # nvt = {u"<RARE>"}
+            nvt = {u'<MASK>'}           # <-- why was rare? loss handles -inf on mask now
         _nvt = set()
         for x in nvt:
             x = x.replace(u"*NC", u"")
@@ -608,7 +609,8 @@ class SqlGroupTrackerDF(object):
         nvt = tracker._nvt      # with structure annotation
         if len(nvt) == 0:
             if self._did_the_end[eid] is True:
-                nvt = {u'<RARE>'}
+                # nvt = {u'<RARE>'}
+                nvt = {u'<MASK>'}           # <-- why was rare? loss handles -inf on mask now
             else:
                 nvt = {u"<END>"}
                 self._did_the_end[eid] = True
@@ -1296,15 +1298,18 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                    dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     class EncDec(torch.nn.Module):
-        def __init__(self, dec):
+        def __init__(self, dec, maxtime=None):
             super(EncDec, self).__init__()
             self.inpemb = inpemb
             self.outemb = outemb
             self.outlin = outlin
             self.encoder = encoder
             self.decoder = dec
+            self.maxtime = maxtime
 
-        def forward(self, inpseq, outseq, inpseqmaps, colnames):
+        def forward(self, inpseq, outseq_starts, inpseqmaps, colnames,
+                    eids=None, maxtime=None):
+            maxtime = self.maxtime if maxtime is None else maxtime
             self.inpemb.prepare(inpseqmaps)
 
             _inpembs, _inpmask = self.inpemb(inpseq)
@@ -1316,10 +1321,12 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
             self.outemb.prepare(inpseqmaps, colnames)
             self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
-            decoding = self.decoder(outseq,
+            decoding = self.decoder(outseq_starts,
                                     ctx=ctx,
                                     ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
-                                    ctxmask=inpmask)
+                                    ctxmask=inpmask,
+                                    eids=eids,
+                                    maxtime=maxtime)
             return decoding
 
     # region decoders and models
@@ -1341,7 +1348,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     valid_decoder_cell.set_runner(q.FreeRunner())
     valid_decoder = valid_decoder_cell.to_decoder()
 
-    valid_m = EncDec(valid_decoder)
+    valid_m = EncDec(valid_decoder, maxtime=osm.matrix.shape[1]+1)      # TODO: check maxtime
     # endregion
 
     if test:
@@ -1349,13 +1356,19 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         devstart = 50
         teststart = 100
 
-    # region data splits
-    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
-    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
-    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
-    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # TODO: check wtf is going on downstairs
+    # region DATA LOADING
+    starts = osm.matrix[:, 0]
+    alldata = [ism.matrix, starts, psm.matrix, e2cn, eids, osm.matrix, eids]
+    traindata = [amat[:devstart] for amat in alldata]
+    validdata = [amat[devstart:teststart] for amat in alldata]
+    testdata =  [amat[teststart:] for amat in alldata]
+    # traindata = [ism.matrix[:devstart], starts[:devstart], psm.matrix[:devstart], e2cn[:devstart], eids[:start]]
+    # validdata = [ism.matrix[devstart:teststart], starts[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    # testdata = [ism.matrix[teststart:], starts[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
+    trainloader = q.dataload(*[traindata[i] for i in [0, 1, 2, 3, 4, 6]], batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*[validdata[i] for i in [0, 1, 2, 3, 5]], batch_size=batsize, shuffle=False)
+    testloader =  q.dataload(*[testdata[i]  for i in [0, 1, 2, 3, 5]], batch_size=batsize, shuffle=False)
     # endregion
 
     losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
@@ -1365,21 +1378,31 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
-                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+                                           treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
     optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
 
-    def inp_bt(a, b, c, colnameids):
+    def inp_bt(a, b, c, colnameids, d, e):      # e is gold, is eids
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
         colnames = q.var(colnames).cuda(colnameids).v
-        return a, b[:, :-1], c, colnames, b[:, 1:]
+        return a, b, c, colnames, d, e
+
+    def valid_inp_bt(a, b, c, colnameids, d):   # d is gold, is sequences of ids
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b, c, colnames, d
+
+    out_btf = lambda _out: _out[:, :-1, :]                  # TODO: why? --> to match seqlen from valid gold
+    gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
+    valid_gold_btf = lambda x: x[:, 1:]
 
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm)\
-        .set_batch_transformer(inp_bt)\
+        .set_batch_transformer(inp_bt, out_btf, gold_btf)\
         .valid_with(valid_m).valid_on(validloader, validlosses)\
+        .set_valid_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)
@@ -1389,11 +1412,11 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # region final numbers
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
-                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+                                           treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     validresults = q.test(valid_m) \
         .on(validloader, finalvalidlosses) \
-        .set_batch_transformer(inp_bt) \
+        .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
         .cuda(cuda) \
         .run()
 
@@ -1402,11 +1425,11 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
-                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+                                           treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     testresults = q.test(valid_m) \
         .on(testloader, testlosses) \
-        .set_batch_transformer(inp_bt) \
+        .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
         .cuda(cuda) \
         .run()
 
