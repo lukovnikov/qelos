@@ -16,6 +16,9 @@ import random
 from unidecode import unidecode
 
 
+_opt_test = True
+
+
 # region DATA
 # region PREPARING DATA
 def prepare_data(p="../../../datasets/wikisql/"):
@@ -315,7 +318,20 @@ def ppq(i, ism, psm):
 # endregion
 # endregion
 
+
 # region SQL TREES
+def order_adder_wikisql(parse):
+    # add order:
+    def order_adder_rec(y):
+        for i, ychild in enumerate(y.children):
+            if y.name == "<VAL>":
+                ychild.order = i
+            order_adder_rec(ychild)
+
+    order_adder_rec(parse)
+    return parse
+
+
 class SqlNode(Node):
     name2ctrl = {
         "<SELECT>": "A",
@@ -332,8 +348,22 @@ class SqlNode(Node):
     def __init__(self, name, order=None, children=tuple(), **kw):
         super(SqlNode, self).__init__(name, order=order, children=children, **kw)
 
+    def __eq__(self, other):
+        return super(SqlNode, self).__eq__(other)
+
+    @classmethod
+    def parse_df(cls, inp, _toprec=True):
+        if _toprec:
+            parse = super(SqlNode, cls).parse_df(inp, _toprec=_toprec)
+            order_adder_wikisql(parse)
+            return parse
+        else:
+            return super(SqlNode, cls).parse_df(inp, _toprec)
+
     @classmethod
     def parse_sql(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
+        """ ONLY FOR CANONICAL LIN WITH THE RIGHT ORDERS, FOR NORMAL DF USE .parse_df()
+        automatically assigns order to children of <VAL> !!! """
         if len(inp) == 0:
             return []
         tokens = inp
@@ -349,7 +379,15 @@ class SqlNode(Node):
                    "<COND>": {"<WHERE>"},
                    "<VAL>": {"<COND>"},}
         while True:
+            head, islast, isleaf = head, None, None
+
+            headsplits = head.split(SqlNode.suffix_sep)
+            if len(headsplits) > 1:
+                head, islast, isleaf = headsplits[0], SqlNode.last_suffix in headsplits, SqlNode.leaf_suffix in headsplits
+
             if head == "<QUERY>":
+                assert(isleaf is None or isleaf is False)
+                assert(islast is None or islast is True)
                 children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
                 ret = SqlNode(head, children=children)
                 break
@@ -357,6 +395,7 @@ class SqlNode(Node):
                 ret = siblings, []
                 break
             elif head in jumpers:
+                assert(isleaf is None or isleaf is False)
                 if _rec_arg in jumpers[head]:
                     children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
                     if head == "<VAL>":
@@ -373,13 +412,14 @@ class SqlNode(Node):
                     ret = siblings, [head] + tail
                     break
             else:
+                assert(isleaf is None or isleaf is True)
                 node = SqlNode(head)
                 siblings.append(node)
-                if len(tail) > 0:
-                    head, tail = tail[0], tail[1:]
-                else:
+                if head == "<ENDVAL>" or len(tail) == 0:
                     ret = siblings, tail
                     break
+                else:
+                    head, tail = tail[0], tail[1:]
         if isinstance(ret, tuple):
             if _toprec:
                 raise q.SumTingWongException("didn't parse SQL in .parse_sql()")
@@ -415,7 +455,9 @@ class SqlNode(Node):
 
 
 def make_tracker(osm):
-    tt = q.ticktock("tree tracker maker"); tt.tick("flushing trees"); trees = []
+    tt = q.ticktock("tree tracker maker")
+    tt.tick("flushing trees")
+    trees = []
     for i in range(len(osm.matrix)):
         tree = SqlNode.parse_sql(osm[i])
         trees.append(tree)
@@ -500,6 +542,109 @@ class SqlGroupTracker(object):
             else:
                 for tracker in self.trackers:
                     tracker.reset()
+
+
+def make_tracker_df(osm):
+    tt = q.ticktock("tree tracker maker")
+    tt.tick("making trees")
+    trees = []
+    for i in range(len(osm.matrix)):
+        tree = SqlNode.parse_sql(osm[i])
+        trees.append(tree)
+    tracker = SqlGroupTrackerDF(trees, osm.D)
+    tt.tock("trees made")
+
+    if True:
+        for k in range(100):
+            accs = set()
+            for j in range(500):
+                acc = u""
+                tracker.reset()
+                while True:
+                    if tracker.is_terminated(k):
+                        break
+                    vnt = tracker.get_valid_next(k)
+                    sel = random.choice(vnt)
+                    acc += u" " + tracker.rD[sel]
+                    tracker.update(k, sel)
+                accs.add(acc)
+                if not SqlNode.parse_sql(unidecode(acc)).equals(tracker.trackables[k]):
+                    print(tracker.trackables[k].pptree())
+                    print(SqlNode.parse_sql(unidecode(acc)).pptree())
+                    raise q.SumTingWongException("trees not equal")
+            print("number of unique linearizations for example {}: {}".format(k, len(accs)))
+    return tracker
+
+
+class SqlGroupTrackerDF(object):
+    def __init__(self, trackables, coreD):
+        super(SqlGroupTrackerDF, self).__init__()
+        self.trackables = trackables
+        self.D = coreD
+        self.rD = {v: k for k, v in self.D.items()}
+        self.trackers = []
+        for xe in self.trackables:
+            tracker = NodeTrackerDF(xe)
+            self.trackers.append(tracker)
+        self._dirty_ids = set()
+        self._did_the_end = [False] * len(self.trackers)
+
+    def reset(self, *which, **kw):
+        force = q.getkw(kw, "force", default=False)
+        if len(which) > 0:
+            for w in which:
+                self.trackers[w].reset()
+                self._did_the_end[w] = False
+        else:
+            if not force and len(self._dirty_ids) > 0:
+                self.reset(*list(self._dirty_ids))
+            else:
+                for tracker in self.trackers:
+                    tracker.reset()
+                self._did_the_end = [False] * len(self.trackers)
+
+    def get_valid_next(self, eid):
+        tracker = self.trackers[eid]
+        nvt = tracker._nvt      # with structure annotation
+        if len(nvt) == 0:
+            if self._did_the_end[eid] is True:
+                nvt = {u'<RARE>'}
+            else:
+                nvt = {u"<END>"}
+                self._did_the_end[eid] = True
+                self._dirty_ids.add(eid)
+        _nvt = set()
+        for x in nvt:
+            x = x.replace(u'*NC', u'').replace(u'*LS', u'')
+            _nvt.add(x)
+        nvt = map(lambda x: self.D[x], _nvt)
+        return nvt
+
+    def update(self, eid, x, altx=None):
+        tracker = self.trackers[eid]
+        self._dirty_ids.add(eid)
+        nvt = tracker._nvt
+        if len(nvt) == 0:
+            pass
+        else:
+            core = self.rD[x]
+            suffix = u''
+            if core not in u"<QUERY> <SELECT> <WHERE> <COND> <VAL>".split():
+                suffix += u'*NC'
+            if core in u'<ENDVAL> <END> <QUERY>'.split():
+                suffix += u'*LS'
+            else:       # check previous _nvt, if it occurred as *LS there, do *LS
+                if core + suffix in nvt and not (core + suffix + u'*LS' in nvt):
+                    suffix += u''
+                elif core + suffix + u'*LS' in nvt and not (core + suffix in nvt):
+                    suffix += u'*LS'
+                else:
+                    raise q.SumTingWongException("some ting wong in sql tracker df")
+            x = core + suffix
+            tracker.nxt(x)
+
+    def is_terminated(self, eid):
+        return self.trackers[eid].is_terminated() and self._did_the_end[eid] is True
 
 
 def make_struct_linout(lindim, baselinout, coreD, outD, tie_weights=False, chained=False, ttt=None):
@@ -604,8 +749,8 @@ def make_struct_emb(embdim, baseemb, coreD, outD, ttt=None):
     return ret
 # endregion
 
-# region DYNAMIC VECTORS
 
+# region DYNAMIC VECTORS
 from qelos.word import WordEmbBase, WordLinoutBase
 
 
@@ -926,16 +1071,16 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
 
 # endregion
 
-def order_adder_wikisql(parse):
-    # add order:
-    def order_adder_rec(y):
-        for i, ychild in enumerate(y.children):
-            if y.name == "<VAL>":
-                ychild.order = i
-            order_adder_rec(ychild)
 
-    order_adder_rec(parse)
-    return parse
+def make_oracle_df(tracker, mode=None):
+    ttt = q.ticktock("oracle maker")
+    print("oracle mode: {}".format(mode))
+    oracle = q.DynamicOracleRunner(tracker=tracker,
+                                   mode=mode,
+                                   explore=0.)
+
+    if _opt_test:
+        print("TODO: oracle tests")
 
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
@@ -1104,6 +1249,175 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     print("TEST RESULTS:")
     print(testresults)
     # endregion
+
+
+def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
+                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
+                   wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
+                   cuda=False, gpu=0, tag="none", test=False, oraclemode="argmax-uniform"):
+    settings = locals().copy()
+    logger = q.Logger(prefix="wikisql_s2s_oracle_df")
+    logger.save_settings(**settings)
+    logger.update_settings(completed=False)
+    logger.update_settings(version="0.9")
+
+    if gdim < 0:
+        gdim = None
+
+    if dim > 0:
+        innerdim = dim
+        inpembdim = dim // 2
+        outembdim = inpembdim
+
+    print("Seq2Seq + ORACLE-DF")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    ism, osm, csm, psm, splits, e2cn = load_matrices()
+    psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
+
+    tracker = make_tracker_df(osm)     # TODO: only for bf
+    oracle = make_oracle_df(tracker, mode=oraclemode)
+
+    devstart, teststart = splits
+    eids = np.arange(0, len(ism), dtype="int64")
+
+    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
+
+    # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+
+    # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    # has to be compatible with outlin dim
+    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+                                   dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
+
+    class EncDec(torch.nn.Module):
+        def __init__(self, dec):
+            super(EncDec, self).__init__()
+            self.inpemb = inpemb
+            self.outemb = outemb
+            self.outlin = outlin
+            self.encoder = encoder
+            self.decoder = dec
+
+        def forward(self, inpseq, outseq, inpseqmaps, colnames):
+            self.inpemb.prepare(inpseqmaps)
+
+            _inpembs, _inpmask = self.inpemb(inpseq)
+            _inpenc = self.encoder(_inpembs, mask=_inpmask)
+            inpmask = _inpmask[:, :_inpenc.size(1)]
+            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
+            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+
+            self.outemb.prepare(inpseqmaps, colnames)
+            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
+
+            decoding = self.decoder(outseq,
+                                    ctx=ctx,
+                                    ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
+                                    ctxmask=inpmask)
+            return decoding
+
+    # region decoders and models
+    # train decoder with teacher forcing, valid decoder with freerunning
+    decdims = [outembdim] + [innerdim] * numlayers
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout) for i in range(1, len(decdims))]
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(edropout),
+                                               outlin, ctx2out=False)
+
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(oracle)
+    decoder = decoder_cell.to_decoder()
+
+    m = EncDec(decoder)
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    valid_m = EncDec(valid_decoder)
+    # endregion
+
+    if test:
+        print("BEWARE: TEST MODE MINI SPLITS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        devstart = 50
+        teststart = 100
+
+    # region data splits
+    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
+    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
+    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # endregion
+
+    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
+                         )
+
+    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    logger.update_settings(optimizer="adam")
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+
+    def inp_bt(a, b, c, colnameids):
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b[:, :-1], c, colnames, b[:, 1:]
+
+    q.train(m).train_on(trainloader, losses)\
+        .optimizer(optim)\
+        .clip_grad_norm(gradnorm)\
+        .set_batch_transformer(inp_bt)\
+        .valid_with(valid_m).valid_on(validloader, validlosses)\
+        .cuda(cuda)\
+        .hook(logger)\
+        .train(epochs)
+
+    logger.update_settings(completed=True)
+
+    # region final numbers
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    validresults = q.test(valid_m) \
+        .on(validloader, finalvalidlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    print("DEV RESULTS:")
+    print(validresults)
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    testresults = q.test(valid_m) \
+        .on(testloader, testlosses) \
+        .set_batch_transformer(inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
+    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
+
+    print("TEST RESULTS:")
+    print(testresults)
+    # endregion
+
+
 
 
 
@@ -1284,7 +1598,7 @@ def test_df_lins(tree):
     for i in range(1000):
         acc = u""
         tracker.reset()
-        for j in range(25):
+        while True:
             vnt = tracker._nvt
             if len(vnt) == 0:
                 break
@@ -1292,10 +1606,10 @@ def test_df_lins(tree):
             acc += u" " + sel
             tracker.nxt(sel)
         accs.add(acc)
+        pacc = SqlNode.parse_df((unidecode(acc)))
+        assert(pacc.equals(tree))
     print("number of unique linearizations for toy example: ", len(accs))
-    for acc in accs:
-        pacc = SqlNode.parse(unidecode(acc))
-        print(pacc.pptree())
+        # print(pacc.pptree())
 
 
 
@@ -1303,7 +1617,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())

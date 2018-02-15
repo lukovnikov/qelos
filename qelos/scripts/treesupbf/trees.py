@@ -83,7 +83,7 @@ class Node(Trackable):
         siblings = []
 
         while True:
-            head, tail = tokens[0], tokens[1:]
+            head, tokens = tokens[0], tokens[1:]
             xsplits = head.split(cls.suffix_sep)
             x, isleaf, islast = xsplits[0], cls.leaf_suffix in xsplits, cls.last_suffix in xsplits
             headname, headlabel = x, None
@@ -95,16 +95,17 @@ class Node(Trackable):
 
             children = tuple()
             if not isleaf:
-                children = cls.parse_df(tail, _toprec=False)
+                children, tokens = cls.parse_df(tokens, _toprec=False)
 
             newnode = Node(headname, label=headlabel, order=headorder, children=children)
             siblings.append(newnode)
 
             if islast:
                 if _toprec:
-                    break
+                    assert(len(siblings) == 1)
+                    return siblings[0]
                 else:
-                    pass
+                    return siblings, tokens
 
     @classmethod
     def parse(cls, inp, _rec_arg=None, _toprec=True, _ret_remainder=False):
@@ -378,13 +379,14 @@ class Node(Trackable):
             labels.update(childlabels)
         return names, labels
 
-    def __eq__(self, other):
+    def equals(self, other):
         if other is None:
             return False
         ret = self._eq_rec(other)
-        if ret is True and "and" in self.pp():
-            pass
         return ret
+
+    def __eq__(self, other):
+        self.equals(other)
 
     def _eq_rec(self, other, _self_pos_in_list=None, _other_pos_in_list=None):
         if isinstance(other, list):

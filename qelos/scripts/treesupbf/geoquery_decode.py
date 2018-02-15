@@ -1077,7 +1077,8 @@ def run_seq2simpletree_tf(lr=OPT_LR, lrdecay=OPT_LR_DECAY, epochs=OPT_EPOCHS, ba
         .cuda(cuda).run()
 
 
-def make_oracle(tracker, symbols2cores, symbols2ctrl, mode=OPT_ORACLEMODE, withannotations=False, cuda=False, ttt=None,
+def make_oracle(tracker, symbols2cores, symbols2ctrl, mode=OPT_ORACLEMODE,
+                withannotations=False, cuda=False, ttt=None,
                 trees=None):      # this line of args is for testing
     if ttt is None:
         ttt = q.ticktock("oraclemaker")
