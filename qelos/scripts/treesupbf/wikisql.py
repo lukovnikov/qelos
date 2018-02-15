@@ -555,7 +555,7 @@ def make_tracker_df(osm):
     tracker = SqlGroupTrackerDF(trees, osm.D)
     tt.tock("trees made")
 
-    if True:
+    if False:
         for k in range(100):
             accs = set()
             for j in range(500):
@@ -622,7 +622,7 @@ class SqlGroupTrackerDF(object):
         nvt = map(lambda x: self.D[x], _nvt)
         return nvt
 
-    def update(self, eid, x, altx=None):
+    def update(self, eid, x, alt_x=None):
         tracker = self.trackers[eid]
         self._dirty_ids.add(eid)
         nvt = tracker._nvt
@@ -799,7 +799,7 @@ class DynamicWordEmb(WordEmbBase):
             xdim = x.dim()
             if xdim == 1:
                 x = x.unsqueeze(1)
-            ret = vecs.gather(1, x.unsqueeze(2).repeat(1, 1, vecs.size(2)))
+            ret = vecs.gather(1, x.clone().unsqueeze(2).repeat(1, 1, vecs.size(2)))
             if xdim == 1:
                 ret = ret.squeeze(1)
             return ret
@@ -1083,6 +1083,7 @@ def make_oracle_df(tracker, mode=None):
 
     if _opt_test:
         print("TODO: oracle tests")
+    return oracle
 
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
@@ -1348,7 +1349,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     valid_decoder_cell.set_runner(q.FreeRunner())
     valid_decoder = valid_decoder_cell.to_decoder()
 
-    valid_m = EncDec(valid_decoder, maxtime=osm.matrix.shape[1]+1)      # TODO: check maxtime
+    valid_m = EncDec(valid_decoder, maxtime=osm.matrix.shape[1])      # TODO: check maxtime
     # endregion
 
     if test:
@@ -1393,9 +1394,14 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b, c, colnames, d
 
-    out_btf = lambda _out: _out[:, :-1, :]                  # TODO: why? --> to match seqlen from valid gold
-    gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
-    valid_gold_btf = lambda x: x[:, 1:]
+    def out_btf(_out):
+        return _out[:, :-1, :]                  # TODO: why? --> because oracle terminates decoding when all trackers terminate and the last output doesn't do anything
+
+    def gold_btf(_eids):
+            return torch.stack(oracle.goldacc, 1)
+
+    def valid_gold_btf(x):
+        return x[:, 1:]
 
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
@@ -1444,7 +1450,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
 
 
-# TODO: same as above but should be using BF-lin from trees and the struct linout
+# TODO: same as df-tf but should be using BF-lin from trees and the struct linout
 def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
