@@ -1395,7 +1395,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         return a, b, c, colnames, d
 
     def out_btf(_out):
-        return _out[:, :-1, :]                  # TODO: why? --> because oracle terminates decoding when all trackers terminate and the last output doesn't do anything
+        return _out[:, :-1, :]      # TODO: why? --> because oracle terminates decoding
+                                    # when all trackers terminate and the last output doesn't correspond to anything in goldacc
 
     def gold_btf(_eids):
             return torch.stack(oracle.goldacc, 1)
