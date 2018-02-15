@@ -1194,7 +1194,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
     # endregion
 
-    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
                          #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
                          )
@@ -1277,6 +1277,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     ism, osm, csm, psm, splits, e2cn = load_matrices()
+
     psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
 
     tracker = make_tracker_df(osm)     # TODO: only for bf
@@ -1399,7 +1400,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                     # when all trackers terminate and the last output doesn't correspond to anything in goldacc
 
     def gold_btf(_eids):
-        q.embed()
+        # q.embed()
         return torch.stack(oracle.goldacc, 1)
 
     def valid_gold_btf(x):
