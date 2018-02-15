@@ -24,10 +24,10 @@ class Loss(nn.Module):
         else:
             total = y.size(0)
 
-        try:
-            loss = y.sum()
-        except Exception as e:
-            q.embed()
+        # try:
+        loss = y.sum()
+        # except Exception as e:
+        #     q.embed()
         if self.size_average:
             loss /= total
         return loss
@@ -173,7 +173,7 @@ class NLLLoss(DiscreteLoss):
 
             # MUL solution creates NaNs if any original probs had inf for masked elements
             # logprobs = logprobs * ignoremask.float()
-        q.embed()
+        # q.embed()
         return logprobs, ignoremask
 
 

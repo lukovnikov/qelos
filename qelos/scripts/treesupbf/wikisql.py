@@ -1399,7 +1399,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                     # when all trackers terminate and the last output doesn't correspond to anything in goldacc
 
     def gold_btf(_eids):
-            return torch.stack(oracle.goldacc, 1)
+        q.embed()
+        return torch.stack(oracle.goldacc, 1)
 
     def valid_gold_btf(x):
         return x[:, 1:]
