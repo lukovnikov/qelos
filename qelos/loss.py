@@ -173,7 +173,7 @@ class NLLLoss(DiscreteLoss):
 
             # MUL solution creates NaNs if any original probs had inf for masked elements
             # logprobs = logprobs * ignoremask.float()
-
+        q.embed()
         return logprobs, ignoremask
 
 
