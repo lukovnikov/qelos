@@ -29,7 +29,7 @@ class Loss(nn.Module):
         except Exception as e:
             print(y)
             print(gold)
-            print(self.__class__.__name__); print(x)
+            print(self.__class__.__name__); print(x); print(ignoremask)
         if self.size_average:
             loss /= total
         return loss
