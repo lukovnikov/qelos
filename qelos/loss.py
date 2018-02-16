@@ -18,7 +18,7 @@ class Loss(nn.Module):
             return y, ignoremask
 
         if ignoremask is not None:
-            y = y * ignoremask.float()
+            y = y * ignoremask.float().clamp(0, 1)      # ensure ignoremask is not higher than 1
         if ignoremask is not None and self._size_avg_ignore_mask:
             total = ignoremask.long().sum().data[0]
         else:
@@ -129,7 +129,7 @@ class SeqLoss(nn.Module):       # TODO: take end of sequence token into account
             if ignoremask is not None:
                 l = torch.autograd.Variable(l.byte().data | ~ ignoremask.data)
             ltotal = l.float().sum(1)
-            ltotal = ltotal == l.size(1)
+            ltotal = ltotal == float(l.size(1))
         elif self.time_agg == "eqtotal":
             ltotal = l.float().sum(1)
             print("DEPRECATED for 'all'")
