@@ -386,7 +386,7 @@ class Node(Trackable):
         return ret
 
     def __eq__(self, other):
-        self.equals(other)
+        return self.equals(other)
 
     def _eq_rec(self, other, _self_pos_in_list=None, _other_pos_in_list=None):
         if isinstance(other, list):
