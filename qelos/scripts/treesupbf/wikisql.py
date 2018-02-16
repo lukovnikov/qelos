@@ -332,7 +332,20 @@ def order_adder_wikisql(parse):
     return parse
 
 
+def order_adder_wikisql_limited(parse):
+    # add order:
+    def order_adder_rec(y):
+        for i, ychild in enumerate(y.children):
+            if y.name != "<WHERE>":
+                ychild.order = i
+            order_adder_rec(ychild)
+
+    order_adder_rec(parse)
+    return parse
+
+
 class SqlNode(Node):
+    mode = "normal"
     name2ctrl = {
         "<SELECT>": "A",
         "<WHERE>":  "A",
@@ -398,7 +411,7 @@ class SqlNode(Node):
                 assert(isleaf is None or isleaf is False)
                 if _rec_arg in jumpers[head]:
                     children, tail = cls.parse_sql(tail, _rec_arg=head, _toprec=False)
-                    if head == "<VAL>":
+                    if cls.mode == "normal" and head == "<VAL>":
                         for i, child in enumerate(children):
                             child.order = i
                     node = SqlNode(head, children=children)
@@ -426,6 +439,8 @@ class SqlNode(Node):
             else:
                 return ret
         else:
+            if SqlNode.mode == "limited":
+                order_adder_wikisql_limited(ret)
             return ret
 
     @classmethod
@@ -555,10 +570,10 @@ def make_tracker_df(osm):
     tracker = SqlGroupTrackerDF(trees, osm.D)
     tt.tock("trees made")
 
-    if False:
-        for k in range(100):
+    if True:
+        for k in range(5000,5100):      # TODO: 5034 throws error (nvts wrong) <-- should not affect tf script,
             accs = set()
-            for j in range(500):
+            for j in range(100):
                 acc = u""
                 tracker.reset()
                 while True:
@@ -570,6 +585,7 @@ def make_tracker_df(osm):
                     tracker.update(k, sel)
                 accs.add(acc)
                 if not SqlNode.parse_sql(unidecode(acc)).equals(tracker.trackables[k]):
+                    print(acc)
                     print(tracker.trackables[k].pptree())
                     print(SqlNode.parse_sql(unidecode(acc)).pptree())
                     raise q.SumTingWongException("trees not equal")
@@ -1259,12 +1275,17 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False, oraclemode="argmax-uniform"):
+                   cuda=False, gpu=0, tag="none", test=False,
+                          oraclemode="argmax-uniform", treemode="limited"):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_oracle_df")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="0.9")
+
+    SqlNode.mode = treemode     # TODO: make treemode and order assigning cleaner
+                                # TODO: make sure order info is used in valid and test
+                                # TODO: try training with order but valid and test without order
 
     if gdim < 0:
         gdim = None
@@ -1650,8 +1671,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
-    # q.argprun(run_seq2seq_oracle_df)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
