@@ -806,7 +806,7 @@ class DynamicWordEmb(WordEmbBase):
 
 
 class DynamicWordLinout(WordLinoutBase):
-    """ HAS SOFTMAX !!!!!!!!!!!!!!"""
+    """ HAS DEFAULT LOGSOFTMAX which you can disable !!!!!!!!!!!!!!"""
     def __init__(self, computer=None, worddic=None, selfsm=True):
         super(DynamicWordLinout, self).__init__(worddic)
         self.computer = computer

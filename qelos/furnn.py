@@ -1074,6 +1074,9 @@ class DynamicOracleRunner(q.DecoderRunner):
             ymask_expl = q.var(ymask_expl_np).cuda(y_t).v if use_expl_mask else None
 
             # get probs
+            for i in range(len(ymask[:, 0])):
+                if ymask[i].cpu().data[0] == 1:
+                    y_t[i, 0] = 0
             _y_t = y_t + torch.log(ymask)
             goldprobs, _ = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
 
