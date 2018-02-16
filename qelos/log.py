@@ -69,6 +69,11 @@ class Logger(q.AutoHooker):
         settings.update(kw)
         self.save_settings(**settings)
 
+    def save_lines(self, lines, filepath):
+        with open(self.p + "/" + filepath, "w") as f:
+            for line in lines:
+                f.write("{}\n".format(line))
+
     def get_hooks(self):
         return {q.train.START: self.on_start,
                 q.train.END_TRAIN: self.on_end_train,

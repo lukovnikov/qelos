@@ -570,12 +570,14 @@ def make_tracker_df(osm):
     tracker = SqlGroupTrackerDF(trees, osm.D)
     tt.tock("trees made")
 
-    if True:
+    if False:
         for k in range(5000,5100):      # TODO: 5034 throws error (nvts wrong) <-- should not affect tf script,
             accs = set()
             for j in range(100):
                 acc = u""
                 tracker.reset()
+                if k == 5033:
+                    pass
                 while True:
                     if tracker.is_terminated(k):
                         break
@@ -1228,6 +1230,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b[:, :-1], c, colnames, b[:, 1:]
 
+    if test:
+        dev_out = q.eval(valid_m).on(validloader).set_batch_transformer(inp_bt).run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        for line in lines:
+            print(line)
+
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm)\
@@ -1238,6 +1248,12 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .train(epochs)
 
     logger.update_settings(completed=True)
+
+    dev_out = q.eval(valid_m).on(validloader).set_batch_transformer(inp_bt).run()
+    _, dev_out = dev_out.max(2)
+    dev_out = dev_out.cpu().data.numpy()
+    lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+    logger.save_lines(lines, "dev_output.txt")
 
     # region final numbers
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
@@ -1671,8 +1687,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    # q.argprun(run_seq2seq_tf)
-    q.argprun(run_seq2seq_oracle_df)
+    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())

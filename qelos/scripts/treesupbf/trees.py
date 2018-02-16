@@ -749,14 +749,22 @@ class NodeTrackerDF(object):
                 possible_path = self.possible_paths[j]
                 new_possible_paths = []     # new possible paths from current possible_path
                 i = 0
+                orderused = False
                 while i < len(possible_path[-1]):   # look at bottom of stack
                     # check every node at top of possible path stack
                     # if node label is x, then clone
                     #       (1) remove node from top of stack (and top of stack too if empty)
                     #       (2) add all children of x on top of stack
                     #       (3) add this new stack as a new possible path
+                    # if node has order, don't repeat
                     node = possible_path[-1][i]
                     node_islast = len(possible_path[-1]) == 1
+                    if node.order is not None:
+                        if not orderused:
+                            orderused = True
+                        else:
+                            i += 1
+                            continue
                     if x == node.symbol(with_label=True, with_annotation=False, with_order=False) \
                             and node_islast == x_islast and node.is_leaf == x_isleaf:
                         new_possible_path = possible_path + []    # copy

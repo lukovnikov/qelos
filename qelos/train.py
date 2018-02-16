@@ -409,7 +409,7 @@ class eval(object):
             batch = [q.var(batch_e, volatile=True).cuda(self.usecuda).v for batch_e in batch]
             if self.transform_batch_inp is not None:
                 batch = self.transform_batch_inp(*batch)
-            modelouts = self.model(*batch)
+            modelouts = self.model(*batch[:-1])
             if self.transform_batch_out is not None:
                 modelouts = self.transform_batch_out(modelouts)
 
