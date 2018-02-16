@@ -1051,8 +1051,6 @@ class DynamicOracleRunner(q.DecoderRunner):
             x_t = x
             gold_t = x_t
         else:
-            next_mode = "argmax" if self._argmax_in_eval and not self.training else self.next_mode
-            gold_mode = self.gold_mode
             if q.issequence(y_t):
                 assert(len(y_t) == 1)
                 y_t = y_t[0]
@@ -1080,62 +1078,74 @@ class DynamicOracleRunner(q.DecoderRunner):
             _y_t = y_t + torch.log(ymask)
             goldprobs, _ = self.scores2probs(_y_t, mask=ymask)     # probs for allowed symbols
 
-            # sample gold from probs
-            if gold_mode == "sample":
-                gold_t = torch.distributions.Categorical(goldprobs).sample()
-                # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
-            elif gold_mode == "uniform":
-                gold_t = torch.distributions.Categorical(ymask).sample()
-            elif gold_mode == "esample":
-                gold_t = torch.distributions.Categorical(goldprobs).sample()
-                alt_gold_t = torch.distributions.Categorical(ymask).sample()
-                _epsprobs = (q.var(torch.rand(gold_t.size())).cuda(gold_t).v < self.eps).long()
-                gold_t = torch.gather(torch.stack([gold_t, alt_gold_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
-            elif gold_mode == "argmax":
-                _, gold_t = torch.max(goldprobs, 1)
-            else:
-                raise q.SumTingWongException("unsupported gold_mode: {}".format(gold_mode))
+            next_mode = "argmax" if self._argmax_in_eval and not self.training else self.next_mode
+            gold_mode = self.gold_mode
 
-            if self.explore == 0:
-                if self.next_mode == self.gold_mode:
-                    x_t = gold_t
-                else:
-                    if next_mode == "sample":
-                        x_t = torch.distributions.Categorical(goldprobs).sample()
-                        # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
-                    elif next_mode == "uniform":
-                        x_t = torch.distributions.Categorical(ymask).sample()
-                    elif next_mode == "esample":
-                        x_t = torch.distributions.Categorical(goldprobs).sample()
-                        alt_x_t = torch.distributions.Categorical(ymask).sample()
-                        _epsprobs = (q.var(torch.rand(x_t.size())).cuda(x_t).v < self.eps).long()
-                        x_t = torch.gather(torch.stack([x_t, alt_x_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
-                    elif next_mode == "argmax":
-                        _, x_t = torch.max(goldprobs, 1)
-                    else:
-                        raise q.SumTingWongException("unsupported next_mode: {}".format(next_mode))
+            if self.mode == "zerocost":
+                _, y_best = y_t.max(1)
+                _, gold_t = goldprobs.max(1)
+                y_random_valid = torch.distributions.Categorical(ymask).sample()
+                y_best_is_valid = torch.gather(ymask, 1, y_best.unsqueeze(1)).long()
+                nextcat = torch.stack([y_random_valid, y_best], 1)
+                x_t = torch.gather(nextcat, 1, y_best_is_valid)
+
             else:
-                _y_t = y_t + torch.log(ymask_expl) if ymask_expl is not None else y_t
-                unmaskedprobs = self.scores2probs(_y_t)
-                if next_mode == "sample":
-                    x_t = torch.distributions.Categorical(unmaskedprobs).sample()
-                    # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
-                elif next_mode == "uniform":
-                    expl_probs = ymask_expl if ymask_expl is not None else q.var(torch.ones(y_t.size())).cuda(y_t).v
-                    x_t = torch.distributions.Categorical(expl_probs).sample()
-                elif next_mode == "argmax":
-                    _, x_t = torch.max(unmaskedprobs, 1)
+                # sample gold from probs
+                if gold_mode == "sample":
+                    gold_t = torch.distributions.Categorical(goldprobs).sample()
+                    # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
+                elif gold_mode == "uniform":
+                    gold_t = torch.distributions.Categorical(ymask).sample()
+                elif gold_mode == "esample":
+                    gold_t = torch.distributions.Categorical(goldprobs).sample()
+                    alt_gold_t = torch.distributions.Categorical(ymask).sample()
+                    _epsprobs = (q.var(torch.rand(gold_t.size())).cuda(gold_t).v < self.eps).long()
+                    gold_t = torch.gather(torch.stack([gold_t, alt_gold_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
+                elif gold_mode == "argmax":
+                    _, gold_t = torch.max(goldprobs, 1)
                 else:
-                    raise q.SumTingWongException("unsupported mode: {}".format(next_mode))
-                if self.explore < 1:  # mixture
-                    mixmask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
-                    mixidx = mixmask.long()
-                    tomix = torch.stack([x_t, gold_t], 1)
-                    x_t = torch.gather(tomix, 1, mixidx.unsqueeze(1)).squeeze(-1)
-                # if sampled choice is in gold probs, set gold to sampled
-                x_t_in_goldprobs = (torch.gather(ymask, 1, x_t.unsqueeze(1)) > 0).long()
-                tomix = torch.stack([gold_t, x_t], 1)
-                gold_t = torch.gather(tomix, 1, x_t_in_goldprobs).squeeze(-1)
+                    raise q.SumTingWongException("unsupported gold_mode: {}".format(gold_mode))
+
+                if self.explore == 0:
+                    if self.next_mode == self.gold_mode:
+                        x_t = gold_t
+                    else:
+                        if next_mode == "sample":
+                            x_t = torch.distributions.Categorical(goldprobs).sample()
+                            # gold_t = torch.multinomial(goldprobs, 1).squeeze(-1).detach()
+                        elif next_mode == "uniform":
+                            x_t = torch.distributions.Categorical(ymask).sample()
+                        elif next_mode == "esample":
+                            x_t = torch.distributions.Categorical(goldprobs).sample()
+                            alt_x_t = torch.distributions.Categorical(ymask).sample()
+                            _epsprobs = (q.var(torch.rand(x_t.size())).cuda(x_t).v < self.eps).long()
+                            x_t = torch.gather(torch.stack([x_t, alt_x_t], 1), 1, _epsprobs.unsqueeze(1)).squeeze(1)
+                        elif next_mode == "argmax":
+                            _, x_t = torch.max(goldprobs, 1)
+                        else:
+                            raise q.SumTingWongException("unsupported next_mode: {}".format(next_mode))
+                else:
+                    _y_t = y_t + torch.log(ymask_expl) if ymask_expl is not None else y_t
+                    unmaskedprobs = self.scores2probs(_y_t)
+                    if next_mode == "sample":
+                        x_t = torch.distributions.Categorical(unmaskedprobs).sample()
+                        # x_t = torch.multinomial(unmaskedprobs, 1).squeeze(-1).detach()
+                    elif next_mode == "uniform":
+                        expl_probs = ymask_expl if ymask_expl is not None else q.var(torch.ones(y_t.size())).cuda(y_t).v
+                        x_t = torch.distributions.Categorical(expl_probs).sample()
+                    elif next_mode == "argmax":
+                        _, x_t = torch.max(unmaskedprobs, 1)
+                    else:
+                        raise q.SumTingWongException("unsupported mode: {}".format(next_mode))
+                    if self.explore < 1:  # mixture
+                        mixmask = q.var(torch.rand(x_t.size())).cuda(x_t).v > self.explore
+                        mixidx = mixmask.long()
+                        tomix = torch.stack([x_t, gold_t], 1)
+                        x_t = torch.gather(tomix, 1, mixidx.unsqueeze(1)).squeeze(-1)
+                    # if sampled choice is in gold probs, set gold to sampled
+                    x_t_in_goldprobs = (torch.gather(ymask, 1, x_t.unsqueeze(1)) > 0).long()
+                    tomix = torch.stack([gold_t, x_t], 1)
+                    gold_t = torch.gather(tomix, 1, x_t_in_goldprobs).squeeze(-1)
 
             # store sampled
             self.seqacc.append(x_t)

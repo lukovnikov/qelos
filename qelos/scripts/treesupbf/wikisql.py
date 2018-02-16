@@ -1231,13 +1231,31 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b[:, :-1], c, colnames, b[:, 1:]
 
-    if test:
-        dev_out = q.eval(valid_m).on(validloader).set_batch_transformer(inp_bt).run()
+    def get_output_lines(_model, validloader):
+        dev_out = q.eval(_model).on(validloader).set_batch_transformer(inp_bt).run()
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
         lines = [line.split(u"<END>")[0] for line in lines]
+        gold_lines = [osm[i] for i in range(devstart, teststart)] # TODO
+        linestrees = []
         for line in lines:
+            try:
+                linetree = SqlNode.parse_sql(line)
+            except Exception as e:
+                linetree = None
+            linestrees.append(linetree)
+        goldstrees = [SqlNode.parse_sql(line) for line in gold_lines]
+        ret = []
+        for line, goldline, linetree, goldtree in zip(lines, gold_lines, linestrees, goldstrees):
+            if goldtree.equals(linetree):
+                ret.append(u"{}: {}".format(u"correct", line))
+            else:
+                ret.append(u"{}: {} ||--> gold: {}".format((u'WONG!' if linetree is not None else u'INVALID'), line, goldline))
+        return ret
+
+    if test:
+        for line in get_output_lines(valid_m, validloader):
             print(line)
 
     q.train(m).train_on(trainloader, losses)\
@@ -1251,11 +1269,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     logger.update_settings(completed=True)
 
-    dev_out = q.eval(valid_m).on(validloader).set_batch_transformer(inp_bt).run()
-    _, dev_out = dev_out.max(2)
-    dev_out = dev_out.cpu().data.numpy()
-    lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
-    lines = [line.split(u"<END>")[0] for line in lines]
+    lines = get_output_lines(valid_m, validloader)
     logger.save_lines(lines, "dev_output.txt")
 
     # region final numbers
@@ -1295,7 +1309,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", test=False,
-                          oraclemode="argmax-uniform", treemode="normal"):
+                          oraclemode="zerocost", treemode="normal"):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_oracle_df")
     logger.save_settings(**settings)
@@ -1321,7 +1335,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
 
-    tracker = make_tracker_df(osm)     # TODO: only for bf
+    tracker = make_tracker_df(osm)
     oracle = make_oracle_df(tracker, mode=oraclemode)
 
     devstart, teststart = splits
