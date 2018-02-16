@@ -1095,7 +1095,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="1.0")
+    logger.update_settings(version="1.1")
 
     if gdim < 0:
         gdim = None
