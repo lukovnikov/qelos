@@ -1295,7 +1295,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", test=False,
-                          oraclemode="argmax-uniform", treemode="limited"):
+                          oraclemode="argmax-uniform", treemode="normal"):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_oracle_df")
     logger.save_settings(**settings)
