@@ -1087,7 +1087,7 @@ class DynamicOracleRunner(q.DecoderRunner):
                 y_random_valid = torch.distributions.Categorical(ymask).sample()
                 y_best_is_valid = torch.gather(ymask, 1, y_best.unsqueeze(1)).long()
                 nextcat = torch.stack([y_random_valid, y_best], 1)
-                x_t = torch.gather(nextcat, 1, y_best_is_valid)
+                x_t = torch.gather(nextcat, 1, y_best_is_valid).squeeze(1)
 
             else:
                 # sample gold from probs

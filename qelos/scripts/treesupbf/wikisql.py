@@ -1320,6 +1320,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                 # TODO: make sure order info is used in valid and test
                                 # TODO: try training with order but valid and test without order
 
+    print("SqlNode treemode: {}".format(SqlNode.mode))
+
     if gdim < 0:
         gdim = None
 
@@ -1737,8 +1739,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
-    # q.argprun(run_seq2seq_oracle_df)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
