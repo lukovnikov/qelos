@@ -806,6 +806,7 @@ class DynamicWordEmb(WordEmbBase):
 
 
 class DynamicWordLinout(WordLinoutBase):
+    """ HAS SOFTMAX !!!!!!!!!!!!!!"""
     def __init__(self, computer=None, worddic=None, selfsm=True):
         super(DynamicWordLinout, self).__init__(worddic)
         self.computer = computer
@@ -855,8 +856,8 @@ class DynamicWordLinout(WordLinoutBase):
 
 
 class BFOL(DynamicWordLinout):
-    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None):
-        super(BFOL, self).__init__(computer=computer, worddic=worddic)
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True):
+        super(BFOL, self).__init__(computer=computer, worddic=worddic, selfsm=selfsm)
         self.inppos2uwid = None
         self.inpenc = None
         self.ismD = ismD
@@ -1068,7 +1069,7 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useg
     comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False)
     return out
 
 # endregion
@@ -1373,7 +1374,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     testloader =  q.dataload(*[testdata[i]  for i in [0, 1, 2, 3, 5]], batch_size=batsize, shuffle=False)
     # endregion
 
-    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
                          #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
                          )
