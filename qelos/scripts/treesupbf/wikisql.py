@@ -1461,6 +1461,36 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     def valid_gold_btf(x):
         return x[:, 1:]
 
+    def get_output_lines(_model, validloader):
+        dev_out = q.eval(_model).on(validloader)\
+            .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf)\
+            .run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
+        gold_lines = [osm[i] for i in range(devstart, teststart)]  # TODO
+        linestrees = []
+        for line in lines:
+            try:
+                linetree = SqlNode.parse_sql(line)
+            except Exception as e:
+                linetree = None
+            linestrees.append(linetree)
+        goldstrees = [SqlNode.parse_sql(line) for line in gold_lines]
+        ret = []
+        for line, goldline, linetree, goldtree in zip(lines, gold_lines, linestrees, goldstrees):
+            if goldtree.equals(linetree):
+                ret.append(u"{}: {}".format(u"correct", line))
+            else:
+                ret.append(
+                    u"{}: {} ||--> gold: {}".format((u'WONG!' if linetree is not None else u'INVALID'), line, goldline))
+        return ret
+
+    if test:
+        for line in get_output_lines(valid_m, validloader):
+            print(line)
+
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm)\
@@ -1472,6 +1502,9 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         .train(epochs)
 
     logger.update_settings(completed=True)
+
+    lines = get_output_lines(valid_m, validloader)
+    logger.save_lines(lines, "dev_output.txt")
 
     # region final numbers
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
