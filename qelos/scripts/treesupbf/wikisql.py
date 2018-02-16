@@ -659,7 +659,8 @@ class SqlGroupTrackerDF(object):
                 elif core + suffix + u'*LS' in nvt and not (core + suffix in nvt):
                     suffix += u'*LS'
                 else:
-                    raise q.SumTingWongException("some ting wong in sql tracker df")
+                    suffix += u''
+                    print("sum ting wong in sql tracker df !!!!!!!!!!!")
             x = core + suffix
             tracker.nxt(x)
 
@@ -1235,6 +1236,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
         for line in lines:
             print(line)
 
@@ -1253,6 +1255,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     _, dev_out = dev_out.max(2)
     dev_out = dev_out.cpu().data.numpy()
     lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+    lines = [line.split(u"<END>")[0] for line in lines]
     logger.save_lines(lines, "dev_output.txt")
 
     # region final numbers
