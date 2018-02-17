@@ -391,6 +391,7 @@ class Node(Trackable):
     def _eq_rec(self, other, _self_pos_in_list=None, _other_pos_in_list=None):
         if isinstance(other, list):
             print("other is list")
+            return False
         same = self.name == other.name
         same &= self.label == other.label
         # same &= self.order == other.order

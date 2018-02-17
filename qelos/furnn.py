@@ -978,6 +978,143 @@ class SimpleParentStackCell(RecStatefulContainer):      # breadth-first tree dec
         return cell_out, {"t": t, "x_t_emb": y_f_tm1_emb, "ctx_t": ctx_t, "mask": outmask_t}
 
 
+class SimpleTreeDecoderDF(RecStatefulContainer):
+    """ attempt at faster implementation of simple tree decoder but depth-first.
+
+        Implementation:
+            * history of states across time steps is stored in state history, new states are appended
+            *
+    """
+
+    # region INIT AND STUFF
+    def __init__(self, emb, cell, branchtransform, y2leaf=None, y2last=None, startsym="<START>", **kw):
+        super(SimpleTreeDecoderDF, self).__init__(**kw)
+        self.cell = cell
+        self.branchtransform = branchtransform
+
+        self.emb = emb
+
+        self.ytoleaf = y2leaf       # function given y_tm1 and output history, gives which ones are leafs
+        self.ytolast = y2last       # function given y_tm1 and output history, gives which ones are last among siblings
+
+        self.fratstartsym = self.fratemb.D[startsym]
+
+        self.state_history = None     # history of states (append all states as a tuple here)
+        self.output_history = None    # history of decoded tokens (y_tm1's go here)
+
+        self.stacks = None        # per-example stacks of pointers to time steps whose output states are parents now
+
+    @property
+    def state_spec(self):
+        return self.cell.state_spec
+
+    def reset_state(self):
+        self.cell.reset_state()
+        self.state_history = None
+        self.output_history = None
+        self.stacks = None
+
+    def set_init_states(self, *states):
+        self.cell.set_init_states(*states)
+
+    def read_states_from_cell(self, batsize):
+        return self.cell.get_states(batsize)
+
+    def set_states_of_cell(self, frat_states):
+        self.cell.set_states(*frat_states)
+
+    @property
+    def initialized(self):
+        return self.stacks is None
+    # endregion
+
+    def forward(self, y_tm1, ctx_t=None, t=None, outmask_t=None, **kw):
+        batsize = y_tm1.size(0)
+        # determine what kind of token each enty in y_tm1 was
+        prev_islast = self.ytolast(y_tm1, self.output_history)
+        prev_isleaf = self.ytoleaf(y_tm1, self.output_history)
+
+        hf_tm1 = self.read_states_from_cell(batsize)
+
+        if not self.initialized:
+            self.stacks = [[-11111] for _ in range(batsize)]
+            self.state_history = []
+            for hf_tm1_e in hf_tm1:
+                self.state_history.append(q.var(torch.zeros(hf_tm1_e.size())).cuda(hf_tm1_e).v.unsqueeze(1))
+                self.output_history = q.var(torch.zeros(y_tm1.size())).cuda(y_tm1).v.long().unsqueeze(1)
+
+        for i, hf_tm1_i in enumerate(hf_tm1):
+            self.state_history[i] = torch.cat([self.state_history[i], hf_tm1_i.unsqueeze(1)], 1)
+        self.output_history = torch.cat([self.output_history, y_tm1.unsqueeze(1)], 1)
+
+        # if previous was a parent (not leaf), go down (branchtransform)
+        #       and remember where to resume bro line
+        # if previous was last, forget the direct predecessor
+        #       and resume bro line in the next predecessor
+        #           if no predecessor to resume bro line, feed zero state
+
+        for i in range(batsize):
+            if self.stacks[i] is None:
+                pass
+            else:
+                isleaf, islast = int(prev_isleaf[i].data[0]) == 1, int(prev_islast[i].data[0]) == 1
+                if not isleaf:                  # if parent
+                    self.stacks[i].append(t + 1)    # remember where to resume bro line (t=0 is for hard zero state)
+                if islast:
+                    del self.stacks[i][-1]      # forget nearest predecessor
+                    if len(self.stacks[i]) == 0:  # if after removing last predecessor, no predecessors left, we're done
+                        self.stacks[i] = None
+
+        if prev_islast.float().norm() > 0:            # some were last --> get states to resume bro line from
+            # find states and symbols to resume bro line from using stacks
+            # if stack value is None, get some zero states (won't matter)
+            gathermask = q.var(torch.zeros(len(self.stacks))).cuda(y_tm1).v.long()
+            for i, stack in enumerate(self.stacks):
+                if int(prev_islast[i].data[0]) == 1:        # if it was actually last
+                    if stack is not None:
+                        gathermask.data[i] = stack[-1]
+                    else:
+                        gathermask.data[i] = 0
+                else:
+                    gathermask.data[i] = t + 1      # current
+            x_t = self.output_history.gather(1, gathermask.unsqueeze(1))
+            h_tm1 = [hstate.gather(1, gathermask.unsqueeze(1).unsqueeze(2).repeat(1, 1, hstate.size(1))) for hstate in self.state_history]
+        else:
+            x_t = y_tm1
+            h_tm1 = hf_tm1
+
+        if (1 - prev_isleaf.float()).norm() > 0:      # some were parents --> go down
+            assert(t > 0)
+            pass
+            # 1. take current state
+            # 2. apply branchtransform to create new states
+            ha_tm1 = self.branchtransform(y_tm1, hf_tm1)
+            # 3. override h_tm1[i]'s with new computed states
+            _h_tm1 = []
+            for ha_tm1_e, h_tm1_e in zip(ha_tm1, h_tm1):
+                s = torch.stack([ha_tm1_e, h_tm1_e], 2)\
+                    .gather(2, prev_isleaf.long().unsqueeze(1).unsqueeze(2).repeat(1, h_tm1_e.size(1), 1))
+                _h_tm1.append(s)
+            h_tm1 = _h_tm1
+            # 4. override x_t[i]'s with bro line start symbol
+            brostarts = q.var(torch.ones(x_t.size())).cuda(x_t).v * self.fratstartsym
+            x_t = torch.stack([brostarts, x_t], 1).gather(1, prev_isleaf.long().unsqueeze(1))
+
+        x_t_emb, _ = self.emb(x_t)
+        tocat = [x_t_emb] + (list(ctx_t) if q.issequence(ctx_t) else [ctx_t])
+        inp_t = torch.cat([xe for xe in tocat if xe is not None], 1)
+
+        self.set_states_of_cell(h_tm1)
+        cell_out = self.cell(inp_t, t=t, **kw)
+
+        return cell_out, {"t": t, "x_t_emb": x_t_emb, "ctx_t": ctx_t, "mask": outmask_t}
+
+
+
+
+
+
+
 class DynamicOracleRunner(q.DecoderRunner):
     """
     Runs a decoder using the provided dynamic tracker.

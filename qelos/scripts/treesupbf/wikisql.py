@@ -1176,7 +1176,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
             decoding = self.decoder(outseq,
                                     ctx=ctx,
                                     ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
-                                    ctxmask=inpmask)
+                                    ctxmask=inpmask,
+                                    maxtime=osm.matrix.shape[1]-1)
             return decoding
 
     # region decoders and models
@@ -1231,6 +1232,12 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b[:, :-1], c, colnames, b[:, 1:]
 
+    def valid_inp_bt(a, b, c, colnameids):
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b[:, 0], c, colnames, b[:, 1:]
+
+
     def get_output_lines(_model, validloader):
         dev_out = q.eval(_model).on(validloader).set_batch_transformer(inp_bt).cuda(cuda).run()
         _, dev_out = dev_out.max(2)
@@ -1249,9 +1256,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         ret = []
         for line, goldline, linetree, goldtree in zip(lines, gold_lines, linestrees, goldstrees):
             if goldtree.equals(linetree):
-                ret.append(u"{}: {}".format(u"correct", line))
+                ret.append(u"{}: {} \n\t||--> gold: {}".format(u"correct", line, goldline))
             else:
-                ret.append(u"{}: {} ||--> gold: {}".format((u'WONG!' if linetree is not None else u'INVALID'), line, goldline))
+                ret.append(u"{}: {} \n\t||--> gold: {}".format((u"WONG!  " if linetree is not None else u'INVALID'), line, goldline))
         return ret
 
     if test:
@@ -1263,6 +1270,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .clip_grad_norm(gradnorm)\
         .set_batch_transformer(inp_bt)\
         .valid_with(valid_m).valid_on(validloader, validlosses)\
+        .set_valid_batch_transformer(valid_inp_bt)\
         .cuda(cuda)\
         .hook(logger)\
         .train(epochs)
@@ -1279,7 +1287,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     validresults = q.test(valid_m) \
         .on(validloader, finalvalidlosses) \
-        .set_batch_transformer(inp_bt) \
+        .set_batch_transformer(valid_inp_bt) \
         .cuda(cuda) \
         .run()
 
@@ -1292,7 +1300,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     testresults = q.test(valid_m) \
         .on(testloader, testlosses) \
-        .set_batch_transformer(inp_bt) \
+        .set_batch_transformer(valid_inp_bt) \
         .cuda(cuda) \
         .run()
 
@@ -1709,8 +1717,6 @@ def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
     # endregion
 
 
-
-
 def run_seq2seq_oracle():       # TODO: uses BF-lin and struct linout like previous but uses oracle instead of teacherforcer
     pass        # TODO
 
@@ -1740,8 +1746,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    # q.argprun(run_seq2seq_tf)
-    q.argprun(run_seq2seq_oracle_df)
+    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
