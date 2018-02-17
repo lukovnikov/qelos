@@ -1050,7 +1050,7 @@ def build_subdics(osm):
     return synD, inpD, colD, syn_trans, inp_trans, col_trans
 
 
-def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
+def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, colenc=None,
                           useglove=True, gdim=None, gfrac=0.1):
     # base embedder for input tokens        # TODO might want to think about reusing encoding
     embdim = gdim if gdim is not None else dim
@@ -1073,23 +1073,29 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
     syn_emb = q.WordEmb(dim, worddic=synD)
 
-    colencoder = ColnameEncoder(dim, colbaseemb, nocolid=csm.D["nonecolumnnonecolumnnonecolumn"])
-    computer = OutVecComputer(syn_emb, syn_trans, inpbaseemb, inp_trans, colencoder, col_trans, osm.D)
-    return computer
+    if colenc is None:
+        colenc = ColnameEncoder(dim, colbaseemb, nocolid=csm.D["nonecolumnnonecolumnnonecolumn"])
+
+    computer = OutVecComputer(syn_emb, syn_trans, inpbaseemb, inp_trans, colenc, col_trans, osm.D)
+    return computer, inpbaseemb, colbaseemb, colenc
 
 
-def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None, gfrac=0.1):
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None):
+    comp, inpbaseemb, colbaseemb, colenc\
+        = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
-    return DynamicWordEmb(computer=comp, worddic=osm.D)
+    return DynamicWordEmb(computer=comp, worddic=osm.D), inpbaseemb, colbaseemb, colenc
 
 
-def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None, useglove=True, gdim=None, gfrac=0.1):
-    comp = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None):
+    comp, inpbaseemb, colbaseemb, colenc\
+        = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
     out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False)
-    return out
+    return out, inpbaseemb, colbaseemb, colenc
 
 # endregion
 
@@ -1110,12 +1116,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False):
+                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="1.1")
+
+    # SqlNode.treemode = "limited"  # without, also non-canonical order of args is accepted (shouldn't be a problem)
 
     if gdim < 0:
         gdim = None
@@ -1140,8 +1148,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    if not tieembeddings:
+        inpbaseemb, colbaseemb = None, None
+    if not tiecolenc:
+        colenc = None
+    outlin, inpbaseemb, colbaseemb, colenc \
+        = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac,
+                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1236,7 +1250,6 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
         colnames = q.var(colnames).cuda(colnameids).v
         return a, b[:, 0], c, colnames, b[:, 1:]
-
 
     def get_output_lines(_model, validloader):
         dev_out = q.eval(_model).on(validloader).set_batch_transformer(inp_bt).cuda(cuda).run()
@@ -1355,8 +1368,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1538,6 +1551,209 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     testresults = q.test(valid_m) \
         .on(testloader, testlosses) \
         .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
+        .cuda(cuda) \
+        .run()
+
+    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
+    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
+
+    print("TEST RESULTS:")
+    print(testresults)
+    # endregion
+
+
+def run_seq2seq_tree_tf(lr=0.001, batsize=100, epochs=100,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
+                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
+                   wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
+                   cuda=False, gpu=0, tag="none", test=False):
+    settings = locals().copy()
+    logger = q.Logger(prefix="wikisql_s2tree_tf")
+    logger.save_settings(**settings)
+    logger.update_settings(completed=False)
+    logger.update_settings(version="0.9")
+
+    # SqlNode.treemode = "limited"  # without, also non-canonical order of args is accepted (shouldn't be a problem)
+
+    if gdim < 0:
+        gdim = None
+
+    if dim > 0:
+        innerdim = dim
+        inpembdim = dim // 2
+        outembdim = inpembdim
+
+    print("Seq2Tree + TF")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    ism, osm, csm, psm, splits, e2cn = load_matrices()
+    psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
+
+    # TODO transform target for token-based DF tree decoding
+
+    devstart, teststart = splits
+    eids = np.arange(0, len(ism), dtype="int64")
+
+    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
+
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+
+    # has to be compatible with outlin dim
+    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+                                   dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+
+    class EncDec(torch.nn.Module):
+        def __init__(self, dec):
+            super(EncDec, self).__init__()
+            self.inpemb = inpemb
+            self.outemb = outemb
+            self.outlin = outlin
+            self.encoder = encoder
+            self.decoder = dec
+
+        def forward(self, inpseq, outseq, inpseqmaps, colnames):
+            self.inpemb.prepare(inpseqmaps)
+
+            _inpembs, _inpmask = self.inpemb(inpseq)
+            _inpenc = self.encoder(_inpembs, mask=_inpmask)
+            inpmask = _inpmask[:, :_inpenc.size(1)]
+            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
+            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+
+            self.outemb.prepare(inpseqmaps, colnames)
+            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
+
+            decoding = self.decoder(outseq,
+                                    ctx=ctx,
+                                    ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
+                                    ctxmask=inpmask,
+                                    maxtime=osm.matrix.shape[1]-1)
+            return decoding
+
+    # region decoders and models
+    # train decoder with teacher forcing, valid decoder with freerunning
+    decdims = [outembdim] + [innerdim] * numlayers
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout) for i in range(1, len(decdims))]
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(edropout),
+                                               outlin, ctx2out=False)
+
+    # TODO: create branchtransform and isleaf and islast functions
+    # TODO: use TreeDecoder instead of decoder core
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    m = EncDec(decoder)
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    valid_m = EncDec(valid_decoder)
+    # endregion
+
+    if test:
+        devstart = 50
+        teststart = 100
+
+    # region data splits
+    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
+    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
+    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+    # endregion
+
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0),
+                         #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
+                         )
+
+    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    logger.update_settings(optimizer="adam")
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+
+    def inp_bt(a, b, c, colnameids):
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b[:, :-1], c, colnames, b[:, 1:]
+
+    def valid_inp_bt(a, b, c, colnameids):
+        colnames = csm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return a, b[:, 0], c, colnames, b[:, 1:]
+
+    def get_output_lines(_model, validloader):
+        dev_out = q.eval(_model).on(validloader).set_batch_transformer(inp_bt).cuda(cuda).run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
+        gold_lines = [osm[i] for i in range(devstart, teststart)] # TODO
+        linestrees = []
+        for line in lines:
+            try:
+                linetree = SqlNode.parse_sql(line)
+            except Exception as e:
+                linetree = None
+            linestrees.append(linetree)
+        goldstrees = [SqlNode.parse_sql(line) for line in gold_lines]
+        ret = []
+        for line, goldline, linetree, goldtree in zip(lines, gold_lines, linestrees, goldstrees):
+            if goldtree.equals(linetree):
+                ret.append(u"{}: {} \n\t||--> gold: {}".format(u"correct", line, goldline))
+            else:
+                ret.append(u"{}: {} \n\t||--> gold: {}".format((u"WONG!  " if linetree is not None else u'INVALID'), line, goldline))
+        return ret
+
+    if test:
+        for line in get_output_lines(valid_m, validloader):
+            print(line)
+
+    q.train(m).train_on(trainloader, losses)\
+        .optimizer(optim)\
+        .clip_grad_norm(gradnorm)\
+        .set_batch_transformer(inp_bt)\
+        .valid_with(valid_m).valid_on(validloader, validlosses)\
+        .set_valid_batch_transformer(valid_inp_bt)\
+        .cuda(cuda)\
+        .hook(logger)\
+        .train(epochs)
+
+    logger.update_settings(completed=True)
+
+    lines = get_output_lines(valid_m, validloader)
+    logger.save_lines(lines, "dev_output.txt")
+
+    # region final numbers
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    validresults = q.test(valid_m) \
+        .on(validloader, finalvalidlosses) \
+        .set_batch_transformer(valid_inp_bt) \
+        .cuda(cuda) \
+        .run()
+
+    print("DEV RESULTS:")
+    print(validresults)
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0,
+                                           treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    testresults = q.test(valid_m) \
+        .on(testloader, testlosses) \
+        .set_batch_transformer(valid_inp_bt) \
         .cuda(cuda) \
         .run()
 
@@ -1747,6 +1963,7 @@ if __name__ == "__main__":
     # create_mats()
     # q.argprun(load_matrices)
     q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tree_tf)
     # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
