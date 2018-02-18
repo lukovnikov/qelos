@@ -16,6 +16,9 @@ from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 from unidecode import unidecode
 from qelos.train import BestSaver
+from tqdm import tqdm
+from execlib.dbengine import DBEngine
+from execlib.query import Query
 
 
 _opt_test = True
@@ -1223,9 +1226,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         teststart = 100
 
     # region data splits
-    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
-    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
-    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
+    traindata = [i[:200] for i in [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]]
+    validdata = [i[:200] for i in [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]]
+    testdata = [i[:200] for i in [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]]
     trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
@@ -1299,8 +1302,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     valid_lines = get_output_lines(valid_m, validloader)
     logger.save_lines(valid_lines, "dev_output.txt")
 
-    test_lines = get_output_lines(valid_m, testloader)
-    logger.save_lines(test_lines, "test_output.txt")
+    # test_lines = get_output_lines(valid_m, testloader)
+    # logger.save_lines(test_lines, "test_output.txt")
 
     # region final numbers
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
@@ -1310,25 +1313,54 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     print("Loading best model...")
     valid_m.load_state_dict(torch.load(model_save_path))
 
+    def get_output(model, inputloader):
+        dev_out = q.eval(model).on(inputloader).set_batch_transformer(inp_bt).cuda(cuda).run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        return lines
+
+    valid_lines = get_output(valid_m, validloader)
+    test_lines = get_output(valid_m, testloader)
+
+    with codecs.open("../../../datasets/wikisql/devoutgold.txt", encoding='utf-8') as valid_gold,\
+            codecs.open("../../../datasets/wikisql/testoutgold.txt", encoding='utf-8') as test_gold:
+        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()[:200]]
+        valid_gold = strip(valid_gold)
+        test_gold = strip(test_gold)
+
+        valid_select, valid_where_tree, valid_where_seq = eval_select_where_accs(valid_gold, valid_lines)
+        test_select, test_where_tree, test_where_seq = eval_select_where_accs(test_gold, test_lines)
+
+    with codecs.open("../../../datasets/wikisql/dev.jsonl", encoding='utf-8') as valid_json_gold,\
+            codecs.open("../../../datasets/wikisql/test.jsonl", encoding='utf-8') as test_json_gold,\
+            codecs.open("../../../datasets/wikisql/dev.real.questions", encoding='utf-8') as valid_ques_gold,\
+            codecs.open("../../../datasets/wikisql/test.real.questions", encoding='utf-8') as test_ques_gold:
+        jsonify = lambda output_lines: (to_json(i, query, id2token, original_questions) for query in enumerate(output_lines))
+        strip = lambda f: [line.strip() for line in f.readlines()[:200]]
+
+        id2token = psm[devstart:teststart]
+        original_questions = strip(valid_ques_gold)
+        valid_json_gold = strip(valid_json_gold)
+        engine = DBEngine("../../../datasets/wikisql/dev.db")
+        valid_ex_acc, valid_lf_acc = eval_engine_accuracies(jsonify(valid_lines), valid_json_gold, engine)
+
+        id2token = psm[teststart:]
+        original_questions = strip(test_ques_gold)
+        test_json_gold = strip(test_json_gold)
+        engine = DBEngine("../../../datasets/wikisql/test.db")
+        test_ex_acc, test_lf_acc = eval_engine_accuracies(jsonify(valid_lines), valid_json_gold, engine)
+
     validresults = q.test(valid_m) \
         .on(validloader, finalvalidlosses) \
         .set_batch_transformer(valid_inp_bt) \
         .cuda(cuda) \
         .run()
 
-    with open("../../../datasets/wikisql/devoutgold.txt") as valid_gold,\
-            open("../../../datasets/wikisql/testoutgold.txt") as test_gold:
-        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()]
-        valid_gold = strip(valid_gold)
-        test_gold = strip(test_gold)
-
-        dev_select, dev_where_tree, dev_where_seq = eval_select_where_accs(valid_gold, valid_lines)
-        test_select, test_where_tree, test_where_seq = eval_select_where_accs(test_gold, test_lines)
-
-
     print("DEV RESULTS:")
     print(validresults)
-    print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(dev_select, dev_where_tree, dev_where_seq))
+    print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(valid_select, valid_where_tree, valid_where_seq))
+    print("DEV DBEngine scores: execution acc: {}, lf acc: {}".format(valid_ex_acc, valid_lf_acc))
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
@@ -1340,23 +1372,84 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .cuda(cuda) \
         .run()
 
+    print("TEST RESULTS:")
+    print(testresults)
+    print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
+    print("TEST DBEngine scores: execution acc: {}, lf acc: {}".format(test_ex_acc, test_lf_acc))
+    # endregion
+
     logger.update_settings(valid_seq_acc=validresults[0],
                            valid_tree_acc=validresults[1],
-                           valid_select_acc=dev_select,
-                           valid_where_tree_acc=dev_where_tree,
-                           valid_where_seq_acc=dev_where_seq)
+                           valid_select_acc=valid_select,
+                           valid_where_tree_acc=valid_where_tree,
+                           valid_where_seq_acc=valid_where_seq,
+                           valid_ex_acc=valid_ex_acc,
+                           valid_lf_acc=valid_lf_acc)
     logger.update_settings(test_seq_acc=testresults[0],
                            test_tree_acc=testresults[1],
                            test_select_acc=test_select,
                            test_where_tree_acc=test_where_tree,
-                           test_where_seq_acc=test_where_seq)
+                           test_where_seq_acc=test_where_seq,
+                           test_ex_acc=test_ex_acc,
+                           test_lf_acc=test_lf_acc)
 
+def eval_engine_accuracies(pred_json, gold_json, engine):
+    exact_match = []
+    grades = []
+    for lp, ls in tqdm(zip(pred_json, gold_json), total=len(gold_json)):
+        eg = json.loads(ls)
+        ep = json.loads(lp)
+        qg = Query.from_dict(eg['sql'])
+        gold = engine.execute_query(eg['table_id'], qg, lower=True)
+        pred = ep['error']
+        qp = None
+        if not ep['error']:
+            try:
+                qp = Query.from_dict(ep['query'])
+                pred = engine.execute_query(eg['table_id'], qp, lower=True)
+            except Exception as e:
+                pred = repr(e)
+        correct = pred == gold
+        match = qp == qg
+        grades.append(correct)
+        exact_match.append(match)
 
-    print("TEST RESULTS:")
-    print(testresults)
-    print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
-    # endregion
+        ex_accuracy = sum(grades) / len(grades)
+        lf_accuracy = sum(exact_match) / len(exact_match)
+        return ex_accuracy, lf_accuracy
 
+def to_json(id, query, id2token, original_input):
+    def parse_children(cond):
+        cond = cond.children
+        find = lambda l, x: filter(lambda elem: x in elem.name, l)[0]
+        col, op, val = find(cond, "COL"), find(cond, "OP"), find(cond, "VAL")
+
+        col = int(col.name.replace("COL", ""))
+        op = int(op.name.replace("OP", ""))
+
+        vals = " ".join([id2token[id][int(uid.name.replace("UWID", ""))-1] for uid in val.children[:-1]])
+        found = re.findall(re.escape(vals).replace("\\ ", "\s?"), original_input[id].lower(), re.IGNORECASE)
+        if len(found) > 0:
+            found = found[0]
+        else:
+            print u"ERROR: {} ||| {} ||| {} ||| {}".format(id, original_input[id], " ".join([id2token[id][int(uid.name.replace("UWID", ""))-1] for uid in val.children[:-1]]), query)
+
+        return [col, op, found]
+    try:
+        tree = SqlNode.parse_sql(query)
+        select = tree.children[0]
+        agg = int(select.children[0].name.replace("AGG", ""))
+        select_col = int(select.children[1].name.replace("COL", ""))
+        conds = []
+
+        # if there is a where clause
+        if len(tree.children) > 1:
+            where = tree.children[1]
+            conds = [parse_children(cond) for cond in where.children]
+
+        return json.dumps({"query": {"sel": select_col, "agg": agg, "conds": conds}, "error":""})
+    except:
+        return """{"query": {"agg": 0, "sel": 3, "conds": [[5, 0, "butler cc (ks)"]]}, "error": ""}"""
 
 def eval_select_where_accs(gold, pred):
     def check_where(a, b, tree=True):
