@@ -1226,9 +1226,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         teststart = 100
 
     # region data splits
-    traindata = [i[:200] for i in [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]]
-    validdata = [i[:200] for i in [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]]
-    testdata = [i[:200] for i in [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]]
+    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
+    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
+    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
     trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
     validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
     testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
@@ -1325,7 +1325,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     with codecs.open("../../../datasets/wikisql/devoutgold.txt", encoding='utf-8') as valid_gold,\
             codecs.open("../../../datasets/wikisql/testoutgold.txt", encoding='utf-8') as test_gold:
-        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()[:200]]
+        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()]
         valid_gold = strip(valid_gold)
         test_gold = strip(test_gold)
 
@@ -1337,7 +1337,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
             codecs.open("../../../datasets/wikisql/dev.real.questions", encoding='utf-8') as valid_ques_gold,\
             codecs.open("../../../datasets/wikisql/test.real.questions", encoding='utf-8') as test_ques_gold:
         jsonify = lambda output_lines: (to_json(i, query, id2token, original_questions) for query in enumerate(output_lines))
-        strip = lambda f: [line.strip() for line in f.readlines()[:200]]
+        strip = lambda f: [line.strip() for line in f.readlines()]
 
         id2token = psm[devstart:teststart]
         original_questions = strip(valid_ques_gold)
