@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import codecs
 import json
+import os
 import pickle as pkl
 import re
 from collections import OrderedDict
@@ -14,6 +15,7 @@ from qelos.scripts.treesupbf.trees import Node, NodeTrackerDF
 from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 from unidecode import unidecode
+from qelos.train import BestSaver
 
 
 _opt_test = True
@@ -1278,6 +1280,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         for line in get_output_lines(valid_m, validloader):
             print(line)
 
+    model_save_path = os.path.join(logger.p, "model")
+    best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1], valid_m, path=model_save_path, verbose=True)
+
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm)\
@@ -1286,6 +1291,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .set_valid_batch_transformer(valid_inp_bt)\
         .cuda(cuda)\
         .hook(logger)\
+        .hook(best_saver)\
         .train(epochs)
 
     logger.update_settings(completed=True)
@@ -1297,6 +1303,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
                                            treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
+
+    print("Loading best model...")
+    valid_m.load_state_dict(torch.load(model_save_path))
 
     validresults = q.test(valid_m) \
         .on(validloader, finalvalidlosses) \

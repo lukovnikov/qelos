@@ -885,6 +885,29 @@ class AutoHooker(object):
     def get_hooks(self):
         raise NotImplemented()
 
+class BestSaver(AutoHooker):
+    def __init__(self, criterion, model, path, save_on_increase=True, verbose=False, **kw):
+        super(BestSaver, self).__init__(**kw)
+        self.criterion = criterion
+        self.model = model
+        self.path = path
+        self.save_on_increase = save_on_increase
+        self.best_criterion = -1.
+        self.verbose = verbose
+
+    def get_hooks(self):
+        return {train.END_VALID: self.save_best_model}
+
+    def save_best_model(self, trainer, **kw):
+        assert isinstance(trainer, train)
+        current_criterion = self.criterion()
+        if (self.save_on_increase and current_criterion > self.best_criterion)\
+                or (not self.save_on_increase and current_criterion < self.best_criterion):
+            if self.verbose:
+                print("Validation criterion improved from {} to {}. Saving model..."\
+                      .format(self.best_criterion, current_criterion))
+            self.best_criterion = current_criterion
+            torch.save(self.model.state_dict(), self.path)
 
 class _LRSchedulerAutoHooker(AutoHooker):
     def __init__(self, s, verbose=False, **kw):
