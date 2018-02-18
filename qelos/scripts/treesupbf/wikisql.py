@@ -4,7 +4,7 @@ import json
 import os
 import pickle as pkl
 import re
-from collections import OrderedDict
+from collections import OrderedDict, Counter
 
 import nltk
 import numpy as np
@@ -1296,8 +1296,11 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     logger.update_settings(completed=True)
 
-    lines = get_output_lines(valid_m, validloader)
-    logger.save_lines(lines, "dev_output.txt")
+    valid_lines = get_output_lines(valid_m, validloader)
+    logger.save_lines(valid_lines, "dev_output.txt")
+
+    test_lines = get_output_lines(valid_m, testloader)
+    logger.save_lines(test_lines, "test_output.txt")
 
     # region final numbers
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
@@ -1313,8 +1316,19 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .cuda(cuda) \
         .run()
 
+    with open("../../../datasets/wikisql/devoutgold.txt") as valid_gold,\
+            open("../../../datasets/wikisql/testoutgold.txt") as test_gold:
+        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()]
+        valid_gold = strip(valid_gold)
+        test_gold = strip(test_gold)
+
+        dev_select, dev_where_tree, dev_where_seq = eval_select_where_accs(valid_gold, valid_lines)
+        test_select, test_where_tree, test_where_seq = eval_select_where_accs(test_gold, test_lines)
+
+
     print("DEV RESULTS:")
     print(validresults)
+    print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(dev_select, dev_where_tree, dev_where_seq))
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
@@ -1326,13 +1340,49 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .cuda(cuda) \
         .run()
 
-    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
-    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
+    logger.update_settings(valid_seq_acc=validresults[0],
+                           valid_tree_acc=validresults[1],
+                           valid_select_acc=dev_select,
+                           valid_where_tree_acc=dev_where_tree,
+                           valid_where_seq_acc=dev_where_seq)
+    logger.update_settings(test_seq_acc=testresults[0],
+                           test_tree_acc=testresults[1],
+                           test_select_acc=test_select,
+                           test_where_tree_acc=test_where_tree,
+                           test_where_seq_acc=test_where_seq)
+
 
     print("TEST RESULTS:")
     print(testresults)
+    print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
     # endregion
 
+
+def eval_select_where_accs(gold, pred):
+    def check_where(a, b, tree=True):
+        compare = lambda x, y: x == y if tree else x.pp() == y.pp()
+
+        if len(a.children) == 1 and len(b.children) == 1:
+            return True
+        elif len(a.children) == 2 and len(b.children) == 2:
+            assert "WHERE" in a.children[1].name and "WHERE" in b.children[1].name
+            return compare(a.children[1], b.children[1])
+        else:
+            return False
+
+    assert len(gold) == len(pred)
+
+    count_true = lambda c: float(c[True]) / len(pred)
+    c = Counter([SqlNode.parse_sql(p).children[0] == SqlNode.parse_sql(g).children[0] for p, g in zip(pred, gold)])
+    select_acc = count_true(c)
+
+    c = Counter([check_where(SqlNode.parse_sql(p), SqlNode.parse_sql(g)) for p, g in zip(pred, gold)])
+    where_tree_acc = count_true(c)
+
+    c = Counter([check_where(SqlNode.parse_sql(p), SqlNode.parse_sql(g), tree=False) for p, g in zip(pred, gold)])
+    where_seq_acc = count_true(c)
+
+    return select_acc, where_tree_acc, where_seq_acc
 
 def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
