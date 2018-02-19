@@ -12,16 +12,12 @@ import requests
 import torch
 
 import qelos as q
-from qelos.scripts.treesupbf.execlib.dbengine import DBEngine
-from qelos.scripts.treesupbf.execlib.query import Query
 from qelos.scripts.treesupbf.trees import Node, NodeTrackerDF
 from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 from unidecode import unidecode
 from qelos.train import BestSaver
 from tqdm import tqdm
-# from execlib.dbengine import DBEngine
-# from execlib.query import Query
 
 
 _opt_test = True
