@@ -8,17 +8,20 @@ from collections import OrderedDict, Counter
 
 import nltk
 import numpy as np
+import requests
 import torch
 
 import qelos as q
+from qelos.scripts.treesupbf.execlib.dbengine import DBEngine
+from qelos.scripts.treesupbf.execlib.query import Query
 from qelos.scripts.treesupbf.trees import Node, NodeTrackerDF
 from qelos.scripts.treesupbf.pasdecode import TreeAccuracy
 import random
 from unidecode import unidecode
 from qelos.train import BestSaver
 from tqdm import tqdm
-from execlib.dbengine import DBEngine
-from execlib.query import Query
+# from execlib.dbengine import DBEngine
+# from execlib.query import Query
 
 
 _opt_test = True
@@ -1147,7 +1150,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # tracker = make_tracker(osm)     # TODO: only for bf
 
     devstart, teststart = splits
-    eids = np.arange(0, len(ism), dtype="int64")
+    eids = np.arange(0, len(ism), dtype="int64")    # wtf this doing here
 
     outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
@@ -1323,33 +1326,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     valid_lines = get_output(valid_m, validloader)
     test_lines = get_output(valid_m, testloader)
 
-    with codecs.open("../../../datasets/wikisql/devoutgold.txt", encoding='utf-8') as valid_gold,\
-            codecs.open("../../../datasets/wikisql/testoutgold.txt", encoding='utf-8') as test_gold:
-        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()]
-        valid_gold = strip(valid_gold)
-        test_gold = strip(test_gold)
-
-        valid_select, valid_where_tree, valid_where_seq = eval_select_where_accs(valid_gold, valid_lines)
-        test_select, test_where_tree, test_where_seq = eval_select_where_accs(test_gold, test_lines)
-
-    with codecs.open("../../../datasets/wikisql/dev.jsonl", encoding='utf-8') as valid_json_gold,\
-            codecs.open("../../../datasets/wikisql/test.jsonl", encoding='utf-8') as test_json_gold,\
-            codecs.open("../../../datasets/wikisql/dev.real.questions", encoding='utf-8') as valid_ques_gold,\
-            codecs.open("../../../datasets/wikisql/test.real.questions", encoding='utf-8') as test_ques_gold:
-        jsonify = lambda output_lines: (to_json(i, query, id2token, original_questions) for query in enumerate(output_lines))
-        strip = lambda f: [line.strip() for line in f.readlines()]
-
-        id2token = psm[devstart:teststart]
-        original_questions = strip(valid_ques_gold)
-        valid_json_gold = strip(valid_json_gold)
-        engine = DBEngine("../../../datasets/wikisql/dev.db")
-        valid_ex_acc, valid_lf_acc = eval_engine_accuracies(jsonify(valid_lines), valid_json_gold, engine)
-
-        id2token = psm[teststart:]
-        original_questions = strip(test_ques_gold)
-        test_json_gold = strip(test_json_gold)
-        engine = DBEngine("../../../datasets/wikisql/test.db")
-        test_ex_acc, test_lf_acc = eval_engine_accuracies(jsonify(valid_lines), valid_json_gold, engine)
+    valid_select, valid_where_tree, valid_where_seq, valid_ex_acc, valid_lf_acc,\
+        test_select, test_where_tree, test_where_seq, test_ex_acc, test_lf_acc = \
+        get_all_evals(valid_lines, test_lines, psm, devstart, teststart)
 
     validresults = q.test(valid_m) \
         .on(validloader, finalvalidlosses) \
@@ -1382,64 +1361,79 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                            valid_tree_acc=validresults[1],
                            valid_select_acc=valid_select,
                            valid_where_tree_acc=valid_where_tree,
-                           valid_where_seq_acc=valid_where_seq,
-                           valid_ex_acc=valid_ex_acc,
-                           valid_lf_acc=valid_lf_acc)
+                           valid_where_seq_acc=valid_where_seq)
+                           # valid_ex_acc=valid_ex_acc,
+                           # valid_lf_acc=valid_lf_acc)
     logger.update_settings(test_seq_acc=testresults[0],
                            test_tree_acc=testresults[1],
                            test_select_acc=test_select,
                            test_where_tree_acc=test_where_tree,
-                           test_where_seq_acc=test_where_seq,
-                           test_ex_acc=test_ex_acc,
-                           test_lf_acc=test_lf_acc)
+                           test_where_seq_acc=test_where_seq)
+                           # test_ex_acc=test_ex_acc,
+                           # test_lf_acc=test_lf_acc)
 
-def eval_engine_accuracies(pred_json, gold_json, engine):
-    exact_match = []
-    grades = []
-    for lp, ls in tqdm(zip(pred_json, gold_json), total=len(gold_json)):
-        eg = json.loads(ls)
-        ep = json.loads(lp)
-        qg = Query.from_dict(eg['sql'])
-        gold = engine.execute_query(eg['table_id'], qg, lower=True)
-        pred = ep['error']
-        qp = None
-        if not ep['error']:
-            try:
-                qp = Query.from_dict(ep['query'])
-                pred = engine.execute_query(eg['table_id'], qp, lower=True)
-            except Exception as e:
-                pred = repr(e)
-        correct = pred == gold
-        match = qp == qg
-        grades.append(correct)
-        exact_match.append(match)
 
-        ex_accuracy = sum(grades) / len(grades)
-        lf_accuracy = sum(exact_match) / len(exact_match)
-        return ex_accuracy, lf_accuracy
+def get_all_evals(valid_lines, test_lines, psm, devstart, teststart):
+    with codecs.open("../../../datasets/wikisql/devoutgold.txt", encoding='utf-8') as valid_gold,\
+            codecs.open("../../../datasets/wikisql/testoutgold.txt", encoding='utf-8') as test_gold:
+        strip = lambda f: [line.replace("<START>", "").replace("<END>", "").strip() for line in f.readlines()]
+        valid_gold = strip(valid_gold)
+        test_gold = strip(test_gold)
+
+        valid_select, valid_where_tree, valid_where_seq = eval_select_where_accs(valid_gold, valid_lines)
+        test_select, test_where_tree, test_where_seq = eval_select_where_accs(test_gold, test_lines)
+
+    with codecs.open("../../../datasets/wikisql/dev.jsonl", encoding='utf-8') as valid_json_gold,\
+            codecs.open("../../../datasets/wikisql/test.jsonl", encoding='utf-8') as test_json_gold:
+        def jsonify(output_lines, id2token, original_questions):
+            return [to_json(i, query, id2token, original_questions) for i, query in enumerate(output_lines)]
+
+        strip = lambda f: [line.strip() for line in f.readlines()]
+
+        id2token = [i.split() for i in psm[devstart:teststart]]
+        valid_json_gold = strip(valid_json_gold)
+        original_questions = [json.loads(i)["question"] for i in valid_json_gold]
+        valid_ex_acc, valid_lf_acc = eval_engine_accuracies(jsonify(valid_lines, id2token, original_questions), [json.loads(i) for i in valid_json_gold], "dev")
+
+        id2token = [i.split() for i in psm[teststart:]]
+        test_json_gold = strip(test_json_gold)
+        del test_json_gold[6076]
+        del test_json_gold[6909-1]
+        original_questions = [json.loads(i)["question"] for i in test_json_gold]
+        test_ex_acc, test_lf_acc = eval_engine_accuracies(jsonify(test_lines, id2token, original_questions), [json.loads(i) for i in test_json_gold], "test")
+
+    return valid_select, valid_where_tree, valid_where_seq, valid_ex_acc, valid_lf_acc, test_select, test_where_tree, test_where_seq, test_ex_acc, test_lf_acc
+
+
+def eval_engine_accuracies(pred_json, gold_json, dataset):
+    r = requests.get("http://localhost:8080/query", params={"pred":json.dumps(pred_json), "gold":json.dumps(gold_json), "dataset":dataset})
+    accs = json.loads(r.content)
+    return accs['ex_accuracy'], accs['lf_accuracy']
 
 def to_json(id, query, id2token, original_input):
+    find_ints = re.compile("(\\d+)")
+    find_id = lambda x: int(re.findall(find_ints, x)[0])
+
     def parse_children(cond):
         cond = cond.children
         find = lambda l, x: filter(lambda elem: x in elem.name, l)[0]
         col, op, val = find(cond, "COL"), find(cond, "OP"), find(cond, "VAL")
 
-        col = int(col.name.replace("COL", ""))
-        op = int(op.name.replace("OP", ""))
+        col = find_id(col.name)
+        op = find_id(op.name)
 
-        vals = " ".join([id2token[id][int(uid.name.replace("UWID", ""))-1] for uid in val.children[:-1]])
+        vals = " ".join([id2token[id][find_id(uid.name)-1] for uid in val.children[:-1]])
         found = re.findall(re.escape(vals).replace("\\ ", "\s?"), original_input[id].lower(), re.IGNORECASE)
         if len(found) > 0:
             found = found[0]
-        else:
-            print u"ERROR: {} ||| {} ||| {} ||| {}".format(id, original_input[id], " ".join([id2token[id][int(uid.name.replace("UWID", ""))-1] for uid in val.children[:-1]]), query)
+            # print u"ERROR: {} ||| {} ||| {} ||| {}".format(id, original_input[id], " ".join([id2token[id][int(uid.name.replace("UWID", ""))-1] for uid in val.children[:-1]]), query)
 
         return [col, op, found]
     try:
         tree = SqlNode.parse_sql(query)
         select = tree.children[0]
-        agg = int(select.children[0].name.replace("AGG", ""))
-        select_col = int(select.children[1].name.replace("COL", ""))
+        agg = find_id(select.children[0].name)
+        select_col = find_id(select.children[1].name)
         conds = []
 
         # if there is a where clause
@@ -1447,9 +1441,11 @@ def to_json(id, query, id2token, original_input):
             where = tree.children[1]
             conds = [parse_children(cond) for cond in where.children]
 
-        return json.dumps({"query": {"sel": select_col, "agg": agg, "conds": conds}, "error":""})
-    except:
-        return """{"query": {"agg": 0, "sel": 3, "conds": [[5, 0, "butler cc (ks)"]]}, "error": ""}"""
+        return {"query": {"sel": select_col, "agg": agg, "conds": conds}, "error":""}
+    except Exception as e:
+        print e
+        return {"query": {"agg": 0, "sel": 3, "conds": [[5, 0, "https://www.youtube.com/watch?v=oHg5SJYRHA0"]]}, "error": ""}
+
 
 def eval_select_where_accs(gold, pred):
     def check_where(a, b, tree=True):
@@ -1466,16 +1462,42 @@ def eval_select_where_accs(gold, pred):
     assert len(gold) == len(pred)
 
     count_true = lambda c: float(c[True]) / len(pred)
-    c = Counter([SqlNode.parse_sql(p).children[0] == SqlNode.parse_sql(g).children[0] for p, g in zip(pred, gold)])
+    counts = []
+    for p,g in zip(pred,gold):
+        try:
+            pparse= SqlNode.parse_sql(p).children[0]
+            gparse = SqlNode.parse_sql(g).children[0]
+            counts.append(pparse == gparse)
+        except Exception as ex:
+            counts.append(False)
+        # c = Counter([SqlNode.parse_sql(p).children[0] == SqlNode.parse_sql(g).children[0] for p, g in zip(pred, gold)])
+    c = Counter(counts)
     select_acc = count_true(c)
 
-    c = Counter([check_where(SqlNode.parse_sql(p), SqlNode.parse_sql(g)) for p, g in zip(pred, gold)])
+    counts = []
+    for p,g in zip(pred, gold):
+        try:
+            pparse= SqlNode.parse_sql(p)
+            gparse = SqlNode.parse_sql(g)
+            counts.append(check_where(pparse, gparse))
+        except Exception as ex:
+            counts.append(False)
+    c = Counter(counts)
     where_tree_acc = count_true(c)
 
-    c = Counter([check_where(SqlNode.parse_sql(p), SqlNode.parse_sql(g), tree=False) for p, g in zip(pred, gold)])
+    counts = []
+    for p,g in zip(pred, gold):
+        try:
+            pparse= SqlNode.parse_sql(p)
+            gparse = SqlNode.parse_sql(g)
+            counts.append(check_where(pparse, gparse, tree=False))
+        except Exception as ex:
+            counts.append(False)
+    c = Counter(counts)
     where_seq_acc = count_true(c)
 
     return select_acc, where_tree_acc, where_seq_acc
+
 
 def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
