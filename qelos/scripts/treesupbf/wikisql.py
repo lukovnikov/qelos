@@ -879,12 +879,13 @@ class DynamicWordLinout(WordLinoutBase):
 
 
 class BFOL(DynamicWordLinout):
-    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True):
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False):
         super(BFOL, self).__init__(computer=computer, worddic=worddic, selfsm=selfsm)
         self.inppos2uwid = None
         self.inpenc = None
         self.ismD = ismD
         self.inp_trans = inp_trans
+        self.nocopy = nocopy
 
     def prepare(self, inpseq, inpenc, *xdata):
         super(BFOL, self).prepare(*xdata)
@@ -897,6 +898,8 @@ class BFOL(DynamicWordLinout):
 
     def _forward(self, x):
         ret, rmask = super(BFOL, self)._forward(x)
+        if nocopy is True:
+            return ret, rmask
 
         xshape = x.size()
         if len(xshape) == 2:
@@ -1093,12 +1096,12 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False):
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy)
     return out, inpbaseemb, colbaseemb, colenc
 
 # endregion
@@ -1120,7 +1123,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False):
+                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
@@ -1159,7 +1162,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colenc = None
     outlin, inpbaseemb, colbaseemb, colenc \
         = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc)
+                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
