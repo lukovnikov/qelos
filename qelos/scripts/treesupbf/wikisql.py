@@ -1357,16 +1357,16 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                            valid_tree_acc=validresults[1],
                            valid_select_acc=valid_select,
                            valid_where_tree_acc=valid_where_tree,
-                           valid_where_seq_acc=valid_where_seq)
-                           # valid_ex_acc=valid_ex_acc,
-                           # valid_lf_acc=valid_lf_acc)
+                           valid_where_seq_acc=valid_where_seq,
+                           valid_ex_acc=valid_ex_acc,
+                           valid_lf_acc=valid_lf_acc)
     logger.update_settings(test_seq_acc=testresults[0],
                            test_tree_acc=testresults[1],
                            test_select_acc=test_select,
                            test_where_tree_acc=test_where_tree,
-                           test_where_seq_acc=test_where_seq)
-                           # test_ex_acc=test_ex_acc,
-                           # test_lf_acc=test_lf_acc)
+                           test_where_seq_acc=test_where_seq,
+                           test_ex_acc=test_ex_acc,
+                           test_lf_acc=test_lf_acc)
 
 
 def get_all_evals(valid_lines, test_lines, psm, devstart, teststart):
@@ -1439,7 +1439,7 @@ def to_json(id, query, id2token, original_input):
 
         return {"query": {"sel": select_col, "agg": agg, "conds": conds}, "error":""}
     except Exception as e:
-        print e
+        # print e
         return {"query": {"agg": 0, "sel": 3, "conds": [[5, 0, "https://www.youtube.com/watch?v=oHg5SJYRHA0"]]}, "error": ""}
 
 
@@ -1711,8 +1711,27 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         .cuda(cuda) \
         .run()
 
+    def get_output(model, inputloader):
+        dev_out = q.eval(model).on(inputloader)\
+            .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf)\
+            .cuda(cuda)\
+            .run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        return lines
+
+    valid_lines = get_output(valid_m, validloader)
+    test_lines = get_output(valid_m, testloader)
+
+    valid_select, valid_where_tree, valid_where_seq, valid_ex_acc, valid_lf_acc,\
+        test_select, test_where_tree, test_where_seq, test_ex_acc, test_lf_acc = \
+        get_all_evals(valid_lines, test_lines, psm, devstart, teststart)
+
     print("DEV RESULTS:")
     print(validresults)
+    print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(valid_select, valid_where_tree, valid_where_seq))
+    print("DEV DBEngine scores: execution acc: {}, lf acc: {}".format(valid_ex_acc, valid_lf_acc))
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0,
@@ -1724,11 +1743,27 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         .cuda(cuda) \
         .run()
 
-    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
-    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
-
     print("TEST RESULTS:")
     print(testresults)
+    print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
+    print("TEST DBEngine scores: execution acc: {}, lf acc: {}".format(test_ex_acc, test_lf_acc))
+    # endregion
+
+    logger.update_settings(valid_seq_acc=validresults[0],
+                           valid_tree_acc=validresults[1],
+                           valid_select_acc=valid_select,
+                           valid_where_tree_acc=valid_where_tree,
+                           valid_where_seq_acc=valid_where_seq,
+                           valid_ex_acc=valid_ex_acc,
+                           valid_lf_acc=valid_lf_acc)
+    logger.update_settings(test_seq_acc=testresults[0],
+                           test_tree_acc=testresults[1],
+                           test_select_acc=test_select,
+                           test_where_tree_acc=test_where_tree,
+                           test_where_seq_acc=test_where_seq,
+                           test_ex_acc=test_ex_acc,
+                           test_lf_acc=test_lf_acc)
+
     # endregion
 
 
