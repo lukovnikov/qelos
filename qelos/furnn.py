@@ -1218,13 +1218,21 @@ class DynamicOracleRunner(q.DecoderRunner):
             next_mode = "argmax" if self._argmax_in_eval and not self.training else self.next_mode
             gold_mode = self.gold_mode
 
-            if self.mode == "zerocost":
+            if self.mode in "zerocost nocost".split():
                 _, y_best = y_t.max(1)
-                _, gold_t = goldprobs.max(1)
+                _, gold_t = goldprobs.max(1)    # gold is always best valid, equal to best if best is valid
                 y_random_valid = torch.distributions.Categorical(ymask).sample()
-                y_best_is_valid = torch.gather(ymask, 1, y_best.unsqueeze(1)).long()
+                y_best_is_valid = torch.gather(ymask, 1, y_best.unsqueeze(1)).long()    # mask is only 1 if y was in vnt
                 nextcat = torch.stack([y_random_valid, y_best], 1)
+                # if best is valid, takes best, else random valid
                 x_t = torch.gather(nextcat, 1, y_best_is_valid).squeeze(1)
+                if self.mode == "nocost":   # set <MASK> as gold if best is valid
+                    zero_gold = q.var(torch.zeros(gold_t.size())).cuda(gold_t).v.long()
+                    goldcat = torch.stack([gold_t, zero_gold], 1)
+                    gold_t = torch.gather(goldcat, 1, y_best_is_valid).squeeze(1)
+                    for i in range(gold_t.size(0)):     # TODO: maybe do this instead of loop above
+                        if gold_t[i].cpu().data[0] == 0:
+                            y_t[i, 0] = 0       # ensure y_t has a non-inf score for when mask is needed
 
             else:
                 # sample gold from probs

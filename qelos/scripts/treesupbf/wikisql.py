@@ -898,7 +898,7 @@ class BFOL(DynamicWordLinout):
 
     def _forward(self, x):
         ret, rmask = super(BFOL, self)._forward(x)
-        if nocopy is True:
+        if self.nocopy is True:
             return ret, rmask
 
         xshape = x.size()
@@ -2178,8 +2178,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
-    # q.argprun(run_seq2seq_tree_tf)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tree_tf)
     # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
