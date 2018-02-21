@@ -1232,7 +1232,8 @@ class DynamicOracleRunner(q.DecoderRunner):
                     gold_t = torch.gather(goldcat, 1, y_best_is_valid).squeeze(1)
                 for i in range(gold_t.size(0)):     # TODO: maybe do this instead of loop above
                     if gold_t[i].cpu().data[0] == 0:
-                        y_t[i, 0] = 0       # ensure y_t has a non-inf score for when mask is needed
+                        pass
+                        #y_t[i, 0] = 0       # ensure y_t has a non-inf score for when mask is needed
 
             else:
                 # sample gold from probs

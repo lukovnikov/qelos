@@ -1246,7 +1246,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                                            treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids):
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -1635,7 +1635,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                            treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids, d, e):      # e is gold, is eids
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -1895,7 +1895,7 @@ def run_seq2seq_tree_tf(lr=0.001, batsize=100, epochs=100,
                                            treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids):
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -2101,7 +2101,7 @@ def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids):
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
