@@ -1147,7 +1147,11 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     if dim > 0:
         innerdim = dim
         inpembdim = dim // 2
-        outembdim = inpembdim
+        outembdim = dim // 2
+        if gdim is not None:
+            inpembdim = gdim
+            outembdim = gdim
+        outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
     print("Seq2Seq + TF")
     if cuda:    torch.cuda.set_device(gpu)
@@ -1159,8 +1163,6 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")    # wtf this doing here
-
-    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
