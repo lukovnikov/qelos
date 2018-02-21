@@ -935,7 +935,11 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
         def __init__(self):
             super(Computer, self).__init__()
             self.baseemb = baseemb
-            self.trans = torch.nn.Linear(embdim, dim, bias=False) if embdim != dim else None
+            if embdim != dim:
+                print("USING LIN ADAPTER")
+                self.trans = torch.nn.Linear(embdim, dim, bias=False)
+            else:
+                self.trans = None
 
         def forward(self, x, data):
             transids = torch.gather(data, 1, x)
@@ -987,8 +991,11 @@ class OutVecComputer(DynamicVecPreparer):
         self.col_trans = col_trans
         self.D = worddic
         self.colzero_to_inf = colzero_to_inf
-        self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False) \
-            if self.inp_emb.vecdim != self.syn_emb.vecdim else None
+        if self.inp_emb.vecdim != self.syn_emb.vecdim:
+            print("USING LIN ADAPTER in OUT")
+            self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False)
+        else:
+            self.inpemb_trans = None
 
     def prepare(self, inpmaps, colnames):
         x = q.var(torch.arange(0, len(self.D))).cuda(inpmaps).v.long()
@@ -2178,8 +2185,8 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    # q.argprun(run_seq2seq_tf)
-    q.argprun(run_seq2seq_tree_tf)
+    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tree_tf)
     # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
