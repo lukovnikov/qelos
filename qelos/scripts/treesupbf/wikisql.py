@@ -1096,6 +1096,7 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
 
 def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
                  useglove=True, gdim=None, gfrac=0.1, colenc=None):
+    print("MAKING OUT EMB")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
@@ -1104,6 +1105,7 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
                  useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False):
+    print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
