@@ -879,13 +879,14 @@ class DynamicWordLinout(WordLinoutBase):
 
 
 class BFOL(DynamicWordLinout):
-    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False):
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False, normalpointer=False):
         super(BFOL, self).__init__(computer=computer, worddic=worddic, selfsm=selfsm)
         self.inppos2uwid = None
         self.inpenc = None
         self.ismD = ismD
         self.inp_trans = inp_trans
         self.nocopy = nocopy
+        self.normalpointer = normalpointer
 
     def prepare(self, inpseq, inpenc, *xdata):
         super(BFOL, self).prepare(*xdata)
@@ -904,7 +905,10 @@ class BFOL(DynamicWordLinout):
         xshape = x.size()
         if len(xshape) == 2:
             x = x.unsqueeze(1)
-        scores = torch.bmm(x, self.inpenc.transpose(2, 1))
+        if self.normalpointer:  # x will be twice the size of inpenc -> which part of x to take???
+            scores = torch.bmm(x[:, :, :x.size(2)//2], self.inpenc.transpose(2, 1))     # first half is y_t
+        else:
+            scores = torch.bmm(x, self.inpenc.transpose(2, 1))
         inppos2uwid = self.inppos2uwid[:, :scores.size(-1), :]      # in case input matrix shrank because of seq packing
         offset = (torch.min(scores) - 1000).data[0]
         umask = (inppos2uwid == 0).float()
@@ -1104,13 +1108,13 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False, normalpointer=False):
     print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy, normalpointer=normalpointer)
     return out, inpbaseemb, colbaseemb, colenc
 
 # endregion
@@ -1132,12 +1136,17 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False):
+                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False, normalpointer=False, repsplits=False):
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_tf")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="1.1")
+
+    if normalpointer:
+        print("NORMAL POINTER !!!!!")
+    if repsplits:
+        print("REPSPLITS !!!!")
 
     # SqlNode.treemode = "limited"  # without, also non-canonical order of args is accepted (shouldn't be a problem)
 
@@ -1173,12 +1182,13 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colenc = None
     outlin, inpbaseemb, colbaseemb, colenc \
         = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy)
+                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy, normalpointer=normalpointer)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+    encdim = outlindim//2 if not normalpointer else innerdim//2
+    encoder = q.FastestLSTMEncoder(inpembdim, *([encdim]*numlayers),
                                    dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     # TODO: below is for bf-based scripts, move
@@ -1200,8 +1210,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
             _inpenc = self.encoder(_inpembs, mask=_inpmask)
             inpmask = _inpmask[:, :_inpenc.size(1)]
             inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
-            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
-
+            if normalpointer is True:
+                ctx = inpenc
+            else:
+                if repsplits:
+                    ctx = inpenc.chunk(2, -1)[1]
+                else:
+                    ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+                # TODO: need to take second half ADIP!!!
             self.outemb.prepare(inpseqmaps, colnames)
             self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
