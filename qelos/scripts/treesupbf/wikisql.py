@@ -879,12 +879,14 @@ class DynamicWordLinout(WordLinoutBase):
 
 
 class BFOL(DynamicWordLinout):
-    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True):
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False, normalpointer=False):
         super(BFOL, self).__init__(computer=computer, worddic=worddic, selfsm=selfsm)
         self.inppos2uwid = None
         self.inpenc = None
         self.ismD = ismD
         self.inp_trans = inp_trans
+        self.nocopy = nocopy
+        self.normalpointer = normalpointer
 
     def prepare(self, inpseq, inpenc, *xdata):
         super(BFOL, self).prepare(*xdata)
@@ -897,11 +899,16 @@ class BFOL(DynamicWordLinout):
 
     def _forward(self, x):
         ret, rmask = super(BFOL, self)._forward(x)
+        if self.nocopy is True:
+            return ret, rmask
 
         xshape = x.size()
         if len(xshape) == 2:
             x = x.unsqueeze(1)
-        scores = torch.bmm(x, self.inpenc.transpose(2, 1))
+        if self.normalpointer:  # x will be twice the size of inpenc -> which part of x to take???
+            scores = torch.bmm(x[:, :, :x.size(2)//2], self.inpenc.transpose(2, 1))     # first half is y_t
+        else:
+            scores = torch.bmm(x, self.inpenc.transpose(2, 1))
         inppos2uwid = self.inppos2uwid[:, :scores.size(-1), :]      # in case input matrix shrank because of seq packing
         offset = (torch.min(scores) - 1000).data[0]
         umask = (inppos2uwid == 0).float()
@@ -932,7 +939,11 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
         def __init__(self):
             super(Computer, self).__init__()
             self.baseemb = baseemb
-            self.trans = torch.nn.Linear(embdim, dim, bias=False) if embdim != dim else None
+            if embdim != dim:
+                print("USING LIN ADAPTER")
+                self.trans = torch.nn.Linear(embdim, dim, bias=False)
+            else:
+                self.trans = None
 
         def forward(self, x, data):
             transids = torch.gather(data, 1, x)
@@ -984,8 +995,11 @@ class OutVecComputer(DynamicVecPreparer):
         self.col_trans = col_trans
         self.D = worddic
         self.colzero_to_inf = colzero_to_inf
-        self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False) \
-            if self.inp_emb.vecdim != self.syn_emb.vecdim else None
+        if self.inp_emb.vecdim != self.syn_emb.vecdim:
+            print("USING LIN ADAPTER in OUT")
+            self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False)
+        else:
+            self.inpemb_trans = None
 
     def prepare(self, inpmaps, colnames):
         x = q.var(torch.arange(0, len(self.D))).cuda(inpmaps).v.long()
@@ -1086,6 +1100,7 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
 
 def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
                  useglove=True, gdim=None, gfrac=0.1, colenc=None):
+    print("MAKING OUT EMB")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
@@ -1093,12 +1108,13 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False, normalpointer=False):
+    print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy, normalpointer=normalpointer)
     return out, inpbaseemb, colbaseemb, colenc
 
 # endregion
@@ -1119,13 +1135,19 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False):
+                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False,
+                   normalpointer=False, repsplits=False):
     settings = locals().copy()
-    logger = q.Logger(prefix="wikisql_s2s_tf")
+    logger = q.Logger(prefix="wikisql_s2s_tf_X")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="1.1")
     print "LOGGER PATH: {}".format(logger.p)
+    logger.update_settings(version="X")
+
+    if normalpointer:
+        print("NORMAL POINTER !!!!!")
+    if repsplits:
+        print("REPSPLITS !!!!")
 
     # SqlNode.treemode = "limited"  # without, also non-canonical order of args is accepted (shouldn't be a problem)
 
@@ -1135,7 +1157,11 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     if dim > 0:
         innerdim = dim
         inpembdim = dim // 2
-        outembdim = inpembdim
+        outembdim = dim // 2
+        if gdim is not None:
+            inpembdim = gdim
+            outembdim = gdim
+        outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
     print("Seq2Seq + TF")
     if cuda:    torch.cuda.set_device(gpu)
@@ -1148,8 +1174,6 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")    # wtf this doing here
 
-    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
-
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
     outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
@@ -1159,12 +1183,13 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colenc = None
     outlin, inpbaseemb, colbaseemb, colenc \
         = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc)
+                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy, normalpointer=normalpointer)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+    encdim = outlindim//2 if not normalpointer else innerdim//2
+    encoder = q.FastestLSTMEncoder(inpembdim, *([encdim]*numlayers),
                                    dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     # TODO: below is for bf-based scripts, move
@@ -1186,8 +1211,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
             _inpenc = self.encoder(_inpembs, mask=_inpmask)
             inpmask = _inpmask[:, :_inpenc.size(1)]
             inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
-            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
-
+            if normalpointer is True:
+                ctx = inpenc
+            else:
+                if repsplits:
+                    ctx = inpenc.chunk(2, -1)[1]
+                else:
+                    ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+                # TODO: need to take second half ADIP!!!
             self.outemb.prepare(inpseqmaps, colnames)
             self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
@@ -1509,16 +1540,22 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", test=False,
-                          oraclemode="zerocost", treemode="normal"):
+                   oraclemode="zerocost", treemode="normal",
+                   normalpointer=False, repsplits=False):
     settings = locals().copy()
-    logger = q.Logger(prefix="wikisql_s2s_oracle_df")
+    logger = q.Logger(prefix="wikisql_s2s_oracle_df_X")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="0.9")
+    logger.update_settings(version="X")
 
     SqlNode.mode = treemode     # TODO: make treemode and order assigning cleaner
                                 # TODO: make sure order info is used in valid and test
                                 # TODO: try training with order but valid and test without order
+
+    if normalpointer:
+        print("NORMAL POINTER !!!!!")
+    if repsplits:
+        print("REPSPLITS !!!!")
 
     print("SqlNode treemode: {}".format(SqlNode.mode))
 
@@ -1528,7 +1565,11 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     if dim > 0:
         innerdim = dim
         inpembdim = dim // 2
-        outembdim = inpembdim
+        outembdim = dim // 2
+        if gdim is not None:
+            inpembdim = gdim
+            outembdim = gdim
+        outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
     print("Seq2Seq + ORACLE-DF")
     if cuda:    torch.cuda.set_device(gpu)
@@ -1548,12 +1589,13 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
     outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac, normalpointer=normalpointer)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+    encdim = outlindim//2 if not normalpointer else innerdim//2
+    encoder = q.FastestLSTMEncoder(inpembdim, *([encdim]*numlayers),
                                    dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     class EncDec(torch.nn.Module):
@@ -1575,8 +1617,14 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
             _inpenc = self.encoder(_inpembs, mask=_inpmask)
             inpmask = _inpmask[:, :_inpenc.size(1)]
             inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
-            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
-
+            if normalpointer is True:
+                ctx = inpenc
+            else:
+                if repsplits:
+                    ctx = inpenc.chunk(2, -1)[1]
+                else:
+                    ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+                # TODO: need to take second half ADIP!!!
             self.outemb.prepare(inpseqmaps, colnames)
             self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
@@ -1640,7 +1688,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                            treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids, d, e):      # e is gold, is eids
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -1900,7 +1948,7 @@ def run_seq2seq_tree_tf(lr=0.001, batsize=100, epochs=100,
                                            treeparser=lambda x: order_adder_wikisql(SqlNode.parse_sql(osm.pp(x)))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids):
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -2106,7 +2154,7 @@ def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
 
     logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr)
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
 
     def inp_bt(a, b, c, colnameids):
         colnames = csm.matrix[colnameids.cpu().data.numpy()]
@@ -2183,9 +2231,9 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_tree_tf)
-    # q.argprun(run_seq2seq_oracle_df)
+    q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
