@@ -1745,7 +1745,12 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
             print(line)
 
     def get_output(model, inputloader):
-        dev_out = q.eval(model).on(inputloader).set_batch_transformer(inp_bt).cuda(cuda).run()
+        dev_out = q.eval(model).on(inputloader)\
+            .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf)\
+            .cuda(cuda)\
+            .run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
