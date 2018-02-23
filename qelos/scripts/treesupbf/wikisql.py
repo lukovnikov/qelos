@@ -1742,8 +1742,23 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         for line in get_output_lines(valid_m, validloader):
             print(line)
 
+    def get_output(model, inputloader):
+        dev_out = q.eval(model).on(inputloader).set_batch_transformer(inp_bt).cuda(cuda).run()
+        _, dev_out = dev_out.max(2)
+        dev_out = dev_out.cpu().data.numpy()
+        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        return lines
+
+    def save_lines(valid_m, validloader, testloader):
+        valid_lines = get_output(valid_m, validloader)
+        test_lines = get_output(valid_m, testloader)
+        logger.save_lines(valid_lines, "valid_output.txt")
+        logger.save_lines(valid_lines, "test_output.txt")
+
+    save_dev_test = lambda : save_lines(valid_m, validloader, testloader)
+
     model_save_path = os.path.join(logger.p, "model")
-    best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1], valid_m, path=model_save_path, verbose=True)
+    best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1], save_dev_test, valid_m, path=model_save_path, verbose=True)
 
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
@@ -1761,73 +1776,75 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     print("Loading best model...")
     valid_m.load_state_dict(torch.load(model_save_path))
 
-    lines = get_output_lines(valid_m, validloader)
-    logger.save_lines(lines, "dev_output.txt")
+    save_dev_test()
 
-    # region final numbers
-    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0,
-                                           treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
-
-    validresults = q.test(valid_m) \
-        .on(validloader, finalvalidlosses) \
-        .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
-        .cuda(cuda) \
-        .run()
-
-    def get_output(model, inputloader):
-        dev_out = q.eval(model).on(inputloader)\
-            .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf)\
-            .cuda(cuda)\
-            .run()
-        _, dev_out = dev_out.max(2)
-        dev_out = dev_out.cpu().data.numpy()
-        lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
-        lines = [line.split(u"<END>")[0] for line in lines]
-        return lines
-
-    valid_lines = get_output(valid_m, validloader)
-    test_lines = get_output(valid_m, testloader)
-
-    valid_select, valid_where_tree, valid_where_seq, valid_ex_acc, valid_lf_acc,\
-        test_select, test_where_tree, test_where_seq, test_ex_acc, test_lf_acc = \
-        get_all_evals(valid_lines, test_lines, psm, devstart, teststart)
-
-    print("DEV RESULTS:")
-    print(validresults)
-    print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(valid_select, valid_where_tree, valid_where_seq))
-    print("DEV DBEngine scores: execution acc: {}, lf acc: {}".format(valid_ex_acc, valid_lf_acc))
-
-    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0,
-                                           treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
-
-    testresults = q.test(valid_m) \
-        .on(testloader, testlosses) \
-        .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
-        .cuda(cuda) \
-        .run()
-
-    print("TEST RESULTS:")
-    print(testresults)
-    print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
-    print("TEST DBEngine scores: execution acc: {}, lf acc: {}".format(test_ex_acc, test_lf_acc))
-    # endregion
-
-    logger.update_settings(valid_seq_acc=validresults[0],
-                           valid_tree_acc=validresults[1],
-                           valid_select_acc=valid_select,
-                           valid_where_tree_acc=valid_where_tree,
-                           valid_where_seq_acc=valid_where_seq,
-                           valid_ex_acc=valid_ex_acc,
-                           valid_lf_acc=valid_lf_acc)
-    logger.update_settings(test_seq_acc=testresults[0],
-                           test_tree_acc=testresults[1],
-                           test_select_acc=test_select,
-                           test_where_tree_acc=test_where_tree,
-                           test_where_seq_acc=test_where_seq,
-                           test_ex_acc=test_ex_acc,
-                           test_lf_acc=test_lf_acc)
+    # lines = get_output_lines(valid_m, validloader)
+    # logger.save_lines(lines, "dev_output.txt")
+    #
+    # # region final numbers
+    # finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+    #                           TreeAccuracy(ignore_index=0,
+    #                                        treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+    #
+    # validresults = q.test(valid_m) \
+    #     .on(validloader, finalvalidlosses) \
+    #     .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
+    #     .cuda(cuda) \
+    #     .run()
+    #
+    # def get_output(model, inputloader):
+    #     dev_out = q.eval(model).on(inputloader)\
+    #         .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf)\
+    #         .cuda(cuda)\
+    #         .run()
+    #     _, dev_out = dev_out.max(2)
+    #     dev_out = dev_out.cpu().data.numpy()
+    #     lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+    #     lines = [line.split(u"<END>")[0] for line in lines]
+    #     return lines
+    #
+    # valid_lines = get_output(valid_m, validloader)
+    # test_lines = get_output(valid_m, testloader)
+    #
+    # valid_select, valid_where_tree, valid_where_seq, valid_ex_acc, valid_lf_acc,\
+    #     test_select, test_where_tree, test_where_seq, test_ex_acc, test_lf_acc = \
+    #     get_all_evals(valid_lines, test_lines, psm, devstart, teststart)
+    #
+    # print("DEV RESULTS:")
+    # print(validresults)
+    # print("DEV select acc: {}, where tree acc: {}, where seq acc: {}".format(valid_select, valid_where_tree, valid_where_seq))
+    # print("DEV DBEngine scores: execution acc: {}, lf acc: {}".format(valid_ex_acc, valid_lf_acc))
+    #
+    # testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+    #                           TreeAccuracy(ignore_index=0,
+    #                                        treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
+    #
+    # testresults = q.test(valid_m) \
+    #     .on(testloader, testlosses) \
+    #     .set_batch_transformer(valid_inp_bt, out_btf, valid_gold_btf) \
+    #     .cuda(cuda) \
+    #     .run()
+    #
+    # print("TEST RESULTS:")
+    # print(testresults)
+    # print("TEST select acc: {}, where tree acc: {}, where seq acc: {}".format(test_select, test_where_tree, test_where_seq))
+    # print("TEST DBEngine scores: execution acc: {}, lf acc: {}".format(test_ex_acc, test_lf_acc))
+    # # endregion
+    #
+    # logger.update_settings(valid_seq_acc=validresults[0],
+    #                        valid_tree_acc=validresults[1],
+    #                        valid_select_acc=valid_select,
+    #                        valid_where_tree_acc=valid_where_tree,
+    #                        valid_where_seq_acc=valid_where_seq,
+    #                        valid_ex_acc=valid_ex_acc,
+    #                        valid_lf_acc=valid_lf_acc)
+    # logger.update_settings(test_seq_acc=testresults[0],
+    #                        test_tree_acc=testresults[1],
+    #                        test_select_acc=test_select,
+    #                        test_where_tree_acc=test_where_tree,
+    #                        test_where_seq_acc=test_where_seq,
+    #                        test_ex_acc=test_ex_acc,
+    #                        test_lf_acc=test_lf_acc)
 
     # endregion
 
