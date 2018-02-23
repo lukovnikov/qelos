@@ -1136,12 +1136,13 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False, normalpointer=False, repsplits=False):
+                   cuda=False, gpu=0, tag="none", test=False, tieembeddings=False, tiecolenc=False, ablatecopy=False,
+                   normalpointer=False, repsplits=False):
     settings = locals().copy()
-    logger = q.Logger(prefix="wikisql_s2s_tf")
+    logger = q.Logger(prefix="wikisql_s2s_tf_X")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="1.1")
+    logger.update_settings(version="X")
 
     if normalpointer:
         print("NORMAL POINTER !!!!!")
@@ -1531,16 +1532,22 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", test=False,
-                          oraclemode="zerocost", treemode="normal"):
+                   oraclemode="zerocost", treemode="normal",
+                   normalpointer=False, repsplits=False):
     settings = locals().copy()
-    logger = q.Logger(prefix="wikisql_s2s_oracle_df")
+    logger = q.Logger(prefix="wikisql_s2s_oracle_df_X")
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
-    logger.update_settings(version="0.9")
+    logger.update_settings(version="X")
 
     SqlNode.mode = treemode     # TODO: make treemode and order assigning cleaner
                                 # TODO: make sure order info is used in valid and test
                                 # TODO: try training with order but valid and test without order
+
+    if normalpointer:
+        print("NORMAL POINTER !!!!!")
+    if repsplits:
+        print("REPSPLITS !!!!")
 
     print("SqlNode treemode: {}".format(SqlNode.mode))
 
@@ -1550,7 +1557,11 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     if dim > 0:
         innerdim = dim
         inpembdim = dim // 2
-        outembdim = inpembdim
+        outembdim = dim // 2
+        if gdim is not None:
+            inpembdim = gdim
+            outembdim = gdim
+        outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
 
     print("Seq2Seq + ORACLE-DF")
     if cuda:    torch.cuda.set_device(gpu)
@@ -1570,12 +1581,13 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
     inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
     outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac, normalpointer=normalpointer)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
+    encdim = outlindim//2 if not normalpointer else innerdim//2
+    encoder = q.FastestLSTMEncoder(inpembdim, *([encdim]*numlayers),
                                    dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
 
     class EncDec(torch.nn.Module):
@@ -1597,8 +1609,14 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
             _inpenc = self.encoder(_inpembs, mask=_inpmask)
             inpmask = _inpmask[:, :_inpenc.size(1)]
             inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
-            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
-
+            if normalpointer is True:
+                ctx = inpenc
+            else:
+                if repsplits:
+                    ctx = inpenc.chunk(2, -1)[1]
+                else:
+                    ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
+                # TODO: need to take second half ADIP!!!
             self.outemb.prepare(inpseqmaps, colnames)
             self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
 
@@ -2205,9 +2223,9 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_tree_tf)
-    # q.argprun(run_seq2seq_oracle_df)
+    q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
