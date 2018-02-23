@@ -1320,13 +1320,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
         return lines
 
     def save_lines(valid_m, validloader, testloader):
         valid_lines = get_output(valid_m, validloader)
         test_lines = get_output(valid_m, testloader)
         logger.save_lines(valid_lines, "valid_output.txt")
-        logger.save_lines(valid_lines, "test_output.txt")
+        logger.save_lines(test_lines, "test_output.txt")
 
     save_dev_test = lambda : save_lines(valid_m, validloader, testloader)
 
@@ -1547,6 +1548,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     logger.save_settings(**settings)
     logger.update_settings(completed=False)
     logger.update_settings(version="X")
+    print "LOGGER PATH: {}".format(logger.p)
 
     SqlNode.mode = treemode     # TODO: make treemode and order assigning cleaner
                                 # TODO: make sure order info is used in valid and test
@@ -1747,13 +1749,14 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
         return lines
 
     def save_lines(valid_m, validloader, testloader):
         valid_lines = get_output(valid_m, validloader)
         test_lines = get_output(valid_m, testloader)
         logger.save_lines(valid_lines, "valid_output.txt")
-        logger.save_lines(valid_lines, "test_output.txt")
+        logger.save_lines(test_lines, "test_output.txt")
 
     save_dev_test = lambda : save_lines(valid_m, validloader, testloader)
 
