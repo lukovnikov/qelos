@@ -1783,6 +1783,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
         _, dev_out = dev_out.max(2)
         dev_out = dev_out.cpu().data.numpy()
         lines = [osm.pp(dev_out[i]) for i in range(len(dev_out))]
+        lines = [line.split(u"<END>")[0] for line in lines]
         return lines
 
     valid_lines = get_output(valid_m, validloader)
