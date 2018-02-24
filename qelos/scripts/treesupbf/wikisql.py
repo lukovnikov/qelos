@@ -1316,6 +1316,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     model_save_path = os.path.join(logger.p, "model")
     best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1], valid_m, path=model_save_path, verbose=True)
 
+    print(m.encoder)
+    print(m.decoder)
+
     q.train(m).train_on(trainloader, losses)\
         .optimizer(optim)\
         .clip_grad_norm(gradnorm)\
@@ -2223,9 +2226,9 @@ if __name__ == "__main__":
     # q.argprun(prepare_data)
     # create_mats()
     # q.argprun(load_matrices)
-    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_tree_tf)
-    q.argprun(run_seq2seq_oracle_df)
+    # q.argprun(run_seq2seq_oracle_df)
     # tree = SqlNode.parse_sql("<QUERY> <SELECT> AGG0 COL5 <WHERE> <COND> COL3 OP0 <VAL> UWID4 UWID5 <ENDVAL> <COND> COL1 OP1 <VAL> UWID1 UWID2 UWID3 <ENDVAL> <END> <select> <END>")
     # test_df_lins(tree)
     # print(tree.pptree())
