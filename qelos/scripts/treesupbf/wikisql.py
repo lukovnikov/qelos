@@ -879,7 +879,8 @@ class DynamicWordLinout(WordLinoutBase):
 
 
 class BFOL(DynamicWordLinout):
-    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False, normalpointer=False):
+    def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, selfsm=True, nocopy=False,
+                 normalpointer=False):
         super(BFOL, self).__init__(computer=computer, worddic=worddic, selfsm=selfsm)
         self.inppos2uwid = None
         self.inpenc = None
@@ -906,7 +907,8 @@ class BFOL(DynamicWordLinout):
         if len(xshape) == 2:
             x = x.unsqueeze(1)
         if self.normalpointer:  # x will be twice the size of inpenc -> which part of x to take???
-            scores = torch.bmm(x[:, :, :x.size(2)//2], self.inpenc.transpose(2, 1))     # first half is y_t
+            compx = x[:, :, :x.size(2)//2]  # slice out first half, which is y_t (not ctx_t)
+            scores = torch.bmm(compx, self.inpenc.transpose(2, 1))
         else:
             scores = torch.bmm(x, self.inpenc.transpose(2, 1))
         inppos2uwid = self.inppos2uwid[:, :scores.size(-1), :]      # in case input matrix shrank because of seq packing
@@ -1108,13 +1110,15 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False, normalpointer=False):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False,
+                 normalpointer=False):
     print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc\
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
                                  useglove=useglove, gdim=gdim, gfrac=gfrac)
     inp_trans = comp.inp_trans      # to index
-    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy, normalpointer=normalpointer)
+    out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, selfsm=False, nocopy=nocopy,
+               normalpointer=normalpointer)
     return out, inpbaseemb, colbaseemb, colenc
 
 # endregion
@@ -1130,6 +1134,7 @@ def make_oracle_df(tracker, mode=None):
     if _opt_test:
         print("TODO: oracle tests")
     return oracle
+
 
 def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
@@ -1183,7 +1188,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         colenc = None
     outlin, inpbaseemb, colbaseemb, colenc \
         = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy, normalpointer=normalpointer)
+                inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc, nocopy=ablatecopy,
+                       normalpointer=normalpointer)
 
     # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1331,7 +1337,36 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     save_dev_test = lambda : save_lines(valid_m, validloader, testloader)
 
-    best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1], save_dev_test, valid_m, path=model_save_path, verbose=True)
+    best_saver = BestSaver(lambda : validlosses.get_agg_errors()[1],
+                           save_dev_test, valid_m, path=model_save_path, verbose=True)
+
+    # TODO
+    def get_json_saver(loader, p=None, skips=tuple()):
+        _used_m = valid_m
+        orig_sql, orig_questions = None, None
+        with codecs.open(p, encoding="utf-8") as f:
+            orig_sql, orig_questions = [], []
+            for c, line in enumerate(f):
+                if c in skips:
+                    print(u"skipping line: \"{}\"".format(line))
+                    continue
+                linejson = json.loads(line)
+                orig_sql.append(linejson["sql"])
+                orig_questions.append(linejson["question"])
+
+        def json_saver():
+            # get predictions over the loader
+            outprobs = q.eval(_used_m).on(loader).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+            _, outids = outprobs.max(2)
+            lines = [osm.pp(outids[i]) for i in range(len(outids))]
+            lines = [line.split(u'<END>')[0] for line in lines]
+
+
+
+    bestcallbacks = q.BestCallbacks(lambda: validlosses.get_agg_errors()[1])
+    bestcallbacks.add_callback(get_json_saver(validloader, p="../../../datasets/wikisql/dev.jsonl"))
+    bestcallbacks.add_callback(get_json_saver(testloader, p="../../../datasets/wikisql/test.jsonl",
+                                              skip_ids=[6076, 6909]))
 
     print(m.encoder)
     print(m.decoder)
@@ -1449,6 +1484,7 @@ def eval_engine_accuracies(pred_json, gold_json, dataset):
     r = requests.get("http://localhost:8080/query", params={"pred":json.dumps(pred_json), "gold":json.dumps(gold_json), "dataset":dataset})
     accs = json.loads(r.content)
     return accs['ex_accuracy'], accs['lf_accuracy']
+
 
 def to_json(id, query, id2token, original_input):
     find_ints = re.compile("(\\d+)")
@@ -2062,177 +2098,6 @@ def run_seq2seq_tree_tf(lr=0.001, batsize=100, epochs=100,
     print(testresults)
     # endregion
 
-
-
-
-
-# TODO: same as df-tf but should be using BF-lin from trees and the struct linout
-def run_seq2seq_tf_bf(lr=0.001, batsize=100, epochs=100,
-                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
-                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
-                   wreg=0.00000000001, gradnorm=5., useglove=True, gfrac=0.01,
-                   cuda=False, gpu=0, tag="none"):
-    settings = locals().copy()
-    logger = q.Logger(prefix="wikisql_s2s_tf_bf")
-    logger.save_settings(**settings)
-    logger.update_settings(completed=False)
-    logger.update_settings(version="0.9")
-
-    if gdim < 0:
-        gdim = None
-
-    if dim > 0:
-        innerdim = dim
-        inpembdim = dim // 2
-        outembdim = inpembdim
-
-    print("Seq2Seq + TF")
-    if cuda:    torch.cuda.set_device(gpu)
-    tt = q.ticktock("script")
-    ism, osm, csm, psm, splits, e2cn = load_matrices()
-    psm._matrix = psm.matrix * (psm.matrix != psm.D["<RARE>"])      # ASSUMES there are no real <RARE> words in psm
-
-    # tracker = make_tracker(osm)     # TODO: only for bf
-
-    devstart, teststart = splits
-    eids = np.arange(0, len(ism), dtype="int64")
-
-    outlindim = innerdim * 2        # (because we're using attention and cat-ing encoder and decoder)
-
-    # TODO: might want to revert to overridden wordembs because gfrac with new wordemb seems to work worse
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, psm, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outemb = make_out_emb(outembdim, osm, psm, csm, inpbaseemb=inpbaseemb, useglove=useglove, gdim=gdim, gfrac=gfrac)
-    outlin = make_out_lin(outlindim, ism, osm, psm, csm, useglove=useglove, gdim=gdim, gfrac=gfrac)
-
-    # TODO: BEWARE OF VIEWS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    # has to be compatible with outlin dim
-    encoder = q.FastestLSTMEncoder(inpembdim, *([outlindim//2]*numlayers),
-                                   dropout_in=idropout, dropout_rec=irdropout, bidir=True)   # TODO: dropouts ?! weight dropouts
-
-    # TODO: below is for bf-based scripts, move
-    # mlinout = make_struct_linout(outlindim, outlin, tracker.coreD, tracker.D, chained=True)
-
-    class EncDec(torch.nn.Module):
-        def __init__(self, dec):
-            super(EncDec, self).__init__()
-            self.inpemb = inpemb
-            self.outemb = outemb
-            self.outlin = outlin
-            self.encoder = encoder
-            self.decoder = dec
-
-        def forward(self, inpseq, outseq, inpseqmaps, colnames):
-            self.inpemb.prepare(inpseqmaps)
-
-            _inpembs, _inpmask = self.inpemb(inpseq)
-            _inpenc = self.encoder(_inpembs, mask=_inpmask)
-            inpmask = _inpmask[:, :_inpenc.size(1)]
-            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)   # to blend fwd and rev dirs of bidir lstm
-            ctx = inpenc.chunk(2, -1)[0]        # only half is used for attention addr and summary
-
-            self.outemb.prepare(inpseqmaps, colnames)
-            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
-
-            decoding = self.decoder(outseq,
-                                    ctx=ctx,
-                                    ctx_0=ctx[:, -1, :],        # TODO: ctx_0 not used if ctx2out is False (currently holds)
-                                    ctxmask=inpmask)
-            return decoding
-
-    # region decoders and models
-    # train decoder with teacher forcing, valid decoder with freerunning
-    decdims = [outembdim] + [innerdim] * numlayers
-    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout) for i in range(1, len(decdims))]
-    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(edropout),
-                                               outlin, ctx2out=False)
-
-    decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(q.TeacherForcer())
-    decoder = decoder_cell.to_decoder()
-
-    m = EncDec(decoder)
-
-    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    valid_decoder_cell.set_runner(q.FreeRunner())
-    valid_decoder = valid_decoder_cell.to_decoder()
-
-    valid_m = EncDec(valid_decoder)
-    # endregion
-
-    # devstart = 50
-    # teststart = 100
-
-    # region data splits
-    traindata = [ism.matrix[:devstart], osm.matrix[:devstart], psm.matrix[:devstart], e2cn[:devstart]]
-    validdata = [ism.matrix[devstart:teststart], osm.matrix[devstart:teststart], psm.matrix[devstart:teststart], e2cn[devstart:teststart]]
-    testdata = [ism.matrix[teststart:], osm.matrix[teststart:], psm.matrix[teststart:], e2cn[teststart:]]
-    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
-    validloader = q.dataload(*validdata, batch_size=batsize, shuffle=False)
-    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
-    # endregion
-
-    losses = q.lossarray(q.SeqNLLLoss(ignore_index=0),
-                         q.SeqAccuracy(ignore_index=0),
-                         #TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x)))
-                         )
-
-    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
-
-    logger.update_settings(optimizer="adam")
-    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
-
-    def inp_bt(a, b, c, colnameids):
-        colnames = csm.matrix[colnameids.cpu().data.numpy()]
-        colnames = q.var(colnames).cuda(colnameids).v
-        return a, b[:, :-1], c, colnames, b[:, 1:]
-
-    q.train(m).train_on(trainloader, losses)\
-        .optimizer(optim)\
-        .clip_grad_norm(gradnorm)\
-        .set_batch_transformer(inp_bt)\
-        .valid_with(valid_m).valid_on(validloader, validlosses)\
-        .cuda(cuda)\
-        .hook(logger)\
-        .train(epochs)
-
-    logger.update_settings(completed=True)
-
-    # region final numbers
-    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
-
-    validresults = q.test(valid_m) \
-        .on(validloader, finalvalidlosses) \
-        .set_batch_transformer(inp_bt) \
-        .cuda(cuda) \
-        .run()
-
-    print("DEV RESULTS:")
-    print(validresults)
-
-    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
-                              TreeAccuracy(ignore_index=0, treeparser=lambda x: SqlNode.parse_sql(osm.pp(x))))
-
-    testresults = q.test(valid_m) \
-        .on(testloader, testlosses) \
-        .set_batch_transformer(inp_bt) \
-        .cuda(cuda) \
-        .run()
-
-    logger.update_settings(valid_seq_acc=validresults[0], valid_tree_acc=validresults[1])
-    logger.update_settings(test_seq_acc=testresults[0], test_tree_acc=testresults[1])
-
-    print("TEST RESULTS:")
-    print(testresults)
-    # endregion
-
-
-def run_seq2seq_oracle():       # TODO: uses BF-lin and struct linout like previous but uses oracle instead of teacherforcer
-    pass        # TODO
 
 
 def test_df_lins(tree):

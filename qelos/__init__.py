@@ -1,5 +1,6 @@
 from qelos.train import lossarray, train, test, eval, TensorDataset, LossWithAgg, \
-    aux_train, loss_input_transform, AutoHooker, HyperparamScheduler
+    aux_train, loss_input_transform, AutoHooker, HyperparamScheduler, BestCallbacks, \
+    CallBackable
 
 from qelos.rnn import GRUCell, LSTMCell, SRUCell, RNU, RecStack, RNNLayer, \
     BiRNNLayer, GRULayer, LSTMLayer, RecurrentStack, BidirGRULayer, \

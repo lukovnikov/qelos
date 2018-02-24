@@ -6,6 +6,7 @@ from torch import nn
 import numpy as np
 import qelos as q
 from qelos.util import isnumber, isstring, ticktock, issequence
+import random
 
 
 class TensorDataset(Dataset):      # TODO
@@ -885,6 +886,50 @@ class AutoHooker(object):
     def get_hooks(self):
         raise NotImplemented()
 
+
+class CallBackable(object):
+    def __init__(self, *args, **kwargs):
+        super(CallBackable, self).__init__(*args, **kwargs)
+        self._callbacks = {}
+
+    def add_callback(self, f):
+        """
+        :param f: function called when callbackable invoked
+        :return: deleter function
+        """
+        cbid = 0
+        while cbid not in self._callbacks:
+            cbid += 1
+        self._callbacks[cbid] = f
+        this = self
+        def deleter():
+            del this._callbacks[cbid]
+        return deleter
+
+    def call_callbacks(self, *args, **kwargs):
+        for callback in self._callbacks:
+            callback(*args, **kwargs)
+
+
+class BestCallbacks(AutoHooker, CallBackable):
+    def __init__(self, critf, higher_is_better=None, **kw):
+        super(BestCallbacks, self).__init__(**kw)
+        self.critf = critf
+        if higher_is_better is None:
+            print("{} assumes higher criterion value is better".format(self.__class__.__name__))
+            higher_is_better = True
+        self.best_crit_val = -np.infty if higher_is_better else np.infty
+        self.comparator = lambda prev, current : (prev <= current if higher_is_better else prev >= current)
+
+    def get_hooks(self):
+        return {train.END_VALID: self.on_end_valid}
+
+    def on_end_valid(self, trainer, **kw):
+        current_crit_val = self.critf()
+        if self.comparator(self.best_crit_val, current_crit_val):
+            self.call_callbacks()
+
+
 class BestSaver(AutoHooker):
     def __init__(self, criterion, save_data, model, path, save_on_increase=True, verbose=False, **kw):
         super(BestSaver, self).__init__(**kw)
@@ -895,6 +940,7 @@ class BestSaver(AutoHooker):
         self.save_data = save_data
         self.best_criterion = -1.
         self.verbose = verbose
+        self.callbacks = {}
 
     def get_hooks(self):
         return {train.END_VALID: self.save_best_model}
@@ -910,6 +956,7 @@ class BestSaver(AutoHooker):
             self.best_criterion = current_criterion
             torch.save(self.model.state_dict(), self.path)
             self.save_data()
+
 
 class _LRSchedulerAutoHooker(AutoHooker):
     def __init__(self, s, verbose=False, **kw):
