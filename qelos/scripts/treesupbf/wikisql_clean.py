@@ -359,7 +359,7 @@ def load_matrices(p="../../../datasets/wikisql_clean/"):
     tt.tick("loading matrices")
     with open(p+"matcache.mats") as f:
         mats = np.load(f)
-        ismmat, osmmat, csmmat, gwids, e2cn \
+        ismmat, osmmat, csmmat, gwidsmat, e2cn \
             = mats["ism"], mats["osm"], mats["csm"], mats["pedics"], mats["e2cn"]
     tt.tock("matrices loaded")
     print(ismmat.shape)
@@ -380,9 +380,79 @@ def load_matrices(p="../../../datasets/wikisql_clean/"):
     csm._matrix = csmmat
     gwids = q.StringMatrix()
     gwids.set_dictionary(pedicsD)
-    gwids._matrix = gwids
+    gwids._matrix = gwidsmat
     # q.embed()
     return ism, osm, csm, gwids, splits, e2cn
+
+
+def reconstruct_question(uwids, gwids, rgd):
+    words = gwids[uwids]
+    question = " ".join([rgd[wordid] for wordid in words])
+    question = question.replace("<MASK>", " ")
+    question = re.sub("\s+", " ", question)
+    question = question.strip()
+    return question
+
+
+def reconstruct_query(osmrow, gwidrow, rod, rgd):
+    query = u" ".join([rod[wordid] for wordid in osmrow])
+    query = query.replace(u"<MASK>", u" ")
+    query = re.sub(u"\s+", u" ", query)
+    query = query.strip()
+    query = re.sub(u"UWID\d+", lambda x: rgd[gwidrow[int(x.group(0)[4:])]], query)
+    return query
+
+
+def reconstruct_query_json(osmrow, gwidrow, rod, rgd):
+    query_lin = reconstruct_query(osmrow, gwidrow, rod, rgd)
+    query_json = querylin2json(query_lin)
+    return query_json
+
+
+def test_matrices(p="../../../datasets/wikisql_clean/"):
+    ism, osm, csm, gwids, splits, e2cn = load_matrices()
+    devlines = load_lines(p+"dev.lines")
+    print("{} dev lines".format(len(devlines)))
+    testlines = load_lines(p+"test.lines")
+    print("{} test lines".format(len(testlines)))
+    devstart, teststart = splits
+
+    dev_ism, dev_gwids, dev_osm, dev_e2cn = ism.matrix[devstart:teststart], gwids.matrix[devstart:teststart], \
+                                            osm.matrix[devstart:teststart], e2cn[devstart:teststart]
+    test_ism, test_gwids, test_osm, test_e2cn = ism.matrix[teststart:], gwids.matrix[teststart:], \
+                                                osm.matrix[teststart:], e2cn[teststart:]
+    rgd = {v: k for k, v in gwids.D.items()}
+    rod = {v: k for k, v in osm.D.items()}
+
+    # test question reconstruction
+    for i in range(len(devlines)):
+        orig_question = devlines[i][0].strip()
+        reco_question = reconstruct_question(dev_ism[i], dev_gwids[i], rgd)
+        assert(orig_question == reco_question)
+    print("dev questions reconstruction matches")
+    for i in range(len(testlines)):
+        orig_question = testlines[i][0].strip()
+        reco_question = reconstruct_question(test_ism[i], test_gwids[i], rgd)
+        assert(orig_question == reco_question)
+    print("test questions reconstruction matches")
+
+    # test query reconstruction
+    for i in range(len(devlines)):
+        orig_query = devlines[i][1].strip()
+        reco_query = reconstruct_query(dev_osm[i], dev_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
+        try:
+            assert (orig_query == reco_query)
+        except Exception as e:
+            print(u"FAILED: {} \n - {}".format(orig_query, reco_query))
+    print("dev queries reconstruction matches")
+    for i in range(len(testlines)):
+        orig_query = testlines[i][1].strip()
+        reco_query = reconstruct_query(test_osm[i], test_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
+        assert (orig_query == reco_query)
+    print("test queries reconstruction matches")
+
+
+
 # endregion
 
 
@@ -518,6 +588,14 @@ class SqlNode(Node):
             return parse
         else:
             return super(SqlNode, cls).parse_df(inp, _toprec)
+
+
+def querylin2json(qlin):
+    # TODO
+    pass
+
+
+# TODO: test reconstruct jsons from query lins (gold) and from matrices, check if correct
 
 
 def order_adder_wikisql(parse):
@@ -1045,7 +1123,8 @@ def make_oracle_df(tracker, mode=None):
 # region TEST
 def test_data(x=0):
     # jsonls_to_lines()
-    create_mats()
+    # create_mats()
+    test_matrices()
 
 # endregion
 
