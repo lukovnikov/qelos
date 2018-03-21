@@ -20,6 +20,9 @@ from qelos.train import BestSaver
 from tqdm import tqdm
 
 
+# TODO: don't forget to use fixed PartiallyPretrainedWordEmb !!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
 _opt_test = True
 
 
