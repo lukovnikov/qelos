@@ -4,6 +4,7 @@ import json
 import warnings
 import pandas as pd
 import glob
+import codecs
 
 
 OPT_PREFIX = "zexp"
@@ -69,10 +70,15 @@ class Logger(q.AutoHooker):
         settings.update(kw)
         self.save_settings(**settings)
 
-    def save_lines(self, lines, filepath):
-        with open(self.p + "/" + filepath, "w") as f:
-            for line in lines:
-                f.write("{}\n".format(line))
+    def save_lines(self, lines, filepath, use_unicode=False):
+        if not use_unicode:
+            with open(self.p + "/" + filepath, "w") as f:
+                for line in lines:
+                    f.write("{}\n".format(line))
+        else:
+            with codecs.open(self.p + "/" + filepath, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write("{}\n".format(line))
 
     def get_hooks(self):
         return {q.train.START: self.on_start,

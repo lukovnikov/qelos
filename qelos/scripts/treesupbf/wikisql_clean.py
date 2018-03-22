@@ -407,6 +407,7 @@ def reconstruct_query(osmrow, gwidrow, rod, rgd):
     return query
 
 
+# region test
 def test_matrices(p=DATA_PATH):
     ism, osm, csm, gwids, splits, e2cn = load_matrices()
     devlines = load_lines(p+"dev.lines")
@@ -448,6 +449,7 @@ def test_matrices(p=DATA_PATH):
         reco_query = reconstruct_query(test_osm[i], test_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
         assert (orig_query == reco_query)
     print("test queries reconstruction matches")
+# endregion
 # endregion
 
 
@@ -549,6 +551,8 @@ class SqlNode(Node):
         else:
             if cls.mode == "limited":
                 order_adder_wikisql_limited(ret)
+            else:
+                order_adder_wikisql(ret)
             return ret
 
     @classmethod
@@ -671,6 +675,22 @@ def same_sql_json(x, y):
                 break
         same &= found
     return same
+
+
+def load_jsonls(p, questionsonly=False, sqlsonly=False):
+    ret = []
+    with open(p) as f:
+        for line in f:
+            jsonl = json.loads(line)
+            if questionsonly:
+                question = jsonl["question"]
+                ret.append(question)
+            elif sqlsonly:
+                sql = jsonl["sql"]
+                ret.append(sql)
+            else:
+                ret.append(jsonl)
+    return ret
 
 
 def test_querylin2json():
@@ -1406,7 +1426,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
               for i in range(1, len(decdims))]
     decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                q.Dropout(edropout),
-                                               outlin, ctx2out=False)
+                                                  outlin, ctx2out=False)
     decoder_core = q.DecoderCore(outemb, *layers)
     decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
     decoder_cell.set_runner(q.TeacherForcer())
@@ -1447,10 +1467,10 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         ismbatch, osminpbatch, gwidsbatch, colnames, osmoutbatch \
             = inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids)
         return ismbatch, osminpbatch[:, 0], gwidsbatch, colnames, osmoutbatch
-    # endregion
 
-    # region produced lines and jsons every time a new dev acc is registered
-
+    # saving best model
+    best_saver = BestSaver(lambda: validlosses.get_agg_errors()[1],
+                           valid_m, path=model_save_path, verbose=True)
     # endregion
 
     # region training
@@ -1459,11 +1479,128 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         .valid_with(valid_m).valid_on(validloader, validlosses).set_valid_batch_transformer(valid_inp_bt)\
         .cuda(cuda).hook(logger).hook(best_saver)\
         .train(epochs)
+    logger.update_settings(completed=True)
     # endregion
 
     # region evaluation
+    tt.tick("Loading best model...")
+    valid_m.load_state_dict(torch.load(model_save_path))
 
+    rev_osm_D = {v: k for k, v in osm.D.items()}
+    rev_gwids_D = {v: k for k, v in gwids.D.items()}
+
+    def get_output(model, data, origquestions):
+        gwids = data[2]
+        # TODO: make sure q.eval() doesn't feed anything wrong or doesn't forget to reset things
+        dataloader = q.dataload(*data, batch_size=batsize, shuffle=False)
+        predictions = q.eval(model).on(dataloader)\
+            .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+        _, predictions = predictions.max(2)
+        predictions = predictions.cpu().data.numpy()
+        rawlines = []
+        sqls = []
+        for i in range(len(gwids)):
+            rawline = reconstruct_query(predictions[i], gwids[i], rev_osm_D, rev_gwids_D)
+            rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
+            rawlines.append(rawline)
+            sqljson = querylin2json(rawline, origquestions[i])
+            sqls.append(sqljson)
+        return rawlines, sqls
+
+    devquestions = load_jsonls(DATA_PATH+"dev.jsonl", questionsonly=True)
+    devsqls = load_jsonls(DATA_PATH+"dev.jsonl", sqlsonly=True)
+    pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions)
+
+    testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
+    testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
+    pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions)
+
+    # save predictions
+    logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
+    logger.save_lines(pred_testlines, "test_pred.lines", use_unicode=True)
+    logger.save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql", use_unicode=True)
+    logger.save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql", use_unicode=True)
+
+    # run sql accuracy on generated sqls
+    def compute_sql_acc(pred_sql, gold_sql):
+        sql_acc = 0.
+        sql_acc_norm = 1e-6
+        for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
+            sql_acc_norm += 1
+            sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
+        return sql_acc / sql_acc_norm
+
+    dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
+    test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
+
+    print("DEV SQL ACC: {}".format(dev_sql_acc))
+    print("TEST SQL ACC: {}".format(test_sql_acc))
     # endregion
+
+
+def test_save():
+    """ load matrices, get test set, reconstruct using get_output()'s logic, save, read, test """
+    tt = q.ticktock("testsave")
+    ism, osm, cnsm, gwids, splits, e2cn = load_matrices()
+    rev_osm_D = {v: k for k, v in osm.D.items()}
+    rev_gwids_D = {v: k for k, v in gwids.D.items()}
+    _, teststart = splits
+    testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
+    testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
+
+    tt.tick("reconstructing test gold...")
+    ism, osm, gwids = ism.matrix[teststart:], osm.matrix[teststart:], gwids.matrix[teststart:]
+    rawlines, sqls = [], []
+    for i in range(len(gwids)):
+        rawline = reconstruct_query(osm[i], gwids[i], rev_osm_D, rev_gwids_D)
+        rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
+        rawlines.append(rawline)
+        sqljson = querylin2json(rawline, testquestions[i])
+        sqls.append(sqljson)
+    tt.tock("reconstructed")
+
+    tt.tick("saving test gold...")
+    # saving without codecs doesn't work
+    with codecs.open("testsave.lines", "w", encoding="utf-8") as f:
+        for line in rawlines:
+            f.write(u"{}\n".format(line))
+
+    with codecs.open("testsave.sqls", "w", encoding="utf-8") as f:
+        for sql in sqls:
+            f.write(u"{}\n".format(json.dumps(sql)))
+    tt.tock("saved")
+
+    tt.tick("reloading saved...")
+    reloaded_lines = []
+    with codecs.open("testsave.lines", encoding="utf-8") as f:
+    # with open("testsave.lines") as f:
+        for line in f:
+            reloaded_lines.append(line.strip())
+
+    reloaded_sqls = []
+    with codecs.open("testsave.sqls", encoding="utf-8") as f:
+        for line in f:
+            sql = json.loads(line)
+            reloaded_sqls.append(sql)
+    tt.tock("reloaded saved")
+
+    for rawline, reloadedline in zip(rawlines, reloaded_lines):
+        if not rawline == reloadedline:
+            print(u"FAILED: '{}' \n - '{}'".format(rawline, reloadedline))
+        assert(rawline == reloadedline)
+
+    failures = 0
+    for testsql, reloaded_sql in zip(testsqls, reloaded_sqls):
+        if not same_sql_json(testsql, reloaded_sql):
+            print("FAILED: {} \n - {} ".format(testsql, reloaded_sql))
+            failures += 1
+        # assert(same_sql_json(testsql, reloaded_sql))
+    assert(failures == 1)
+    print("only one failure")
+
+    print(len(reloaded_lines))
+
+
 
 
 
@@ -1484,5 +1621,6 @@ if __name__ == "__main__":
     # test_matrices()
     # test_querylin2json()
     # test_sqlnode_and_sqls()
-    test_grouptracker()
+    # test_grouptracker()
+    test_save()
     # q.argprun()

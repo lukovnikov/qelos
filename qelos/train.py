@@ -412,7 +412,7 @@ class eval(object):
                 batch = self.transform_batch_inp(*batch)
             modelouts = self.model(*batch[:-1])
             if self.transform_batch_out is not None:
-                modelouts = self.transform_batch_out(modelouts)
+                modelouts = self.transform_batch_out(modelouts, input_batch=batch)
 
             tt.live("eval - [{}/{}]"
                 .format(
