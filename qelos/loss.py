@@ -4,6 +4,8 @@ import numpy as np
 
 EPS = 1e-6
 
+# TODO: REWRITE PROPERLY AND PUSH TO QELOS-CORE
+# TODO: mask has no place here, mask must be applied in prediction modules
 
 class Loss(nn.Module):
     def __init__(self, size_average=True, _size_avg_ignore_mask=False, **kw):
@@ -61,14 +63,14 @@ class PairRankingLoss(Loss):
 
 
 class LinearLoss(Loss):
-    """ LinearLoss or NoLoss"""
+    """ LinearLoss or NoLoss. Use this if model returns loss """
     def _forward(self, x, gold, **kw):
         """ x is minimized, gold is ignored"""
         return x, None
 
 
-
 class DiscreteLoss(Loss):
+    """ Loss with ignore_index(es), provides default implementation of _get_ignore_mask """
     def __init__(self, size_average=True, ignore_index=None, **kw):
         super(DiscreteLoss, self).__init__(size_average=size_average, **kw)
         if ignore_index is not None:
@@ -318,11 +320,35 @@ class Accuracy(DiscreteLoss):
         return same.float(), ignoremask
 
 
-class SeqAccuracy(SeqLoss, Accuracy):
+class OldSeqAccuracy(SeqLoss, Accuracy):
     def __init__(self, size_average=True, ignore_index=None):
-        super(SeqAccuracy, self).__init__(size_average=size_average,
+        super(OldSeqAccuracy, self).__init__(size_average=size_average,
                                           ignore_index=ignore_index,
                                           time_agg="all")
+
+
+class SeqAccuracy(DiscreteLoss):
+    """ very basic explicit seqaccuracy implementation.
+        does not support batchable sparse mask """
+    def _forward(self, x, gold, mask=None):
+        """
+        :param x: (batsize, seqlen, vocsize) - probabilities over output symbols for every time step
+        :param gold: (batsize, seqlen) - ids of gold output symbols at every time step
+        :param mask: (batsize, seqlen, vocsize) - optional mask to zero out probabilities over output symbols
+        :return: loss value, ignormask
+        """
+        if mask is not None:
+            x = x + torch.log(mask.float())
+        ignoremask = self._get_ignore_mask(gold)
+        _, best = torch.max(x, 2)       # (batsize, seqlen) - most probable symbols at every time step
+        same = best == gold
+        outignoremask = None
+        if ignoremask is not None:
+            same.data = same.data | ~ ignoremask.data   # set ignored portions to be same[i,j]=True
+            outignoremask = ignoremask.long().sum(1) > 0
+        sameseqs = same.long().sum(1)
+        sameseqs = sameseqs == int(same.size(1))
+        return sameseqs, outignoremask
 
 
 class SeqElemAccuracy(DiscreteLoss):    # TODO take end of sequence token into account
@@ -449,9 +475,9 @@ class OldSeqNLLLoss(nn.NLLLoss):
         return loss
 
 
-class OldSeqAccuracy(nn.Module):
+class OldOldSeqAccuracy(nn.Module):
     def __init__(self, size_average=True, ignore_index=0):
-        super(OldSeqAccuracy, self).__init__()
+        super(OldOldSeqAccuracy, self).__init__()
         self.size_average = size_average
         if ignore_index is not None:
             if not q.issequence(ignore_index):

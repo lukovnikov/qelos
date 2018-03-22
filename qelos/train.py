@@ -749,6 +749,15 @@ class train(object):
             self.transform_batch_gold = gold_transform
         return self
 
+    def get_penalties(self, batsize, numbats):
+        penacc = 0.
+        for submodule in self.model.modules():
+            if hasattr(submodule, "penalties"):
+                for penalty in submodule.penalties:       # assumes penalties must be normalized by batsize AND numbats
+                    pen = penalty.acc / float(batsize * numbats)
+                    penacc += pen
+        return penacc
+
     def trainloop(self):
         if self.epochs == 0:
             self.tt.msg("skipping training")
@@ -791,6 +800,11 @@ class train(object):
                     l2reg = q.l2(*list(params)) * self._l2
 
                 cost = trainlosses[0] + l1reg + l2reg
+
+                batsize, numbats = batch[0].size(0), len(self.traindataloader)
+                penalties = self.get_penalties(batsize, numbats)
+
+                cost += penalties
 
                 cost.backward()
 
