@@ -1419,7 +1419,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     valid_decoder = valid_decoder_cell.to_decoder()
 
     valid_m = EncDec(valid_decoder)     # use for valid
-    # TODO: verify valid_m doesn't get something wrong !
+    # TODO: verify that valid_m doesn't get something wrong !
     # endregion
 
     # region training preparation

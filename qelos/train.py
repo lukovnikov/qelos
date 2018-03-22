@@ -945,13 +945,12 @@ class BestCallbacks(AutoHooker, CallBackable):
 
 
 class BestSaver(AutoHooker):
-    def __init__(self, criterion, save_data, model, path, save_on_increase=True, verbose=False, **kw):
+    def __init__(self, criterion, model, path, save_on_increase=True, verbose=False, **kw):
         super(BestSaver, self).__init__(**kw)
         self.criterion = criterion
         self.model = model
         self.path = path
         self.save_on_increase = save_on_increase
-        self.save_data = save_data
         self.best_criterion = -1.
         self.verbose = verbose
         self.callbacks = {}
@@ -969,7 +968,6 @@ class BestSaver(AutoHooker):
                       .format(self.best_criterion, current_criterion))
             self.best_criterion = current_criterion
             torch.save(self.model.state_dict(), self.path)
-            self.save_data()
 
 
 class _LRSchedulerAutoHooker(AutoHooker):

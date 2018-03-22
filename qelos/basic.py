@@ -20,7 +20,7 @@ class Lambda(nn.Module):
         if register_modules is not None:
             if not q.issequence(register_modules):
                 register_modules = [register_modules]
-            self.extra_modules = q.ModuleList(register_modules)
+            self.extra_modules = nn.ModuleList(register_modules)
         if register_params is not None:
             if not q.issequence(register_params):
                 register_params = [register_params]
@@ -200,7 +200,7 @@ class WiredStackLayer(nn.Module):
 class Stack(nn.Module):
     def __init__(self, *layers):
         super(Stack, self).__init__()
-        self.layers = q.ModuleList()
+        self.layers = nn.ModuleList()
         self.add(*layers)
         self._saved_slots = {}      # not for params
         self._persist_kwargs = False

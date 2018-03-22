@@ -308,7 +308,7 @@ class TwoStackCell(RecStatefulContainer):   # for depth-first tree decoding
             cells = (cell,)
             cell_inp_router_mode = "joined" if cell_inp_router_mode == "default" else cell_inp_router_mode
 
-        self.cells = q.ModuleList(list(cells))
+        self.cells = nn.ModuleList(list(cells))
 
         if isinstance(emb, tuple):
             assert(len(emb) == 2)
@@ -579,7 +579,7 @@ class ParentStackCell(RecStatefulContainer):      # breadth-first tree decoding
             cells = (cell,)
             cell_inp_router_mode = "joined" if cell_inp_router_mode == "default" else cell_inp_router_mode
 
-        self.cells = q.ModuleList(list(cells))
+        self.cells = nn.ModuleList(list(cells))
 
         if isinstance(emb, tuple):
             assert (len(emb) == 2)
