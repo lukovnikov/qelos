@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 
 _opt_test = True
+DATA_PATH = "../../../datasets/wikisql_clean/"
 
 
 # region DATA
@@ -38,7 +39,7 @@ def read_jsonl(p):
     return lines
 
 
-def jsonls_to_lines(p="../../../datasets/wikisql_clean/"):
+def jsonls_to_lines(p=DATA_PATH):
     """ loads all jsons, converts them to .lines, saves and returns """
     # region load all jsons
     tt = q.ticktock("data preparer")
@@ -123,8 +124,8 @@ def jsonl_to_line(line, alltables):
     question = u" ".join(nltk.word_tokenize(line["question"])).lower()
 
     # region replacements on top of tokenization:
-    question = question.replace(u"\u2009", u" ")    # unicode long space to normal space
-    question = question.replace(u"\u2013", u"-")    # unicode long dash to normal dash
+    # question = question.replace(u"\u2009", u" ")    # unicode long space to normal space
+    # question = question.replace(u"\u2013", u"-")    # unicode long dash to normal dash
     question = question.replace(u"`", u"'")         # unicode backward apostrophe to normal
     question = question.replace(u"\u00b4", u"'")    # unicode forward apostrophe to normal
     question = question.replace(u"''", u'"')    # double apostrophe to quote
@@ -146,8 +147,11 @@ def jsonl_to_line(line, alltables):
     # test, line 6910, "Difference of- 17" to "Difference of - 17" (added space)
     # test, line 2338, "baccalaureate colleges" to "baccalaureate college" (condition value contains latter)
     # test, line 5440, "44+" to "44 +"
-    # test, line 7159, "a frequency of 1600MHz and voltage under 1.35V" to "a frequency of 1600 MHz and voltage under 1.35 V" (added two spaces)
+    # test, line 7159, "a frequency of 1600MHz and voltage under 1.35V" to "a frequency of 1600 MHz and voltage under 1.35 V" (added two spaces) and changed condition "1600mhz" to "1600 mhz"
     # test, line 8042, "under 20.6bil" to "under 20.6 bil" (added space)
+    # test, line 8863, replaced long spaces "\u2009" with normal space
+    # test, line 8866, replaced long spaces "\u2009" with normal space
+    # test, line 8867, replaced long spaces "\u2009" with normal space
     # test, line 13290, "35.666sqmi" to "35.666 sqmi" (added space)
     # BAD TEST CHANGES (left in to ensure consistency of line numbers)
     # test, line 6077, changed first condition from "\u2013" to "no"
@@ -164,8 +168,8 @@ def jsonl_to_line(line, alltables):
             condval = unicode(cond[2]).lower()
 
         # replacements in condval, equivalent to question replacements
-        condval = condval.replace(u"\u2009", u" ")    # unicode long space to normal space
-        condval = condval.replace(u"\u2013", u"-")    # unicode long dash to normal dash
+        # condval = condval.replace(u"\u2009", u" ")    # unicode long space to normal space
+        # condval = condval.replace(u"\u2013", u"-")    # unicode long dash to normal dash
         condval = condval.replace(u"`", u"'")
         condval = condval.replace(u"\u00b4", u"'")    # unicode forward apostrophe to normal
         condval = condval.replace(u"''", u'"')
@@ -216,7 +220,7 @@ def load_lines(p):
     return retlines
 
 
-def create_mats(p="../../../datasets/wikisql_clean/"):
+def create_mats(p=DATA_PATH):
     # loading lines
     tt = q.ticktock("data loader")
     tt.tick("loading lines")
@@ -345,7 +349,7 @@ def create_mats(p="../../../datasets/wikisql_clean/"):
     # endregion
 
 
-def load_matrices(p="../../../datasets/wikisql_clean/"):
+def load_matrices(p=DATA_PATH):
     """ loads matrices generated before.
         Returns:    * ism: input questions - in uwids
                     * osm: target sequences - use uwids for words
@@ -409,7 +413,7 @@ def reconstruct_query_json(osmrow, gwidrow, rod, rgd):
     return query_json
 
 
-def test_matrices(p="../../../datasets/wikisql_clean/"):
+def test_matrices(p=DATA_PATH):
     ism, osm, csm, gwids, splits, e2cn = load_matrices()
     devlines = load_lines(p+"dev.lines")
     print("{} dev lines".format(len(devlines)))
@@ -450,9 +454,6 @@ def test_matrices(p="../../../datasets/wikisql_clean/"):
         reco_query = reconstruct_query(test_osm[i], test_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
         assert (orig_query == reco_query)
     print("test queries reconstruction matches")
-
-
-
 # endregion
 
 
@@ -504,10 +505,12 @@ class SqlNode(Node):
         while True:
             head, islast, isleaf = head, None, None
 
+            # TODO: might want to disable this
             headsplits = head.split(SqlNode.suffix_sep)
-            if len(headsplits) > 1:
-                head, islast, isleaf = headsplits[
-                                           0], SqlNode.last_suffix in headsplits, SqlNode.leaf_suffix in headsplits
+            if len(headsplits) in (2, 3):
+                if headsplits[1] in (SqlNode.leaf_suffix, SqlNode.last_suffix) \
+                    and (len(headsplits) == 1 or (headsplits[2] in (SqlNode.leaf_suffix, SqlNode.last_suffix))):
+                        head, islast, isleaf = headsplits[0], SqlNode.last_suffix in headsplits, SqlNode.leaf_suffix in headsplits
 
             if head == "<QUERY>":
                 assert (isleaf is None or isleaf is False)
@@ -590,12 +593,144 @@ class SqlNode(Node):
             return super(SqlNode, cls).parse_df(inp, _toprec)
 
 
-def querylin2json(qlin):
-    # TODO
-    pass
+def get_children_by_name(node, cre):
+    for child in node.children:
+        if re.match(cre, child.name):
+            yield child
 
 
-# TODO: test reconstruct jsons from query lins (gold) and from matrices, check if correct
+def querylin2json(qlin, origquestion):
+    parsedtree = SqlNode.parse_sql(qlin)
+    try:
+        assert(parsedtree.name == "<QUERY>")            # root must by <query>
+        # get select and where subtrees
+        selectnode = list(get_children_by_name(parsedtree, "<SELECT>"))
+        assert(len(selectnode) == 1)
+        selectnode = selectnode[0]
+        wherenode = list(get_children_by_name(parsedtree, "<WHERE>"))
+        assert(len(wherenode) <= 1)
+        if len(wherenode) == 0:
+            wherenode = None
+        else:
+            wherenode = wherenode[0]
+        assert(selectnode.name == "<SELECT>")
+        assert(wherenode is None or wherenode.name == "<WHERE>")
+        # get select arguments
+        assert(len(selectnode.children) == 2)
+        select_col = list(get_children_by_name(selectnode, "COL\d{1,2}"))
+        assert(len(select_col) == 1)
+        select_col = int(select_col[0].name[3:])
+        select_agg = list(get_children_by_name(selectnode, "AGG\d"))
+        assert(len(select_agg) == 1)
+        select_agg = int(select_agg[0].name[3:])
+        # get where conditions
+        conds = []
+        if wherenode is not None:
+            for child in wherenode.children:
+                assert(child.name == "<COND>")
+                assert(len(child.children) == 3)
+                cond_col = list(get_children_by_name(child, "COL\d{1,2}"))
+                assert(len(cond_col) == 1)
+                cond_col = int(cond_col[0].name[3:])
+                cond_op = list(get_children_by_name(child, "OP\d"))
+                assert(len(cond_op) == 1)
+                cond_op = int(cond_op[0].name[2:])
+                val_node = list(get_children_by_name(child, "<VAL>"))
+                assert(len(val_node) == 1)
+                val_node = val_node[0]
+                val_nodes = val_node.children
+                if val_nodes[-1].name == "<ENDVAL>":        # all should end with endval but if not, accept
+                    val_nodes = val_nodes[:-1]
+                valstring = u" ".join(map(lambda x: x.name, val_nodes))
+                valsearch = re.escape(valstring.lower()).replace("\\ ", "\s?")
+                found = re.findall(valsearch, origquestion.lower())
+                if len(found) > 0:
+                    found = found[0]
+                    conds.append([cond_col, cond_op, found])
+        return {"sel": select_col, "agg": select_agg, "conds": conds}
+    except Exception as e:
+        return {"agg": 0, "sel": 3, "conds": [[5, 0, "https://www.youtube.com/watch?v=oHg5SJYRHA0"]]}
+
+
+def same_sql_json(x, y):
+    same = True
+    same &= x["sel"] == y["sel"]
+    same &= x["agg"] == y["agg"]
+    same &= len(x["conds"]) == len(y["conds"])
+    xconds = x["conds"] + []
+    yconds = y["conds"] + []
+    for xcond in xconds:
+        found = False
+        for j in range(len(yconds)):
+            xcondval = xcond[2]
+            if isinstance(xcondval, float):
+                xcondval = xcondval.__repr__()
+            ycondval = yconds[j][2]
+            if isinstance(ycondval, float):
+                ycondval = ycondval.__repr__()
+            xcondval, ycondval = unicode(xcondval), unicode(ycondval)
+            if xcond[0] == yconds[j][0] \
+                    and xcond[1] == yconds[j][1] \
+                    and xcondval.lower() == ycondval.lower():
+                found = True
+                del yconds[j]
+                break
+        same &= found
+    return same
+
+
+def test_querylin2json():
+    qlin = u"<QUERY> <SELECT> AGG0 COL3 <WHERE> <COND> COL5 OP0 <VAL> butler cc ( ks ) <ENDVAL>"
+    jsonl = u"""{"phase": 1, "table_id": "1-10015132-11", "question": "What position does the player who played for butler cc (ks) play?",
+                "sql": {"sel": 3, "conds": [[5, 0, "Butler CC (KS)"]], "agg": 0}}"""
+    jsonl = json.loads(jsonl)
+    origquestion = jsonl["question"]
+    orig_sql = jsonl["sql"]
+    recon_sql = querylin2json(qlin, origquestion)
+    assert(same_sql_json(recon_sql, orig_sql))
+
+    # test dev lines
+    p = DATA_PATH
+    devlines = load_lines(p + "dev.lines")
+    failures = 0
+    with open(p + "dev.jsonl") as f:
+        i = 0
+        for l in f:
+            jsonl = json.loads(l)
+            origquestion, orig_sql = jsonl["question"], jsonl["sql"]
+            recon_sql = querylin2json(devlines[i][1], origquestion)
+            try:
+                assert (same_sql_json(recon_sql, orig_sql))
+            except Exception as e:
+                failures += 1
+                print("FAILED: {}: {}\n-{}".format(i, orig_sql, recon_sql))
+            i += 1
+    if failures == 0:
+        print("dev querylin2json passed")
+    else:
+        print("dev querylin2json: FAILED")
+
+    # test test lines
+    p = DATA_PATH
+    devlines = load_lines(p+"test.lines")
+    failures = 0
+    with open(p+"test.jsonl") as f:
+        i = 0
+        for l in f:
+            jsonl = json.loads(l)
+            origquestion, orig_sql = jsonl["question"], jsonl["sql"]
+            recon_sql = querylin2json(devlines[i][1], origquestion)
+            try:
+                assert(same_sql_json(recon_sql, orig_sql))
+            except Exception as e:
+                failures += 1
+                print("FAILED: {}: {}\n-{}".format(i, orig_sql, recon_sql))
+            i += 1
+    if failures == 0:
+        print("test querylin2json passed")
+    else:
+        print("test querylin2json: FAILED - expected 1 failure")
+    # !!! example 15485 in test fails because wrong gold constructed in lines (wrong occurence of 2-0 is taken)
 
 
 def order_adder_wikisql(parse):
@@ -623,7 +758,74 @@ def order_adder_wikisql_limited(parse):
 
 
 # region test
-def test_sqlnode():
+def test_sqlnode_and_sqls(x=0):
+    orig_question = "which city of license has a frequency mhz smaller than 100.9 , and a erp w larger than 100 ?"
+    orig_line = "<QUERY> <SELECT> AGG0 COL2 " \
+                "<WHERE> <COND> COL1 OP2 <VAL> 100.9 <ENDVAL> <COND> COL3 OP1 <VAL> 100 <ENDVAL>"
+    orig_tree = SqlNode.parse_sql(orig_line)
+    orig_sql = querylin2json(orig_line, orig_question)
+
+    print(orig_tree.pptree())
+
+    swapped_conds_line = "<QUERY> <SELECT> AGG0 COL2 " \
+                "<WHERE> <COND> COL3 OP1 <VAL> 100 <ENDVAL> <COND> COL1 OP2 <VAL> 100.9 <ENDVAL>"
+
+    swapped_conds_tree = SqlNode.parse_sql(swapped_conds_line)
+    swapped_conds_sql = querylin2json(swapped_conds_line, orig_question)
+
+    print("swapped conds testing:")
+    assert(orig_tree == swapped_conds_tree)
+    print("trees same")
+    assert(same_sql_json(orig_sql, swapped_conds_sql))
+    print("sqls same")
+
+    swapped_select_args_line = "<QUERY> <SELECT> COL2 AGG0 " \
+                "<WHERE> <COND> COL1 OP2 <VAL> 100.9 <ENDVAL> <COND> COL3 OP1 <VAL> 100 <ENDVAL>"
+    swapped_select_args_tree = SqlNode.parse_sql(swapped_select_args_line)
+    swapped_select_args_sql = querylin2json(swapped_select_args_line, orig_question)
+    print("swapped select args testing:")
+    assert(orig_tree != swapped_select_args_tree)
+    print("trees NOT same")
+    assert(same_sql_json(orig_sql, swapped_select_args_sql))
+    print("sqls same")
+
+    wrong_line = "<QUERY> <SELECT> AGG0 COL2 " \
+                "<WHERE> <COND> COL1 OP2 <VAL> 100.92 <ENDVAL> <COND> COL3 OP1 <VAL> 100 <ENDVAL>"
+    wrong_tree = SqlNode.parse_sql(wrong_line)
+    wrong_sql = querylin2json(wrong_line, orig_question)
+    print("wrong query testing:")
+    assert(orig_tree != wrong_tree)
+    print("trees NOT same")
+    assert(not same_sql_json(orig_sql, wrong_sql))
+    print("sqls NOT same")
+
+    bad_line = "<QUERY> <SELECT> AGG0 COL2 " \
+                "<WHERE> <COND> COL1 OP2 <VAL> 100.9 <ENDVAL> <COND> COL3 OP1 <VAL> 100 "
+    bad_tree = SqlNode.parse_sql(bad_line)
+    print("bad correct line: tree parsed")
+    bad_sql = querylin2json(bad_line, orig_question)
+    assert(same_sql_json(orig_sql, bad_sql))
+    print("sqls same")
+
+    # test with broken lines
+    linesplits = orig_line.split()
+    for i in range(len(linesplits)-1):      # every except last one
+        for j in range(i+1, len(linesplits)):
+            broken_line = linesplits[:i] + linesplits[j:]
+            broken_line = " ".join(broken_line)
+            try:
+                broken_tree = SqlNode.parse_sql(broken_line)
+                broken_sql = querylin2json(broken_line, orig_question)
+                assert(broken_tree != orig_tree)
+                if " ".join(linesplits[i:j]) not in ("<ENDVAL>"):
+                    assert(not same_sql_json(broken_sql, orig_sql))
+            except q.SumTingWongException as e:
+                # didn't parse
+                pass
+    print("all brokens passed")
+
+
+
     # TODO: test parsing from different linearizations
     # TODO: test __eq__
     # TODO: test order while parsing and __eq__
@@ -715,35 +917,40 @@ def make_tracker_df(osm):
         trees.append(tree)
     tracker = SqlGroupTrackerDF(trees, osm.D)
     tt.tock("trees made")
-
-    if False:
-        for k in range(5000, 5100):  # TODO: 5034 throws error (nvts wrong) <-- should not affect tf script
-            accs = set()
-            for j in range(100):
-                acc = u""
-                tracker.reset()
-                if k == 5033:
-                    pass
-                while True:
-                    if tracker.is_terminated(k):
-                        break
-                    vnt = tracker.get_valid_next(k)
-                    sel = random.choice(vnt)
-                    acc += u" " + tracker.rD[sel]
-                    tracker.update(k, sel)
-                accs.add(acc)
-                if not SqlNode.parse_sql(unidecode(acc)).equals(tracker.trackables[k]):
-                    print(acc)
-                    print(tracker.trackables[k].pptree())
-                    print(SqlNode.parse_sql(unidecode(acc)).pptree())
-                    raise q.SumTingWongException("trees not equal")
-            print("number of unique linearizations for example {}: {}".format(k, len(accs)))
     return tracker
+
 
 # region test
 def test_grouptracker():
-    # TODO: define what to test
-    pass
+    # TODO: test that every possible tree is correct tree and leads to correct sql
+    ism, osm, csm, psm, splits, e2cn = load_matrices()
+    devstart, teststart = splits
+
+    tracker = make_tracker_df(osm)
+
+    for i in range(devstart, len(osm.matrix)):
+        accs = set()
+        for j in range(100):
+            acc = u""
+            tracker.reset()
+            while True:
+                if tracker.is_terminated(i):
+                    break
+                vnt = tracker.get_valid_next(i)
+                sel = random.choice(vnt)
+                acc += u" " + tracker.rD[sel]
+                tracker.update(i, sel)
+            accs.add(acc)
+            assert(SqlNode.parse_sql(acc).equals(tracker.trackables[i]))
+            if not SqlNode.parse_sql(unidecode(acc)).equals(tracker.trackables[i]):
+                print(acc)
+                print(tracker.trackables[i].pptree())
+                print(SqlNode.parse_sql(unidecode(acc)).pptree())
+                raise q.SumTingWongException("trees not equal")
+        assert(len(accs) > 0)
+        numconds = len(re.findall("<COND>", tracker.trackables[i].pp()))
+        print("number of unique linearizations for example {}: {} - {}".format(i, len(accs), numconds))
+
 # endregion
 
 # endregion
@@ -1119,15 +1326,12 @@ def make_oracle_df(tracker, mode=None):
 # endregion
 # endregion
 
-
-# region TEST
-def test_data(x=0):
-    # jsonls_to_lines()
-    # create_mats()
-    test_matrices()
-
 # endregion
 
 
 if __name__ == "__main__":
-    q.argprun(test_data)
+    # test_matrices()
+    # test_querylin2json()
+    # test_sqlnode_and_sqls()
+    test_grouptracker()
+    # q.argprun()
