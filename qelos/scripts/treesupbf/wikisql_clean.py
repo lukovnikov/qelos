@@ -407,12 +407,6 @@ def reconstruct_query(osmrow, gwidrow, rod, rgd):
     return query
 
 
-def reconstruct_query_json(osmrow, gwidrow, rod, rgd):
-    query_lin = reconstruct_query(osmrow, gwidrow, rod, rgd)
-    query_json = querylin2json(query_lin)
-    return query_json
-
-
 def test_matrices(p=DATA_PATH):
     ism, osm, csm, gwids, splits, e2cn = load_matrices()
     devlines = load_lines(p+"dev.lines")
@@ -928,9 +922,13 @@ def test_grouptracker():
 
     tracker = make_tracker_df(osm)
 
+    devstart = 74500
+
     for i in range(devstart, len(osm.matrix)):
         accs = set()
-        for j in range(100):
+        numconds = len(re.findall("<COND>", tracker.trackables[i].pp()))
+        numsamples = {0: 3, 1: 3, 2: 5, 3: 10, 4: 100, 5: 1000}[numconds]
+        for j in range(numsamples):
             acc = u""
             tracker.reset()
             while True:
@@ -948,7 +946,6 @@ def test_grouptracker():
                 print(SqlNode.parse_sql(unidecode(acc)).pptree())
                 raise q.SumTingWongException("trees not equal")
         assert(len(accs) > 0)
-        numconds = len(re.findall("<COND>", tracker.trackables[i].pp()))
         print("number of unique linearizations for example {}: {} - {}".format(i, len(accs), numconds))
 
 # endregion
@@ -1076,7 +1073,7 @@ class ColnameEncoder(torch.nn.Module):
         packedx, order = q.seq_pack(embx, mask)
         _y_t, (y_T, c_T) = self.enc(packedx, (y_0, c_0))
         y_T = y_T[0][order]
-        y_t, umask = q.seq_unpack(_y_t, order)
+        # y_t, umask = q.seq_unpack(_y_t, order)
         ret = y_T.contiguous().view(x.size(0), x.size(1), y_T.size(-1))
         return ret, rmask
 
@@ -1223,16 +1220,12 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
         if useglove:
             inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
-            # gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
-            # inpbaseemb = inpbaseemb.override(gloveemb)
 
     # base embedder for column names
     if colbaseemb is None:
         colbaseemb = q.WordEmb(embdim, worddic=csm.D)
         if useglove:
             colbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=csm.D, gradfracs=(1., gfrac))
-            # gloveemb = q.PretrainedWordEmb(embdim, worddic=csm.D)
-            # colbaseemb = colbaseemb.override(gloveemb)
 
     synD, inpD, colD, syn_trans, inp_trans, col_trans = build_subdics(osm)
 
@@ -1251,9 +1244,6 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
     baseemb = q.WordEmb(dim=embdim, worddic=psm.D)
     if useglove:
         baseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
-    # if useglove:
-    #     gloveemb = q.PretrainedWordEmb(dim=embdim, worddic=psm.D)
-    #     baseemb = baseemb.override(gloveemb)
 
     class Computer(DynamicVecComputer):
         def __init__(self):
@@ -1315,6 +1305,167 @@ def make_oracle_df(tracker, mode=None):
         print("TODO: oracle tests")
     return oracle
 # endregion
+
+
+def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
+                   inpembdim=50, outembdim=50, innerdim=100, numlayers=1, dim=-1, gdim=-1,
+                   dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
+                   wreg=0.000000000001, gradnorm=5., useglove=True, gfrac=0.01,
+                   cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
+                   tieembeddings=False, tiecolenc=False):
+    # region init
+    settings = locals().copy()
+    logger = q.Logger(prefix="wikisql_s2s_clean")
+    logger.save_settings(**settings)
+    logger.update_settings(completed=False)
+    print("LOGGER PATH: {}".format(logger.p))
+    logger.update_settings(version="1")
+
+    model_save_path = os.path.join(logger.p, "model")
+
+    print("Seq2Seq + TF (clean)")
+    if cuda:    torch.cuda.set_device(gpu)
+    tt = q.ticktock("script")
+    # endregion
+
+    # region dimensions
+    gdim = None if gdim < 0 else gdim
+
+    if dim > 0:
+        innerdim = dim              # total dimension of encoding
+        inpembdim = dim // 2        # dimension of input embedding
+        outembdim = dim // 2        # dimension of output embedding
+        if gdim is not None:
+            inpembdim = gdim
+            outembdim = gdim
+        outlindim = innerdim * 2    # dimension of output layer - twice the encoding dim because cat of enc and state
+
+    encdim = innerdim // 2          # half the dimension because bidirectional encoder
+    encdims = [inpembdim] + [encdim] * numlayers    # encoder's layers' dimensions
+    decdims = [outembdim] + [innerdim] * numlayers  # decoder's layers' dimensions
+    # endregion
+
+    # region data
+    ism, osm, cnsm, gwids, splits, e2cn = load_matrices()
+    gwids._matrix = gwids.matrix * (gwids.matrix != gwids.D["<RARE>"])
+    devstart, teststart = splits
+    eids = np.arange(0, len(ism), dtype="int64")
+    # splits
+    if test:    devstart, teststart = 50, 100
+    datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn]
+    traindata = [datamat[:devstart] for datamat in datamats]
+    devdata = [datamat[devstart:teststart] for datamat in datamats]
+    testdata = [datamat[teststart:] for datamat in datamats]
+    # endregion
+
+    # region submodules
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    outemb, inpbaseemb, colbaseemb, colenc = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
+                                                          inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac)
+    if not tieembeddings:
+        inpbaseemb, colbaseemb = None, None
+    if not tiecolenc:
+        colenc = None
+
+    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
+                                                          useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                                          inpbaseemb=inpbaseemb, colbaseemb=colbaseemb, colenc=colenc,
+                                                          nocopy=ablatecopy)
+
+    encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+    # endregion
+
+    # region encoder-decoder definition
+    class EncDec(torch.nn.Module):
+        def __init__(self, dec):
+            super(EncDec, self).__init__()
+            self.inpemb, self.outemb, self.outlin, self.encoder, self.decoder \
+                = inpemb, outemb, outlin, encoder, dec
+
+        def forward(self, inpseq, outseq, inpseqmaps, colnames):
+            # encoding
+            self.inpemb.prepare(inpseqmaps)
+            _inpembs, _inpmask = self.inpemb(inpseq)
+            _inpenc = self.encoder(_inpembs, mask=_inpmask)
+            inpmask = _inpmask[:, :_inpenc.size(1)]
+            inpenc = q.intercat(_inpenc.chunk(2, -1), -1)
+            ctx = inpenc    # old normalpointer mode
+
+            # decoding
+            self.outemb.prepare(inpseqmaps, colnames)
+            self.outlin.prepare(inpseq, inpenc, inpseqmaps, colnames)
+
+            decoding = self.decoder(outseq, ctx=ctx, ctx_0=ctx[:, -1, :],
+                                    ctxmask=inpmask, maxtime=osm.matrix.shape[1]-1)
+
+            return decoding
+    # endregion
+
+    # region decoders and model, for train and test
+    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
+              for i in range(1, len(decdims))]
+    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                               q.Dropout(edropout),
+                                               outlin, ctx2out=False)
+    decoder_core = q.DecoderCore(outemb, *layers)
+    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    decoder_cell.set_runner(q.TeacherForcer())
+    decoder = decoder_cell.to_decoder()
+
+    m = EncDec(decoder)         # ONLY USE FOR TRAINING !!!
+
+    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+    valid_decoder_cell.set_runner(q.FreeRunner())
+    valid_decoder = valid_decoder_cell.to_decoder()
+
+    valid_m = EncDec(valid_decoder)     # use for valid
+    # TODO: verify valid_m doesn't get something wrong !
+    # endregion
+
+    # region training preparation
+    trainloader = q.dataload(*traindata, batch_size=batsize, shuffle=True)
+    validloader = q.dataload(*devdata, batch_size=batsize, shuffle=False)
+    testloader = q.dataload(*testdata, batch_size=batsize, shuffle=False)
+
+    losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
+                         q.SeqAccuracy(ignore_index=0))
+
+    row2tree = lambda x: SqlNode.parse_sql(osm.pp(x))
+
+    validlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=row2tree))
+
+    logger.update_settings(optimizer="adam")
+    optim = torch.optim.Adam(q.paramgroups_of(m), lr=lr, weight_decay=wreg)
+
+    def inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids):
+        colnames = cnsm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return ismbatch, osmbatch[:, :-1], gwidsbatch, colnames, osmbatch[:, 1:]
+
+    def valid_inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids):
+        ismbatch, osminpbatch, gwidsbatch, colnames, osmoutbatch \
+            = inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids)
+        return ismbatch, osminpbatch[:, 0], gwidsbatch, colnames, osmoutbatch
+    # endregion
+
+    # region produced lines and jsons every time a new dev acc is registered
+
+    # endregion
+
+    # region training
+    q.train(m).train_on(trainloader, losses)\
+        .optimizer(optim).clip_grad_norm(gradnorm).set_batch_transformer(inp_bt)\
+        .valid_with(valid_m).valid_on(validloader, validlosses).set_valid_batch_transformer(valid_inp_bt)\
+        .cuda(cuda).hook(logger).hook(best_saver)\
+        .train(epochs)
+    # endregion
+
+    # region evaluation
+
+    # endregion
+
+
 
 # region main scripts
 
