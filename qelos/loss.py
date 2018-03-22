@@ -4,6 +4,8 @@ import numpy as np
 
 EPS = 1e-6
 
+# TODO: REWRITE PROPERLY AND PUSH TO QELOS-CORE
+# TODO: mask has no place here, mask must be applied in prediction modules
 
 class Loss(nn.Module):
     def __init__(self, size_average=True, _size_avg_ignore_mask=False, **kw):
@@ -61,11 +63,10 @@ class PairRankingLoss(Loss):
 
 
 class LinearLoss(Loss):
-    """ LinearLoss or NoLoss"""
+    """ LinearLoss or NoLoss. Use this if model returns loss """
     def _forward(self, x, gold, **kw):
         """ x is minimized, gold is ignored"""
         return x, None
-
 
 
 class DiscreteLoss(Loss):
@@ -474,9 +475,9 @@ class OldSeqNLLLoss(nn.NLLLoss):
         return loss
 
 
-class OldSeqAccuracy(nn.Module):
+class OldOldSeqAccuracy(nn.Module):
     def __init__(self, size_average=True, ignore_index=0):
-        super(OldSeqAccuracy, self).__init__()
+        super(OldOldSeqAccuracy, self).__init__()
         self.size_average = size_average
         if ignore_index is not None:
             if not q.issequence(ignore_index):
