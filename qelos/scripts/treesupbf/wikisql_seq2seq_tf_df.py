@@ -1,4 +1,4 @@
-from qelos.scripts.treesupbf.wikisql import run_seq2seq_tf as runf
+from qelos.scripts.treesupbf.wikisql_clean import run_seq2seq_tf as runf
 import qelos as q
 
 if __name__ == "__main__":

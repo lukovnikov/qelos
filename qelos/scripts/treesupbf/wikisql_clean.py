@@ -598,8 +598,8 @@ def get_children_by_name(node, cre):
 
 
 def querylin2json(qlin, origquestion):
-    parsedtree = SqlNode.parse_sql(qlin)
     try:
+        parsedtree = SqlNode.parse_sql(qlin)
         assert(parsedtree.name == "<QUERY>")            # root must by <query>
         # get select and where subtrees
         selectnode = list(get_children_by_name(parsedtree, "<SELECT>"))
@@ -647,7 +647,7 @@ def querylin2json(qlin, origquestion):
                     conds.append([cond_col, cond_op, found])
         return {"sel": select_col, "agg": select_agg, "conds": conds}
     except Exception as e:
-        return {"agg": 0, "sel": 3, "conds": [[5, 0, "https://www.youtube.com/watch?v=oHg5SJYRHA0"]]}
+        return {"agg": 10, "sel": 1345, "conds": [[5, 0, "https://www.youtube.com/watch?v=oHg5SJYRHA0"]]}
 
 
 def same_sql_json(x, y):
@@ -1468,6 +1468,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     traindata = [datamat[:devstart] for datamat in datamats]
     devdata = [datamat[devstart:teststart] for datamat in datamats]
     testdata = [datamat[teststart:] for datamat in datamats]
+
+    rev_osm_D = {v: k for k, v in osm.D.items()}
+    rev_gwids_D = {v: k for k, v in gwids.D.items()}
     # endregion
 
     # region submodules
@@ -1582,9 +1585,14 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     tt.tick("Loading best model...")
     valid_m.load_state_dict(torch.load(model_save_path))
 
-    rev_osm_D = {v: k for k, v in osm.D.items()}
-    rev_gwids_D = {v: k for k, v in gwids.D.items()}
+    dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
+                                               inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
+                                               savedir=logger.p)
+    # endregion
 
+
+def evaluate_model(m, devdata, testdata, rev_osm_D, rev_gwids_D,
+                   inp_bt=None, batsize=100, cuda=False, savedir=None):
     def compute_sql_acc(pred_sql, gold_sql):
         sql_acc = 0.
         sql_acc_norm = 1e-6
@@ -1593,14 +1601,21 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
             sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
         return sql_acc / sql_acc_norm
 
+    def save_lines(lines, fname):
+        with codecs.open(savedir+fname, "w", encoding="utf-8") as f:
+            for lin in lines:
+                f.write(u"{}\n".format(lin))
+
     # dev predictions
     devquestions = load_jsonls(DATA_PATH+"dev.jsonl", questionsonly=True)
     devsqls = load_jsonls(DATA_PATH+"dev.jsonl", sqlsonly=True)
-    pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions,
-                                             batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+    pred_devlines, pred_devsqls = get_output(m, devdata, devquestions,
+                                             batsize=batsize, inp_bt=inp_bt, cuda=cuda,
                                              rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
-    logger.save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql", use_unicode=True)
+
+    if savedir is not None:
+        save_lines(pred_devlines, "dev_pred.lines")
+        save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql")
 
     dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
     print("DEV SQL ACC: {}".format(dev_sql_acc))
@@ -1608,15 +1623,17 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # test predictions
     testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
     testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
-    pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions,
-                                               batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+    pred_testlines, pred_testsqls = get_output(m, testdata, testquestions,
+                                               batsize=batsize, inp_bt=inp_bt, cuda=cuda,
                                                rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    logger.save_lines(pred_testlines, "test_pred.lines", use_unicode=True)
-    logger.save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql", use_unicode=True)
+
+    if savedir is not None:
+        save_lines(pred_testlines, "test_pred.lines")
+        save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql")
 
     test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
     print("TEST SQL ACC: {}".format(test_sql_acc))
-    # endregion
+    return dev_sql_acc, test_sql_acc
 
 
 def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
@@ -1665,11 +1682,14 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")
     # splits
-    if test:    devstart, teststart = 50, 100
+    if test:    devstart, teststart, batsize = 200, 250, 50
     datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn, eids]
     traindata = [datamats[i][:devstart] for i in [0, 1, 2, 3, 4]]
     devdata = [datamats[i][devstart:teststart] for i in [0, 1, 2, 3]]       # should be same as tf script
     testdata = [datamats[i][teststart:] for i in [0, 1, 2, 3]]              # should be same as tf script
+
+    rev_osm_D = {v: k for k, v in osm.D.items()}
+    rev_gwids_D = {v: k for k, v in gwids.D.items()}
 
     # oracle:
     tracker = make_tracker_df(osm)
@@ -1794,41 +1814,50 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     tt.tick("Loading best model...")
     valid_m.load_state_dict(torch.load(model_save_path))
 
-    rev_osm_D = {v: k for k, v in osm.D.items()}
-    rev_gwids_D = {v: k for k, v in gwids.D.items()}
-
-    def compute_sql_acc(pred_sql, gold_sql):
-        sql_acc = 0.
-        sql_acc_norm = 1e-6
-        for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
-            sql_acc_norm += 1
-            sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
-        return sql_acc / sql_acc_norm
-
-    # dev predictions
-    devquestions = load_jsonls(DATA_PATH + "dev.jsonl", questionsonly=True)
-    devsqls = load_jsonls(DATA_PATH + "dev.jsonl", sqlsonly=True)
-    pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions,
-                                             batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
-                                             rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
-    logger.save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql", use_unicode=True)
-
-    dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
-    print("DEV SQL ACC: {}".format(dev_sql_acc))
-
-    # test predictions
-    testquestions = load_jsonls(DATA_PATH + "test.jsonl", questionsonly=True)
-    testsqls = load_jsonls(DATA_PATH + "test.jsonl", sqlsonly=True)
-    pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions,
-                                               batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
-                                               rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    logger.save_lines(pred_testlines, "test_pred.lines", use_unicode=True)
-    logger.save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql", use_unicode=True)
-
-    test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
-    print("TEST SQL ACC: {}".format(test_sql_acc))
+    dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
+                                               inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
+                                               savedir=logger.p)
     # endregion
+
+    # # region evaluation
+    # tt.tick("Loading best model...")
+    # valid_m.load_state_dict(torch.load(model_save_path))
+    #
+    # rev_osm_D = {v: k for k, v in osm.D.items()}
+    # rev_gwids_D = {v: k for k, v in gwids.D.items()}
+    #
+    # def compute_sql_acc(pred_sql, gold_sql):
+    #     sql_acc = 0.
+    #     sql_acc_norm = 1e-6
+    #     for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
+    #         sql_acc_norm += 1
+    #         sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
+    #     return sql_acc / sql_acc_norm
+    #
+    # # dev predictions
+    # devquestions = load_jsonls(DATA_PATH + "dev.jsonl", questionsonly=True)
+    # devsqls = load_jsonls(DATA_PATH + "dev.jsonl", sqlsonly=True)
+    # pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions,
+    #                                          batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+    #                                          rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
+    # logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
+    # logger.save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql", use_unicode=True)
+    #
+    # dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
+    # print("DEV SQL ACC: {}".format(dev_sql_acc))
+    #
+    # # test predictions
+    # testquestions = load_jsonls(DATA_PATH + "test.jsonl", questionsonly=True)
+    # testsqls = load_jsonls(DATA_PATH + "test.jsonl", sqlsonly=True)
+    # pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions,
+    #                                            batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+    #                                            rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
+    # logger.save_lines(pred_testlines, "test_pred.lines", use_unicode=True)
+    # logger.save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql", use_unicode=True)
+    #
+    # test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
+    # print("TEST SQL ACC: {}".format(test_sql_acc))
+    # # endregion
 
 
 def test_reconstruct_save_reload_and_eval():
