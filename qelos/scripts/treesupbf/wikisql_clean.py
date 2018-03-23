@@ -20,7 +20,7 @@ from qelos.train import BestSaver
 from tqdm import tqdm
 
 
-# TODO: don't forget to use fixed PartiallyPretrainedWordEmb !!!!!!!!!!!!!!!!!!!!!!!!!!
+# TODO: UNIQUE RARES
 
 
 _opt_test = True
@@ -986,7 +986,18 @@ class DynamicVecPreparer(torch.nn.Module):  pass
 class DynamicWordEmb(WordEmbBase):
     """ Dynamic Word Emb dynamically computes word embeddings on a per-example basis
         based on the given batch of word ids and batch of data.
-        Basically a dynamic-data ComputedWordEmb. """
+
+        Computer can be a DynamicVecPreparer or a DynamicVecComputer.
+        The .prepare() method must be called at the beginning of every batch
+            with the per-example data batch used to compute the vectors.
+
+        If a Preparer is used, vectors are prepared for every example in the batch.
+        The Preparer receives the data, per example and must compute different sets of vectors for different examples.
+        During forward, the prepared vectors are sliced from, on a per-example basis.
+
+        If a Computer is used, .prepare() only stores the given data,
+            which are passed to the computer during forward, together with the actual input.
+        """
 
     def __init__(self, computer=None, worddic=None, **kw):
         super(DynamicWordEmb, self).__init__(worddic=worddic)
@@ -1026,6 +1037,10 @@ class DynamicWordEmb(WordEmbBase):
 
 
 class DynamicWordLinout(WordLinoutBase):        # removed the logsoftmax in here
+    """ Must be used with a DynamicVecPreparer (see DynamicWordEmb doc).
+        As with DynamicWordEmb, the vectors used in this layer are different for every example.
+        .prepare() must be called with the per-example data batch at the beginning of the batch.
+    """
     def __init__(self, computer=None, worddic=None):
         super(DynamicWordLinout, self).__init__(worddic)
         self.computer = computer
@@ -1071,8 +1086,12 @@ class DynamicWordLinout(WordLinoutBase):        # removed the logsoftmax in here
         return ret, rmask
 # endregion
 
+
 # region dynamic vectors modules
 class ColnameEncoder(torch.nn.Module):
+    """ Encoder for column names.
+        Uses one LSTM layer.
+    """
     def __init__(self, dim, colbaseemb, nocolid=None):
         super(ColnameEncoder, self).__init__()
         self.emb = colbaseemb
@@ -1082,6 +1101,10 @@ class ColnameEncoder(torch.nn.Module):
         self.nocolid = nocolid
 
     def forward(self, x):
+        """ input is (batsize, numcols, colnamelen)
+            out is (batsize, numcols, dim)
+        """
+        # TODO: test
         rmask = None
         if self.nocolid is not None:
             rmask = x[:, :, 0] != self.nocolid
@@ -1099,6 +1122,16 @@ class ColnameEncoder(torch.nn.Module):
 
 
 class OutVecComputer(DynamicVecPreparer):
+    """ This is a DynamicVecPreparer used for both output embeddings and output layer.
+        To be created, needs:
+         * syn_emb:         normal syntax embedding
+         * syn_trans:       normal syntax trans - if sliced with osm.D ids, return ids to use with syn_emb in .prepare()
+         * inpbaseemb:      embedder for input words
+         * inp_trans:       input words trans - if sliced with osm.D ids, return ids to use with inpbaseemb and inpmaps in .prepare()
+         * colencoder:      encoder for column names
+         * col_trans:       column names trans
+         * worddic:         dictionary of output symbols (synids, colids, uwids) = osm.D
+    """
     def __init__(self, syn_emb, syn_trans, inpbaseemb, inp_trans,
                  colencoder, col_trans, worddic, colzero_to_inf=False):
         super(OutVecComputer, self).__init__()
@@ -1117,54 +1150,82 @@ class OutVecComputer(DynamicVecPreparer):
             self.inpemb_trans = None
 
     def prepare(self, inpmaps, colnames):
-        x = q.var(torch.arange(0, len(self.D))).cuda(inpmaps).v.long()
+        """ inpmaps (batsize, num_uwids) contains mapping from uwids to gwids for every example = batch from gwids matrix
+            colnames (batsize, numcols, colnamelen) contains colnames for every example
+        """
+        x = q.var(torch.arange(0, len(self.D))).cuda(inpmaps).v.long()      # prepare for all possible input tokens (from osm.D)
         batsize = inpmaps.size(0)
 
-        _syn_ids = self.syn_trans[x]
+        # region syntax words
+        _syn_ids = self.syn_trans[x]            # maps input ids to syn ids
+        # computes vectors and mask for syn ids from input
         _syn_embs, _syn_mask = self.syn_emb(_syn_ids.unsqueeze(0).repeat(batsize, 1))
+        # repeat(batsize, 1) because syn embs are same across examples
+        #   --> produces (batsize, vocsize) indexes that are then embedded to (batsize, vocsize, embdim)
+        # endregion
 
-        _inp_ids = self.inp_trans[x]
+        # region input words --> used in output embedding but normally overridden by BFOL for output scores
+        # TODO: unique rares can be implemented here
+        _inp_ids = self.inp_trans[x]            # maps input ids to uwid numbers
+        # gets gwids for uwids using inpmaps (=batch from gwids)
         transids = torch.gather(inpmaps, 1, _inp_ids.unsqueeze(0).repeat(batsize, 1))
+        # repeat(batsize, 1) because mapping from input ids to uwid number is same across all examples
+        #   --> produces (batsize, vocsize) matrix of uwid numbers
+        #           that are then used to gather to (batsize, vocsize) matrix of gwid ids
+
+        # embeds retrieved gwids using provided inpbaseemb
         _inp_embs, _inp_mask = self.inp_emb(transids)
+        # if expected vector size doesn't match inpemb vector size, apply linear transform to adapt
         if self.inpemb_trans is not None:
             _inp_embs = self.inpemb_trans(_inp_embs)
+        # endregion
 
-        _colencs, _col_mask = self.col_enc(colnames)
-        _col_ids = self.col_trans[x]
-        _col_ids = _col_ids.unsqueeze(0).repeat(batsize, 1)
+        # region column names
+        _colencs, _col_mask = self.col_enc(colnames)        # encode given column names
+        _col_ids = self.col_trans[x]                        # map input ids to col ids
+        _col_ids = _col_ids.unsqueeze(0).repeat(batsize, 1) # mapped col ids are shared across all examples
+        # ???
         _col_trans_mask = (_col_ids > -1).long()
         _col_ids += (1 - _col_trans_mask)
         _col_mask = torch.gather(_col_mask, 1, _col_ids)
-        _col_ids = _col_ids.unsqueeze(2).repeat(1, 1, _colencs.size(2))
-        _col_embs = torch.gather(_colencs, 1, _col_ids)
+        _col_ids = _col_ids.unsqueeze(2).repeat(1, 1, _colencs.size(2))     # because colens are (batsize, numcols, embdim)
+
+        _col_embs = torch.gather(_colencs, 1, _col_ids)     # gather the right column ids for every example --> (batsize, vocsize, embdim)
         _col_mask = _col_mask.float() * _col_trans_mask.float()
+        # endregion
 
         # _col_mask = _col_mask.float() - _inp_mask.float() - _syn_mask.float()
 
+        # region combine
         _totalmask = _syn_mask.float() + _inp_mask.float() + _col_mask.float()
 
         assert (np.all(_totalmask.cpu().data.numpy() < 2))
 
         # _col_mask = (x > 0).float() - _inp_mask.float() - _syn_mask.float()
 
+        # merge --> (batsize, vocsize, embdim)
         ret =   _syn_embs * _syn_mask.float().unsqueeze(2) \
               + _inp_embs * _inp_mask.float().unsqueeze(2) \
               + _col_embs * _col_mask.float().unsqueeze(2)
 
+        # endregion
         # _pp = osm.pp(x.cpu().data.numpy())
         return ret, _totalmask
 
 
 class BFOL(DynamicWordLinout):
+    """ Implements pointer-based scores over uwids, overrides uwid scores produced by OutVecComputer() """
     def __init__(self, computer=None, worddic=None, ismD=None, inp_trans=None, nocopy=False):
+        """ computer is an OutVecComputer() """
         super(BFOL, self).__init__(computer=computer, worddic=worddic)
-        self.inppos2uwid = None
+        self.inppos2uwid = None     # maps positions in the input to uwids
         self.inpenc = None
         self.ismD = ismD
         self.inp_trans = inp_trans
         self.nocopy = nocopy
 
     def prepare(self, inpseq, inpenc, *xdata):
+        """ inpseq: (batsize, seqlen) """
         super(BFOL, self).prepare(*xdata)
         inppos2uwid = q.var(torch.zeros(inpseq.size(0), inpseq.size(1), len(self.ismD))).cuda(inpseq).v
         inppos2uwid.data.scatter_(2, inpseq.unsqueeze(2).data, 1)
@@ -1176,22 +1237,30 @@ class BFOL(DynamicWordLinout):
     def _forward(self, x):
         ret, rmask = super(BFOL, self)._forward(x)
         if self.nocopy is True:
+            # just outveccomputer results
             return ret, rmask
 
         xshape = x.size()
         if len(xshape) == 2:
             x = x.unsqueeze(1)
+
+        # compute scores over input positions
         # x will be twice the size of inpenc -> which part of x to take???
         compx = x[:, :, :x.size(2) // 2]  # slice out first half, which is y_t (not ctx_t)
         scores = torch.bmm(compx, self.inpenc.transpose(2, 1))
 
+        # translate scores over input positions to scores over uwids
         inppos2uwid = self.inppos2uwid[:, :scores.size(-1), :]  # in case input matrix shrank because of seq packing
         offset = (torch.min(scores) - 1000).data[0]
         umask = (inppos2uwid == 0).float()
         uwid_scores = scores.transpose(2, 1) * inppos2uwid
         uwid_scores = uwid_scores + offset * umask
+
+        # take max scores
         uwid_scores, _ = torch.max(uwid_scores, 1)
         uwid_scores_mask = (inppos2uwid.sum(1) > 0).float()  # (batsize, #uwid)
+
+        # replace old scores over uwids with the just computer pointer-based scores over uwids
         sel_uwid_scores = uwid_scores.index_select(1, self.inp_trans)
         sel_uwid_scores_mask = uwid_scores_mask.index_select(1, self.inp_trans)
         # the zeros in seluwid mask for those uwids should already be there in rmask
@@ -1201,6 +1270,7 @@ class BFOL(DynamicWordLinout):
         # assert(((rret != 0.).float() - rmask.float()).norm().cpu().data[0] == 0)
         return rret, rmask
 # endregion
+
 
 # region dynamic vector module creation functions
 # region dynamic vector module creation helper functions
@@ -1275,9 +1345,9 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
             else:
                 self.trans = None
 
-        def forward(self, x, data):
+        def forward(self, x, data):     # TODO: unique rares can be implemented here
             transids = torch.gather(data, 1, x)
-            _pp = psm.pp(transids[:5].cpu().data.numpy())
+            # _pp = psm.pp(transids[:5].cpu().data.numpy())
             _embs, mask = self.baseemb(transids)
             if self.trans is not None:
                 _embs = self.trans(_embs)
@@ -1324,6 +1394,27 @@ def make_oracle_df(tracker, mode=None):
     if _opt_test:
         print("TODO: oracle tests")
     return oracle
+
+
+def get_output(model, data, origquestions, batsize=100, inp_bt=None, cuda=False,
+               rev_osm_D=None, rev_gwids_D=None):
+    """ takes a model (must be freerunning !!!) """
+    gwids = data[2]
+    # TODO: make sure q.eval() doesn't feed anything wrong or doesn't forget to reset things
+    dataloader = q.dataload(*data, batch_size=batsize, shuffle=False)
+    predictions = q.eval(model).on(dataloader) \
+        .set_batch_transformer(inp_bt).cuda(cuda).run()
+    _, predictions = predictions.max(2)
+    predictions = predictions.cpu().data.numpy()
+    rawlines = []
+    sqls = []
+    for i in range(len(gwids)):
+        rawline = reconstruct_query(predictions[i], gwids[i], rev_osm_D, rev_gwids_D)
+        rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
+        rawlines.append(rawline)
+        sqljson = querylin2json(rawline, origquestions[i])
+        sqls.append(sqljson)
+    return rawlines, sqls
 # endregion
 
 
@@ -1358,9 +1449,10 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
         if gdim is not None:
             inpembdim = gdim
             outembdim = gdim
-        outlindim = innerdim * 2    # dimension of output layer - twice the encoding dim because cat of enc and state
 
-    encdim = innerdim // 2          # half the dimension because bidirectional encoder
+    outlindim = innerdim * 2    # dimension of output layer - twice the encoding dim because cat of enc and state
+
+    encdim = innerdim // 2          # half the dimension because bidirectional encoder doubles it back
     encdims = [inpembdim] + [encdim] * numlayers    # encoder's layers' dimensions
     decdims = [outembdim] + [innerdim] * numlayers  # decoder's layers' dimensions
     # endregion
@@ -1489,31 +1581,17 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     rev_osm_D = {v: k for k, v in osm.D.items()}
     rev_gwids_D = {v: k for k, v in gwids.D.items()}
 
-    def get_output(model, data, origquestions):
-        gwids = data[2]
-        # TODO: make sure q.eval() doesn't feed anything wrong or doesn't forget to reset things
-        dataloader = q.dataload(*data, batch_size=batsize, shuffle=False)
-        predictions = q.eval(model).on(dataloader)\
-            .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
-        _, predictions = predictions.max(2)
-        predictions = predictions.cpu().data.numpy()
-        rawlines = []
-        sqls = []
-        for i in range(len(gwids)):
-            rawline = reconstruct_query(predictions[i], gwids[i], rev_osm_D, rev_gwids_D)
-            rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
-            rawlines.append(rawline)
-            sqljson = querylin2json(rawline, origquestions[i])
-            sqls.append(sqljson)
-        return rawlines, sqls
-
     devquestions = load_jsonls(DATA_PATH+"dev.jsonl", questionsonly=True)
     devsqls = load_jsonls(DATA_PATH+"dev.jsonl", sqlsonly=True)
-    pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions)
+    pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions,
+                                             batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+                                             rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
 
     testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
     testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
-    pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions)
+    pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions,
+                                               batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
+                                               rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
 
     # save predictions
     logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
@@ -1578,7 +1656,8 @@ def test_save():
             reloaded_lines.append(line.strip())
 
     reloaded_sqls = []
-    with codecs.open("testsave.sqls", encoding="utf-8") as f:
+    # with codecs.open("testsave.sqls", encoding="utf-8") as f:
+    with open("testsave.sqls") as f:
         for line in f:
             sql = json.loads(line)
             reloaded_sqls.append(sql)
@@ -1622,5 +1701,5 @@ if __name__ == "__main__":
     # test_querylin2json()
     # test_sqlnode_and_sqls()
     # test_grouptracker()
-    test_save()
-    # q.argprun()
+    # test_save()
+    q.argprun(run_seq2seq_tf)

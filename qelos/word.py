@@ -457,9 +457,37 @@ class PretrainedWordEmb(WordEmb, PretrainedWordVec):
 
 
 class PartiallyPretrainedWordEmb(WordEmb, PretrainedWordVec):
-    """ !!! Don't forget to call .apply_gradfrac() before doing optim step when not using qelos training loop !!! """
     def __init__(self, dim=50, worddic=None, path=None, gradfracs=(1., 1.), **kw):
         super(PartiallyPretrainedWordEmb, self).__init__(dim=dim, worddic=worddic, **kw)
+        path = self._get_path(dim, path=path)
+        value, wdic = self.loadvalue(path, dim, indim=None,
+                                     worddic=None, maskid=None,
+                                     rareid=None)
+        value = q.val(value).v
+        self.mixmask = q.val(np.zeros((len(self.D),), dtype="float32")).v
+        for k, v in self.D.items():
+            if k in wdic:
+                self.embedding.weight.data[v, :] = value.data[wdic[k], :]
+                self.mixmask.data[v] = 1
+
+        self.gradfrac_vanilla, self.gradfrac_pretrained = gradfracs
+
+        def apply_gradfrac(grad):
+            if self.gradfrac_vanilla != 1.:
+                grad = grad * ((1 - self.mixmask.unsqueeze(1)) * q.v(self.gradfrac_vanilla)
+                               + self.mixmask.unsqueeze(1))
+            if self.gradfrac_pretrained != 1.:
+                grad = grad * (self.mixmask.unsqueeze(1) * q.v(self.gradfrac_pretrained)
+                               + (1 - self.mixmask.unsqueeze(1)))
+            return grad
+
+        self.embedding.weight.register_hook(apply_gradfrac)
+
+
+class OldPartiallyPretrainedWordEmb(WordEmb, PretrainedWordVec):
+    """ !!! Don't forget to call .apply_gradfrac() before doing optim step when not using qelos training loop !!! """
+    def __init__(self, dim=50, worddic=None, path=None, gradfracs=(1., 1.), **kw):
+        super(OldPartiallyPretrainedWordEmb, self).__init__(dim=dim, worddic=worddic, **kw)
         path = self._get_path(dim, path=path)
         value, wdic = self.loadvalue(path, dim, indim=None,
                                      worddic=None, maskid=None,
