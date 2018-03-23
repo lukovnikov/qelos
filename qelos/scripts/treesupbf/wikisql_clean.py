@@ -22,8 +22,10 @@ from tqdm import tqdm
 
 # TODO: make sure test and dev splits are correct
 # TODO: MAKE SURE vanilla embeddings are changed after training
-# TODO: UNIQUE RARES  --> make_inp_emb and OutVecComputer should use rare-X embeddings based on rare_gwids_not_in_glove
-#       replace representation of rare words with a vector <-- a hack
+
+# TODO: rare words in col names
+# DONE: UNIQUE RARES  --> make_inp_emb and OutVecComputer use rare-X embeddings based on rare_gwids_not_in_glove
+#                         (implemented by a hack replacement with rare_vec)
 
 
 _opt_test = True
