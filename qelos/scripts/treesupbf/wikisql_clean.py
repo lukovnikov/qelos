@@ -20,7 +20,10 @@ from qelos.train import BestSaver
 from tqdm import tqdm
 
 
-# TODO: UNIQUE RARES
+# TODO: make sure test and dev splits are correct
+# TODO: MAKE SURE vanilla embeddings are changed after training
+# TODO: UNIQUE RARES  --> make_inp_emb and OutVecComputer should use rare-X embeddings based on rare_gwids_not_in_glove
+#       replace representation of rare words with a vector <-- a hack
 
 
 _opt_test = True
@@ -451,10 +454,6 @@ def test_matrices(p=DATA_PATH):
     print("test queries reconstruction matches")
 # endregion
 # endregion
-
-
-def ppq(i, ism, gwids):
-    return gwids.pp(gwids.matrix[i][ism.matrix[i]])
 
 # endregion
 
@@ -1304,7 +1303,7 @@ def build_subdics(osm):
 
 def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, colenc=None,
                           useglove=True, gdim=None, gfrac=0.1):
-    # base embedder for input tokens        # TODO might want to think about reusing encoding
+    # base embedder for input tokens
     embdim = gdim if gdim is not None else dim
     if inpbaseemb is None:
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
@@ -1329,7 +1328,8 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
 # endregion
 
 
-def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
+def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1,
+                 rare_gwids=None):
     embdim = gdim if gdim is not None else dim
     baseemb = q.WordEmb(dim=embdim, worddic=psm.D)
     if useglove:
@@ -1358,7 +1358,8 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1):
 
 
 def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None,
+                 rare_gwids=None):
     print("MAKING OUT EMB")
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
@@ -1367,7 +1368,8 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 
 def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
-                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False):
+                 useglove=True, gdim=None, gfrac=0.1, colenc=None, nocopy=False,
+                 rare_gwids=None):
     print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
@@ -1381,9 +1383,25 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
 
 # endregion
 
-
 # region MAIN SCRIPTS
 # region main scripts helper functions
+def get_rare_stats(trainism, traingwids, gwidsD, gdic, rarefreq=2):
+    """  get rare gwids, missing gwids, ignoring glove (glove should be taken into account in the modules) """
+    rD = {v: k for k, v in gwidsD.items()}
+    # count all unique ids in traingwids
+    uniquegwids, gwid_counts = np.unique(traingwids, return_counts=True)
+    rare_gwids = gwid_counts <= rarefreq
+    number_rare = np.sum(rare_gwids.astype("int32"))
+    print("{} gwids with freq <= {} in train".format(number_rare, rarefreq))
+    unique_nonrare_ids = uniquegwids * (~rare_gwids).astype("int32")
+    unique_nonrare_ids = set(unique_nonrare_ids)
+    unique_nonrare_words = set([rD[unrid] for unrid in unique_nonrare_ids])
+    rare_words = set(gwidsD.keys()) - unique_nonrare_words - set(gdic.keys())
+    rare_gwids_after_glove = set([gwidsD[rare_word] for rare_word in rare_words])
+    print("{} gwids with freq <= {} in train and not in used glove".format(len(rare_gwids_after_glove), rarefreq))
+    return rare_gwids_after_glove
+
+
 def make_oracle_df(tracker, mode=None):
     ttt = q.ticktock("oracle maker")
     print("oracle mode: {}".format(mode))
@@ -1410,11 +1428,129 @@ def get_output(model, data, origquestions, batsize=100, inp_bt=None, cuda=False,
     sqls = []
     for i in range(len(gwids)):
         rawline = reconstruct_query(predictions[i], gwids[i], rev_osm_D, rev_gwids_D)
-        rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
+        rawline = rawline.replace("<START>", "").strip()
+        rawline = rawline.split("<END>")[0].strip()
         rawlines.append(rawline)
         sqljson = querylin2json(rawline, origquestions[i])
         sqls.append(sqljson)
     return rawlines, sqls
+
+
+def evaluate_model(m, devdata, testdata, rev_osm_D, rev_gwids_D,
+                   inp_bt=None, batsize=100, cuda=False, savedir=None, test=False):
+    def compute_sql_acc(pred_sql, gold_sql):
+        sql_acc = 0.
+        sql_acc_norm = 1e-6
+        for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
+            sql_acc_norm += 1
+            sql_acc += 1. if same_sql_json(pred_sql_i, gold_sql_i) else 0.
+        return sql_acc / sql_acc_norm
+
+
+    def save_lines(lines, fname):
+        with codecs.open(savedir + '/' + fname, "w", encoding="utf-8") as f:
+            for lin in lines:
+                f.write(u"{}\n".format(lin))
+
+
+    # dev predictions
+    devquestions = load_jsonls(DATA_PATH + "dev.jsonl", questionsonly=True)
+    devsqls = load_jsonls(DATA_PATH + "dev.jsonl", sqlsonly=True)
+
+    if test:
+        devquestions = load_jsonls(DATA_PATH + "train.jsonl", questionsonly=True)[200:250]
+        devsqls = load_jsonls(DATA_PATH + "train.jsonl", sqlsonly=True)[200:250]
+
+    pred_devlines, pred_devsqls = get_output(m, devdata, devquestions,
+                                             batsize=batsize, inp_bt=inp_bt, cuda=cuda,
+                                             rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
+    if savedir is not None:
+        save_lines(pred_devlines, "dev_pred.lines")
+        save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.jsonl")
+
+    dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
+    print("DEV SQL ACC: {}".format(dev_sql_acc))
+
+    # test predictions
+    testquestions = load_jsonls(DATA_PATH + "test.jsonl", questionsonly=True)
+    testsqls = load_jsonls(DATA_PATH + "test.jsonl", sqlsonly=True)
+    pred_testlines, pred_testsqls = get_output(m, testdata, testquestions,
+                                               batsize=batsize, inp_bt=inp_bt, cuda=cuda,
+                                               rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
+    if savedir is not None:
+        save_lines(pred_testlines, "test_pred.lines")
+        save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.jsonl")
+
+    test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
+    print("TEST SQL ACC: {}".format(test_sql_acc))
+    return dev_sql_acc, test_sql_acc
+
+
+# region test
+def test_reconstruct_save_reload_and_eval():
+    """ load matrices, get test set, reconstruct using get_output()'s logic, save, read, test """
+    tt = q.ticktock("testsave")
+    ism, osm, cnsm, gwids, splits, e2cn = load_matrices()
+    rev_osm_D = {v: k for k, v in osm.D.items()}
+    rev_gwids_D = {v: k for k, v in gwids.D.items()}
+    _, teststart = splits
+    testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
+    testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
+
+    tt.tick("reconstructing test gold...")
+    ism, osm, gwids = ism.matrix[teststart:], osm.matrix[teststart:], gwids.matrix[teststart:]
+    rawlines, sqls = [], []
+    for i in range(len(gwids)):
+        rawline = reconstruct_query(osm[i], gwids[i], rev_osm_D, rev_gwids_D)
+        rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
+        rawlines.append(rawline)
+        sqljson = querylin2json(rawline, testquestions[i])
+        sqls.append(sqljson)
+    tt.tock("reconstructed")
+
+    tt.tick("saving test gold...")
+    # saving without codecs doesn't work
+    with codecs.open("testsave.lines", "w", encoding="utf-8") as f:
+        for line in rawlines:
+            f.write(u"{}\n".format(line))
+
+    with codecs.open("testsave.sqls", "w", encoding="utf-8") as f:
+        for sql in sqls:
+            f.write(u"{}\n".format(json.dumps(sql)))
+    tt.tock("saved")
+
+    tt.tick("reloading saved...")
+    reloaded_lines = []
+    with codecs.open("testsave.lines", encoding="utf-8") as f:
+    # with open("testsave.lines") as f:
+        for line in f:
+            reloaded_lines.append(line.strip())
+
+    reloaded_sqls = []
+    # with codecs.open("testsave.sqls", encoding="utf-8") as f:
+    with open("testsave.sqls") as f:
+        for line in f:
+            sql = json.loads(line)
+            reloaded_sqls.append(sql)
+    tt.tock("reloaded saved")
+
+    for rawline, reloadedline in zip(rawlines, reloaded_lines):
+        if not rawline == reloadedline:
+            print(u"FAILED: '{}' \n - '{}'".format(rawline, reloadedline))
+        assert(rawline == reloadedline)
+
+    failures = 0
+    for testsql, reloaded_sql in zip(testsqls, reloaded_sqls):
+        if not same_sql_json(testsql, reloaded_sql):
+            print("FAILED: {} \n - {} ".format(testsql, reloaded_sql))
+            failures += 1
+        # assert(same_sql_json(testsql, reloaded_sql))
+    assert(failures == 1)
+    print("only one failure")
+
+    print(len(reloaded_lines))
+# endregion
+
 # endregion
 
 
@@ -1471,19 +1607,22 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     rev_osm_D = {v: k for k, v in osm.D.items()}
     rev_gwids_D = {v: k for k, v in gwids.D.items()}
+
+    gdic = q.PretrainedWordEmb(gdim).D
+    rare_gwids_after_glove = get_rare_stats(traindata[0], traindata[2], gwids.D, gdic)
     # endregion
 
     # region submodules
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
     outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
-                                                  inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac)
+                                                  inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
     if not tieembeddings:
         inpbaseemb, colbaseemb = None, None
 
     outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
                                                           useglove=useglove, gdim=gdim, gfrac=gfrac,
                                                           inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                                          colenc=None, nocopy=ablatecopy)
+                                                          colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
 
     encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
     # endregion
@@ -1587,53 +1726,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
                                                inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
-                                               savedir=logger.p)
+                                               savedir=logger.p, test=test)
     # endregion
-
-
-def evaluate_model(m, devdata, testdata, rev_osm_D, rev_gwids_D,
-                   inp_bt=None, batsize=100, cuda=False, savedir=None):
-    def compute_sql_acc(pred_sql, gold_sql):
-        sql_acc = 0.
-        sql_acc_norm = 1e-6
-        for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
-            sql_acc_norm += 1
-            sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
-        return sql_acc / sql_acc_norm
-
-    def save_lines(lines, fname):
-        with codecs.open(savedir+fname, "w", encoding="utf-8") as f:
-            for lin in lines:
-                f.write(u"{}\n".format(lin))
-
-    # dev predictions
-    devquestions = load_jsonls(DATA_PATH+"dev.jsonl", questionsonly=True)
-    devsqls = load_jsonls(DATA_PATH+"dev.jsonl", sqlsonly=True)
-    pred_devlines, pred_devsqls = get_output(m, devdata, devquestions,
-                                             batsize=batsize, inp_bt=inp_bt, cuda=cuda,
-                                             rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-
-    if savedir is not None:
-        save_lines(pred_devlines, "dev_pred.lines")
-        save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql")
-
-    dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
-    print("DEV SQL ACC: {}".format(dev_sql_acc))
-
-    # test predictions
-    testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
-    testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
-    pred_testlines, pred_testsqls = get_output(m, testdata, testquestions,
-                                               batsize=batsize, inp_bt=inp_bt, cuda=cuda,
-                                               rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-
-    if savedir is not None:
-        save_lines(pred_testlines, "test_pred.lines")
-        save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql")
-
-    test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
-    print("TEST SQL ACC: {}".format(test_sql_acc))
-    return dev_sql_acc, test_sql_acc
 
 
 def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
@@ -1819,122 +1913,6 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                                                savedir=logger.p)
     # endregion
 
-    # # region evaluation
-    # tt.tick("Loading best model...")
-    # valid_m.load_state_dict(torch.load(model_save_path))
-    #
-    # rev_osm_D = {v: k for k, v in osm.D.items()}
-    # rev_gwids_D = {v: k for k, v in gwids.D.items()}
-    #
-    # def compute_sql_acc(pred_sql, gold_sql):
-    #     sql_acc = 0.
-    #     sql_acc_norm = 1e-6
-    #     for pred_sql_i, gold_sql_i in zip(pred_sql, gold_sql):
-    #         sql_acc_norm += 1
-    #         sql_acc += 1 if same_sql_json(pred_sql_i, gold_sql_i) else 0
-    #     return sql_acc / sql_acc_norm
-    #
-    # # dev predictions
-    # devquestions = load_jsonls(DATA_PATH + "dev.jsonl", questionsonly=True)
-    # devsqls = load_jsonls(DATA_PATH + "dev.jsonl", sqlsonly=True)
-    # pred_devlines, pred_devsqls = get_output(valid_m, devdata, devquestions,
-    #                                          batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
-    #                                          rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    # logger.save_lines(pred_devlines, "dev_pred.lines", use_unicode=True)
-    # logger.save_lines(map(lambda x: json.dumps(x), pred_devsqls), "dev_pred.sql", use_unicode=True)
-    #
-    # dev_sql_acc = compute_sql_acc(pred_devsqls, devsqls)
-    # print("DEV SQL ACC: {}".format(dev_sql_acc))
-    #
-    # # test predictions
-    # testquestions = load_jsonls(DATA_PATH + "test.jsonl", questionsonly=True)
-    # testsqls = load_jsonls(DATA_PATH + "test.jsonl", sqlsonly=True)
-    # pred_testlines, pred_testsqls = get_output(valid_m, testdata, testquestions,
-    #                                            batsize=batsize, inp_bt=valid_inp_bt, cuda=cuda,
-    #                                            rev_osm_D=rev_osm_D, rev_gwids_D=rev_gwids_D)
-    # logger.save_lines(pred_testlines, "test_pred.lines", use_unicode=True)
-    # logger.save_lines(map(lambda x: json.dumps(x), pred_testsqls), "test_pred.sql", use_unicode=True)
-    #
-    # test_sql_acc = compute_sql_acc(pred_testsqls, testsqls)
-    # print("TEST SQL ACC: {}".format(test_sql_acc))
-    # # endregion
-
-
-def test_reconstruct_save_reload_and_eval():
-    """ load matrices, get test set, reconstruct using get_output()'s logic, save, read, test """
-    tt = q.ticktock("testsave")
-    ism, osm, cnsm, gwids, splits, e2cn = load_matrices()
-    rev_osm_D = {v: k for k, v in osm.D.items()}
-    rev_gwids_D = {v: k for k, v in gwids.D.items()}
-    _, teststart = splits
-    testquestions = load_jsonls(DATA_PATH+"test.jsonl", questionsonly=True)
-    testsqls = load_jsonls(DATA_PATH+"test.jsonl", sqlsonly=True)
-
-    tt.tick("reconstructing test gold...")
-    ism, osm, gwids = ism.matrix[teststart:], osm.matrix[teststart:], gwids.matrix[teststart:]
-    rawlines, sqls = [], []
-    for i in range(len(gwids)):
-        rawline = reconstruct_query(osm[i], gwids[i], rev_osm_D, rev_gwids_D)
-        rawline = rawline.replace("<START>", "").replace("<END>", "").strip()
-        rawlines.append(rawline)
-        sqljson = querylin2json(rawline, testquestions[i])
-        sqls.append(sqljson)
-    tt.tock("reconstructed")
-
-    tt.tick("saving test gold...")
-    # saving without codecs doesn't work
-    with codecs.open("testsave.lines", "w", encoding="utf-8") as f:
-        for line in rawlines:
-            f.write(u"{}\n".format(line))
-
-    with codecs.open("testsave.sqls", "w", encoding="utf-8") as f:
-        for sql in sqls:
-            f.write(u"{}\n".format(json.dumps(sql)))
-    tt.tock("saved")
-
-    tt.tick("reloading saved...")
-    reloaded_lines = []
-    with codecs.open("testsave.lines", encoding="utf-8") as f:
-    # with open("testsave.lines") as f:
-        for line in f:
-            reloaded_lines.append(line.strip())
-
-    reloaded_sqls = []
-    # with codecs.open("testsave.sqls", encoding="utf-8") as f:
-    with open("testsave.sqls") as f:
-        for line in f:
-            sql = json.loads(line)
-            reloaded_sqls.append(sql)
-    tt.tock("reloaded saved")
-
-    for rawline, reloadedline in zip(rawlines, reloaded_lines):
-        if not rawline == reloadedline:
-            print(u"FAILED: '{}' \n - '{}'".format(rawline, reloadedline))
-        assert(rawline == reloadedline)
-
-    failures = 0
-    for testsql, reloaded_sql in zip(testsqls, reloaded_sqls):
-        if not same_sql_json(testsql, reloaded_sql):
-            print("FAILED: {} \n - {} ".format(testsql, reloaded_sql))
-            failures += 1
-        # assert(same_sql_json(testsql, reloaded_sql))
-    assert(failures == 1)
-    print("only one failure")
-
-    print(len(reloaded_lines))
-
-
-
-
-
-# region main scripts
-
-# endregion
-
-
-# region eval helper functions
-
-# endregion
 # endregion
 
 # endregion
