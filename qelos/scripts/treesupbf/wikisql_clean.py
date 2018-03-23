@@ -1132,7 +1132,8 @@ class OutVecComputer(DynamicVecPreparer):
          * worddic:         dictionary of output symbols (synids, colids, uwids) = osm.D
     """
     def __init__(self, syn_emb, syn_trans, inpbaseemb, inp_trans,
-                 colencoder, col_trans, worddic, colzero_to_inf=False):
+                 colencoder, col_trans, worddic, colzero_to_inf=False,
+                 rare_gwids=None):
         super(OutVecComputer, self).__init__()
         self.syn_emb = syn_emb
         self.syn_trans = syn_trans
@@ -1142,6 +1143,11 @@ class OutVecComputer(DynamicVecPreparer):
         self.col_trans = col_trans
         self.D = worddic
         self.colzero_to_inf = colzero_to_inf
+
+        # initialize rare vec to rare vector from syn_emb
+        self.rare_vec = torch.nn.Parameter(syn_emb.embedding.weight[syn_emb.D["<RARE>"]].data)
+        self.rare_gwids = rare_gwids
+
         if self.inp_emb.vecdim != self.syn_emb.vecdim:
             print("USING LIN ADAPTER in OUT")
             self.inpemb_trans = torch.nn.Linear(self.inp_emb.vecdim, self.syn_emb.vecdim, bias=False)
@@ -1164,19 +1170,20 @@ class OutVecComputer(DynamicVecPreparer):
         # endregion
 
         # region input words --> used in output embedding but normally overridden by BFOL for output scores
-        # TODO: unique rares can be implemented here
         _inp_ids = self.inp_trans[x]            # maps input ids to uwid numbers
         # gets gwids for uwids using inpmaps (=batch from gwids)
-        transids = torch.gather(inpmaps, 1, _inp_ids.unsqueeze(0).repeat(batsize, 1))
+        transids = torch.gather(inpmaps, 1, _inp_ids.unsqueeze(0).repeat(batsize, 1))       # in gwids
         # repeat(batsize, 1) because mapping from input ids to uwid number is same across all examples
         #   --> produces (batsize, vocsize) matrix of uwid numbers
         #           that are then used to gather to (batsize, vocsize) matrix of gwid ids
 
         # embeds retrieved gwids using provided inpbaseemb
-        _inp_embs, _inp_mask = self.inp_emb(transids)
+        _inp_embs, _inp_mask = self.inp_emb(transids)               # inp_emb embeds gwids
         # if expected vector size doesn't match inpemb vector size, apply linear transform to adapt
         if self.inpemb_trans is not None:
             _inp_embs = self.inpemb_trans(_inp_embs)
+        _inp_embs = replace_rare_gwids_with_rare_vec(_inp_embs, transids, self.rare_gwids, self.rare_vec)
+        # _inp_mask should zero out _inp_embs if there is something wrong in rare vec replacement -> TEST!
         # endregion
 
         # region column names
@@ -1271,8 +1278,21 @@ class BFOL(DynamicWordLinout):
 # endregion
 
 
-# region dynamic vector module creation functions
-# region dynamic vector module creation helper functions
+# region dynamic vector modules helper functions
+def replace_rare_gwids_with_rare_vec(x, ids, rare_gwids, rare_vec):
+    if rare_gwids is None:
+        return x
+    # get mask based on where rare_gwids occur in ids
+    ids_np = ids.cpu().data.numpy()
+    ids_mask_np = np.vectorize(lambda x: x not in rare_gwids)(ids_np).astype("uint8")       # ids_mask is one if NOT rare
+    ids_mask = q.var(ids_mask_np).cuda(x).v.float()
+    # switch between vectors
+    ret = rare_vec.unsqueeze(0).unsqueeze(1) * (1 - ids_mask.unsqueeze(2))
+    ret = ret + x * ids_mask.unsqueeze(2)
+    # TODO: test properly
+    return ret
+
+
 def build_subdics(osm):
     # split dictionary for SQL syntax, col names and input tokens
     synD = {"<MASK>": 0}
@@ -1302,7 +1322,8 @@ def build_subdics(osm):
 
 
 def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, colenc=None,
-                          useglove=True, gdim=None, gfrac=0.1):
+                          useglove=True, gdim=None, gfrac=0.1,
+                          rare_gwids=None):
     # base embedder for input tokens
     embdim = gdim if gdim is not None else dim
     if inpbaseemb is None:
@@ -1323,11 +1344,13 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
     if colenc is None:
         colenc = ColnameEncoder(dim, colbaseemb, nocolid=csm.D["nonecolumnnonecolumnnonecolumn"])
 
-    computer = OutVecComputer(syn_emb, syn_trans, inpbaseemb, inp_trans, colenc, col_trans, osm.D)
+    computer = OutVecComputer(syn_emb, syn_trans, inpbaseemb, inp_trans, colenc, col_trans, osm.D,
+                              rare_gwids=rare_gwids)
     return computer, inpbaseemb, colbaseemb, colenc
 # endregion
 
 
+# region dynamic vector module creation functions
 def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1,
                  rare_gwids=None):
     embdim = gdim if gdim is not None else dim
@@ -1339,18 +1362,20 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1,
         def __init__(self):
             super(Computer, self).__init__()
             self.baseemb = baseemb
+            self.rare_vec = torch.nn.Parameter(baseemb.embedding.weight[baseemb.D["<RARE>"]].data)
             if embdim != dim:
                 print("USING LIN ADAPTER")
                 self.trans = torch.nn.Linear(embdim, dim, bias=False)
             else:
                 self.trans = None
 
-        def forward(self, x, data):     # TODO: unique rares can be implemented here
-            transids = torch.gather(data, 1, x)
+        def forward(self, x, data):
+            transids = torch.gather(data, 1, x)         # transids are in gwids
             # _pp = psm.pp(transids[:5].cpu().data.numpy())
-            _embs, mask = self.baseemb(transids)
+            _embs, mask = self.baseemb(transids)        # baseemb embedds gwids
             if self.trans is not None:
                 _embs = self.trans(_embs)
+            _embs = replace_rare_gwids_with_rare_vec(_embs, transids, rare_gwids, self.rare_vec)
             return _embs
 
     emb = DynamicWordEmb(computer=Computer(), worddic=ism.D)
@@ -1363,7 +1388,8 @@ def make_out_emb(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     print("MAKING OUT EMB")
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac)
+                                colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                rare_gwids=rare_gwids)
     return DynamicWordEmb(computer=comp, worddic=osm.D), inpbaseemb, colbaseemb, colenc
 
 
@@ -1373,7 +1399,8 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     print("MAKING OUT LIN")
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac)
+                                colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                rare_gwids=rare_gwids)
     inp_trans = comp.inp_trans  # to index
     out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, nocopy=nocopy)
     return out, inpbaseemb, colbaseemb, colenc
@@ -1392,13 +1419,13 @@ def get_rare_stats(trainism, traingwids, gwidsD, gdic, rarefreq=2):
     uniquegwids, gwid_counts = np.unique(traingwids, return_counts=True)
     rare_gwids = gwid_counts <= rarefreq
     number_rare = np.sum(rare_gwids.astype("int32"))
-    print("{} gwids with freq <= {} in train".format(number_rare, rarefreq))
+    print("{} gwids with freq <= {} (counted in train)".format(number_rare, rarefreq))
     unique_nonrare_ids = uniquegwids * (~rare_gwids).astype("int32")
     unique_nonrare_ids = set(unique_nonrare_ids)
     unique_nonrare_words = set([rD[unrid] for unrid in unique_nonrare_ids])
     rare_words = set(gwidsD.keys()) - unique_nonrare_words - set(gdic.keys())
     rare_gwids_after_glove = set([gwidsD[rare_word] for rare_word in rare_words])
-    print("{} gwids with freq <= {} in train and not in used glove".format(len(rare_gwids_after_glove), rarefreq))
+    print("{} gwids with freq <= {} (counted in train) and not in used glove".format(len(rare_gwids_after_glove), rarefreq))
     return rare_gwids_after_glove
 
 
@@ -1559,7 +1586,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
-                   tieembeddings=False):
+                   tieembeddings=False, dorare=False):
     # region init
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_clean")
@@ -1610,6 +1637,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     gdic = q.PretrainedWordEmb(gdim).D
     rare_gwids_after_glove = get_rare_stats(traindata[0], traindata[2], gwids.D, gdic)
+    print("{} doing rare".format("NOT" if not dorare else ""))
+    if not dorare:
+        rare_gwids_after_glove = None
     # endregion
 
     # region submodules
@@ -1735,7 +1765,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                           dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                           wreg=0.0000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                           cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
-                          tieembeddings=False,
+                          tieembeddings=False, dorare=False,
                           oraclemode="zerocost"):
     # region init
     settings = locals().copy()
@@ -1785,22 +1815,28 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     rev_osm_D = {v: k for k, v in osm.D.items()}
     rev_gwids_D = {v: k for k, v in gwids.D.items()}
 
+    gdic = q.PretrainedWordEmb(gdim).D
+    rare_gwids_after_glove = get_rare_stats(traindata[0], traindata[2], gwids.D, gdic)
+    print("{} doing rare".format("NOT" if not dorare else ""))
+    if not dorare:
+        rare_gwids_after_glove = None
+
     # oracle:
     tracker = make_tracker_df(osm)
     oracle = make_oracle_df(tracker, mode=oraclemode)
     # endregion
 
     # region submodules     # exactly the same as tf script
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac)
+    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
     outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
-                                                     inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac)
+                                                  inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
     if not tieembeddings:
         inpbaseemb, colbaseemb = None, None
 
     outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
                                                           useglove=useglove, gdim=gdim, gfrac=gfrac,
                                                           inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                                          colenc=None, nocopy=ablatecopy)
+                                                          colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
 
     encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
     # endregion
