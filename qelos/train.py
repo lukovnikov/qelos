@@ -714,12 +714,12 @@ class train(object):
         return self
 
     def set_valid_batch_transformer(self, input_transform = None, output_transform=None, gold_transform=None):
-        if input_transform is not None:
-            self.valid_transform_batch_inp = input_transform
-        if output_transform is not None:
-            self.valid_transform_batch_out = output_transform
-        if gold_transform is not None:
-            self.valid_transform_batch_gold = gold_transform
+        # if input_transform is not None:
+        self.valid_transform_batch_inp = input_transform
+        # if output_transform is not None:
+        self.valid_transform_batch_out = output_transform
+        # if gold_transform is not None:
+        self.valid_transform_batch_gold = gold_transform
         return self
 
     def optimizer(self, optimizer, **kw):
@@ -741,12 +741,12 @@ class train(object):
         return self
 
     def set_batch_transformer(self, input_transform=None, output_transform=None, gold_transform=None):
-        if input_transform is not None:
-            self.transform_batch_inp = input_transform
-        if output_transform is not None:
-            self.transform_batch_out = output_transform
-        if gold_transform is not None:
-            self.transform_batch_gold = gold_transform
+        # if input_transform is not None:
+        self.transform_batch_inp = input_transform
+        # if output_transform is not None:
+        self.transform_batch_out = output_transform
+        # if gold_transform is not None:
+        self.transform_batch_gold = gold_transform
         return self
 
     def get_penalties(self, batsize, numbats):

@@ -20,6 +20,9 @@ from qelos.train import BestSaver
 from tqdm import tqdm
 
 
+# TODO: !!!!!!!!!!!!! DON'T FORGET THAT VALID BT'S OVERRIDE NORMAL BT'S --> HAVE TO SET TO NONE TO CANCEL TRAIN TIME BT
+#       --> TODO: CHECK IN OLD SCRIPT AND NEW SCRIPT THAT NOTHING WRONG HAPPENS !!!!!!!!!
+
 # TODO: make sure test and dev splits are correct
 # TODO: MAKE SURE vanilla embeddings are changed after training
 
@@ -1633,6 +1636,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     model_save_path = os.path.join(logger.p, "model")
 
     print("Seq2Seq + TF (clean)")
+    print("PyTorch initial seed: {}".format(torch.initial_seed()))
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     # endregion
@@ -1814,6 +1818,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     model_save_path = os.path.join(logger.p, "model")
 
     print("Seq2Seq + ORACLE (clean)")
+    print("PyTorch initial seed: {}".format(torch.initial_seed()))
     if cuda:    torch.cuda.set_device(gpu)
     tt = q.ticktock("script")
     # endregion
@@ -1971,7 +1976,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # region training
     q.train(m).train_on(trainloader, losses) \
         .optimizer(optim).clip_grad_norm(gradnorm).set_batch_transformer(inp_bt, out_bt, gold_bt) \
-        .valid_with(valid_m).valid_on(validloader, validlosses).set_valid_batch_transformer(valid_inp_bt) \
+        .valid_with(valid_m).valid_on(validloader, validlosses).set_valid_batch_transformer(valid_inp_bt, None, None) \
         .cuda(cuda).hook(logger).hook(best_saver) \
         .train(epochs)
     logger.update_settings(completed=True)
@@ -1997,4 +2002,5 @@ if __name__ == "__main__":
     # test_sqlnode_and_sqls()
     # test_grouptracker()
     # test_save()
-    q.argprun(run_seq2seq_tf)
+    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_oracle_df)
