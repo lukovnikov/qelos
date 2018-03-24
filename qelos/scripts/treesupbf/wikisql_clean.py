@@ -1431,6 +1431,39 @@ def get_rare_stats(trainism, traingwids, gwidsD, gdic, rarefreq=2):
     return rare_gwids_after_glove
 
 
+def do_rare_in_colnames(cnsm, traincolids, gdic, rarefreq=3, replace=False):
+    """ cnsm: (#cols, colnamelen) -- traincolids: (numex, #cols) """
+    # print(np.sum(cnsm._matrix == cnsm.D["<RARE>"]))
+    tt = q.ticktock("rare column names")
+    tt.tick("computing counts")
+    rD = {v: k for k, v in cnsm.D.items()}
+    # print("{} words in cnsm.D".format(len(cnsm.D)))
+    wordcounts = {w: 0 for w in cnsm.D.keys()}
+
+    uniquecolids, colidcounts = np.unique(traincolids, return_counts=True)
+    for i in range(len(uniquecolids)):
+        for j in range(len(cnsm.matrix[uniquecolids[i]])):
+            word = rD[cnsm.matrix[uniquecolids[i], j]]
+            wordcounts[word] += colidcounts[i]
+
+    rarewords = set()
+    for k, v in wordcounts.items():
+        if v <= rarefreq:
+            rarewords.add(k)
+    # print("nonecolumnnonecolumnnonecolumn" in rarewords)
+    rarewords -= {"nonecolumnnonecolumnnonecolumn",}
+    print("{} rare words (rarefreq {}) out of {} unique words in col names"
+          .format(len(rarewords), rarefreq, len(wordcounts)))
+    rarewords_notinglove = rarewords - set(gdic.keys())
+    print("{} rare words (rarefreq {}) not in glove, out of {} unique words in col names"
+          .format(len(rarewords_notinglove), rarefreq, len(wordcounts)))
+    tt.tock("counts computed")
+    if replace:
+        cnsm._matrix = np.vectorize(lambda x: x if rD[x] not in rarewords_notinglove else cnsm.D["<RARE>"])(cnsm.matrix)
+        tt.msg("total rare words replaced with rare id: {}".format(np.sum(cnsm.matrix == cnsm.D["<RARE>"])))
+    return cnsm
+
+
 def make_oracle_df(tracker, mode=None):
     ttt = q.ticktock("oracle maker")
     print("oracle mode: {}".format(mode))
@@ -1642,6 +1675,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     print("{} doing rare".format("NOT" if not dorare else ""))
     if not dorare:
         rare_gwids_after_glove = None
+    cnsm = do_rare_in_colnames(cnsm, traindata[-1], gdic, replace=dorare)
     # endregion
 
     # region submodules
@@ -1822,6 +1856,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     print("{} doing rare".format("NOT" if not dorare else ""))
     if not dorare:
         rare_gwids_after_glove = None
+    cnsm = do_rare_in_colnames(cnsm, traindata[-1], gdic, replace=dorare)
 
     # oracle:
     tracker = make_tracker_df(osm)
