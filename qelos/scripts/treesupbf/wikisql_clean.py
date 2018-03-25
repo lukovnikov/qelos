@@ -1686,26 +1686,31 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region submodules
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
-    outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
-                                                  inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
-    if not tieembeddings:
-        inpbaseemb, colbaseemb = None, None
+    def create_submodules():
+        _inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                           rare_gwids=rare_gwids_after_glove)
+        _outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
+                                                          inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac,
+                                                          rare_gwids=rare_gwids_after_glove)
+        if not tieembeddings:
+            inpbaseemb, colbaseemb = None, None
 
-    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
-                                                          useglove=useglove, gdim=gdim, gfrac=gfrac,
-                                                          inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                                          colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
+        _outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
+                                                              useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                                              inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+                                                              colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
 
-    encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+        _encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+        return _inpemb, _outemb, _outlin, _encoder
+    inpemb, outemb, outlin, encoder = create_submodules()
     # endregion
 
     # region encoder-decoder definition
     class EncDec(torch.nn.Module):
-        def __init__(self, dec, maxtime=None):
+        def __init__(self, _inpemb, _outemb, _outlin, _encoder, dec, maxtime=None):
             super(EncDec, self).__init__()
             self.inpemb, self.outemb, self.outlin, self.encoder, self.decoder \
-                = inpemb, outemb, outlin, encoder, dec
+                = _inpemb, _outemb, _outlin, _encoder, dec
             self.maxtime = maxtime
 
         def forward(self, inpseq, outseq, inpseqmaps, colnames):
@@ -1730,23 +1735,26 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region decoders and model, for train and test
-    layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
-              for i in range(1, len(decdims))]
-    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(edropout),
-                                                  outlin, ctx2out=False)
-    decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(q.TeacherForcer())
-    decoder = decoder_cell.to_decoder()
+    def create_train_and_test_models(_inpemb, _outemb, _outlin, _encoder):
+        layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
+                  for i in range(1, len(decdims))]
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   q.Dropout(edropout),
+                                                   _outlin, ctx2out=False)
+        decoder_core = q.DecoderCore(_outemb, *layers)
+        decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decoder_cell.set_runner(q.TeacherForcer())
+        decoder = decoder_cell.to_decoder()
 
-    m = EncDec(decoder)         # ONLY USE FOR TRAINING !!!
+        _m = EncDec(_inpemb, _outemb, _outlin, _encoder, decoder)         # ONLY USE FOR TRAINING !!!
 
-    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    valid_decoder_cell.set_runner(q.FreeRunner())
-    valid_decoder = valid_decoder_cell.to_decoder()
+        valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+        valid_decoder_cell.set_runner(q.FreeRunner())
+        valid_decoder = valid_decoder_cell.to_decoder()
 
-    valid_m = EncDec(valid_decoder)     # use for valid
+        _valid_m = EncDec(_inpemb, _outemb, _outlin, _encoder, valid_decoder)     # use for valid
+        return _m, _valid_m
+    m, valid_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
     # TODO: verify that valid_m doesn't get something wrong !
     # endregion
 
@@ -1794,12 +1802,32 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region evaluation
-    tt.tick("Loading best model...")
-    valid_m.load_state_dict(torch.load(model_save_path))
+    tt.tick("evaluating")
 
-    dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
+    tt.msg("generating model from scratch")
+    inpemb, outemb, outlin, encoder = create_submodules()
+    _, test_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+
+    tt.msg("setting weights from best model")
+    test_m.load_state_dict(torch.load(model_save_path))
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=row2tree))
+
+    valid_results = q.test(test_m).on(validloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+    print("DEV RESULTS:")
+    print(valid_results)
+    logger.update_settings(valid_seq_acc=valid_results[0], valid_tree_acc=valid_results[1])
+    if not test:
+        test_results = q.test(test_m).on(testloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+        print("TEST RESULTS:")
+        print(test_results)
+        logger.update_settings(test_seq_acc=test_results[0], test_tree_acc=test_results[1])
+
+    dev_sql_acc, test_sql_acc = evaluate_model(test_m, devdata, testdata, rev_osm_D, rev_gwids_D,
                                                inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
                                                savedir=logger.p, test=test)
+    tt.tock("evaluated")
     # endregion
 
 
@@ -1872,27 +1900,32 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region submodules     # exactly the same as tf script
-    inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
-    outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
-                                                  inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac, rare_gwids=rare_gwids_after_glove)
-    if not tieembeddings:
-        inpbaseemb, colbaseemb = None, None
+    def create_submodules():
+        _inpemb, inpbaseemb = make_inp_emb(inpembdim, ism, gwids, useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                           rare_gwids=rare_gwids_after_glove)
+        _outemb, inpbaseemb, colbaseemb, _ = make_out_emb(outembdim, osm, gwids, cnsm, gdim=gdim,
+                                                          inpbaseemb=inpbaseemb, useglove=useglove, gfrac=gfrac,
+                                                          rare_gwids=rare_gwids_after_glove)
+        if not tieembeddings:
+            inpbaseemb, colbaseemb = None, None
 
-    outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
-                                                          useglove=useglove, gdim=gdim, gfrac=gfrac,
-                                                          inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
-                                                          colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
+        _outlin, inpbaseemb, colbaseemb, colenc = make_out_lin(outlindim, ism, osm, gwids, cnsm,
+                                                              useglove=useglove, gdim=gdim, gfrac=gfrac,
+                                                              inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
+                                                              colenc=None, nocopy=ablatecopy, rare_gwids=rare_gwids_after_glove)
 
-    encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+        _encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
+        return _inpemb, _outemb, _outlin, _encoder
+    inpemb, outemb, outlin, encoder = create_submodules()
     # endregion
 
     # region encoder decoder definitions
     # -- changes from TF script: added maxtime on class itself, forward additionally takes eids and maxtime
     class EncDec(torch.nn.Module):
-        def __init__(self, dec, maxtime=None):
+        def __init__(self, _inpemb, _outemb, _outlin, _encoder, dec, maxtime=None):
             super(EncDec, self).__init__()
             self.inpemb, self.outemb, self.outlin, self.encoder, self.decoder \
-                = inpemb, outemb, outlin, encoder, dec
+                = _inpemb, _outemb, _outlin, _encoder, dec
             self.maxtime = maxtime
 
         def forward(self, inpseq, outseq_starts, inpseqmaps, colnames, eids=None, maxtime=None):
@@ -1916,24 +1949,28 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region decoders and model, for train and test
-    layers = [q.LSTMCell(decdims[i - 1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
-              for i in range(1, len(decdims))]
-    decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
-                                               q.Dropout(edropout),
-                                               outlin, ctx2out=False)
-    decoder_core = q.DecoderCore(outemb, *layers)
-    decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    decoder_cell.set_runner(oracle)                 # change from TF script
-    decoder = decoder_cell.to_decoder()
+    def create_train_and_test_models(_inpemb, _outemb, _outlin, _encoder):
+        layers = [q.LSTMCell(decdims[i - 1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
+                  for i in range(1, len(decdims))]
+        decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
+                                                   q.Dropout(edropout),
+                                                   outlin, ctx2out=False)
+        decoder_core = q.DecoderCore(outemb, *layers)
+        decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+        decoder_cell.set_runner(oracle)                 # change from TF script
+        decoder = decoder_cell.to_decoder()
 
-    m = EncDec(decoder)  # ONLY USE FOR TRAINING !!!
+        _m = EncDec(_inpemb, _outemb, _outlin, _encoder, decoder)  # ONLY USE FOR TRAINING !!!
 
-    valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
-    valid_decoder_cell.set_runner(q.FreeRunner())
-    valid_decoder = valid_decoder_cell.to_decoder()
+        valid_decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
+        valid_decoder_cell.set_runner(q.FreeRunner())
+        valid_decoder = valid_decoder_cell.to_decoder()
 
-    valid_m = EncDec(valid_decoder, maxtime=osm.matrix.shape[1]-1)  # use for valid -- change from TF script
-                # change from original oracle script: added -1 to have same maxtime as TF script --> don't need out_bt
+        _valid_m = EncDec(_inpemb, _outemb, _outlin, _encoder,
+                          valid_decoder, maxtime=osm.matrix.shape[1]-1)  # use for valid -- change from TF script
+                    # change from original oracle script: added -1 to have same maxtime as TF script --> don't need out_bt
+        return _m, _valid_m
+    m, valid_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
     # TODO: verify that valid_m doesn't get something wrong !
     # endregion
 
@@ -1985,13 +2022,33 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     logger.update_settings(completed=True)
     # endregion
 
-    # region evaluation
-    tt.tick("Loading best model...")
-    valid_m.load_state_dict(torch.load(model_save_path))
+    # region evaluation     -- exactly same as tf script
+    tt.tick("evaluating")
 
-    dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
+    tt.msg("generating model from scratch")
+    inpemb, outemb, outlin, encoder = create_submodules()
+    _, test_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+
+    tt.msg("setting weights from best model")
+    test_m.load_state_dict(torch.load(model_save_path))
+
+    testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=row2tree))
+
+    valid_results = q.test(test_m).on(validloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+    print("DEV RESULTS:")
+    print(valid_results)
+    logger.update_settings(valid_seq_acc=valid_results[0], valid_tree_acc=valid_results[1])
+    if not test:
+        test_results = q.test(test_m).on(testloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+        print("TEST RESULTS:")
+        print(test_results)
+        logger.update_settings(test_seq_acc=test_results[0], test_tree_acc=test_results[1])
+
+    dev_sql_acc, test_sql_acc = evaluate_model(test_m, devdata, testdata, rev_osm_D, rev_gwids_D,
                                                inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
                                                savedir=logger.p, test=test)
+    tt.tock("evaluated")
     # endregion
 
 # endregion
