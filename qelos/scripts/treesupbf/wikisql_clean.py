@@ -2000,7 +2000,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
 
 if __name__ == "__main__":
-    # test_matrices()
+    test_matrices()
     # test_querylin2json()
     # test_sqlnode_and_sqls()
     # test_grouptracker()
