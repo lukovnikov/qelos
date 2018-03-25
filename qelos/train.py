@@ -713,7 +713,7 @@ class train(object):
         self.valid_model = model
         return self
 
-    def set_valid_batch_transformer(self, input_transform = None, output_transform=None, gold_transform=None):
+    def set_valid_batch_transformer(self, input_transform=False, output_transform=False, gold_transform=False):
         # if input_transform is not None:
         self.valid_transform_batch_inp = input_transform
         # if output_transform is not None:

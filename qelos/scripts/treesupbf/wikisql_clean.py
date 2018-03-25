@@ -23,6 +23,9 @@ from tqdm import tqdm
 # TODO: !!!!!!!!!!!!! DON'T FORGET THAT VALID BT'S OVERRIDE NORMAL BT'S --> HAVE TO SET TO NONE TO CANCEL TRAIN TIME BT
 #       --> TODO: CHECK IN OLD SCRIPT AND NEW SCRIPT THAT NOTHING WRONG HAPPENS !!!!!!!!!
 
+# REMARK:   changed set_(valid)_batch_transform() to accept None's as they are
+#           before, might have "sticky" bt's, but shouldn't have affected old wikisql TODO: CHECK !!!
+
 # TODO: make sure test and dev splits are correct
 # TODO: MAKE SURE vanilla embeddings are changed after training
 
@@ -1988,7 +1991,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     dev_sql_acc, test_sql_acc = evaluate_model(valid_m, devdata, testdata, rev_osm_D, rev_gwids_D,
                                                inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
-                                               savedir=logger.p)
+                                               savedir=logger.p, test=test)
     # endregion
 
 # endregion
