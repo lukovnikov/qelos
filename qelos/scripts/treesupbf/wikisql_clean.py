@@ -1813,19 +1813,27 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=row2tree))
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=row2tree))
 
-    valid_results = q.test(test_m).on(validloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+    valid_results = q.test(test_m).on(validloader, finalvalidlosses)\
+        .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
     print("DEV RESULTS:")
     print(valid_results)
     logger.update_settings(valid_seq_acc=valid_results[0], valid_tree_acc=valid_results[1])
     if not test:
-        test_results = q.test(test_m).on(testloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+        test_results = q.test(test_m).on(testloader, testlosses)\
+            .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
         print("TEST RESULTS:")
         print(test_results)
         logger.update_settings(test_seq_acc=test_results[0], test_tree_acc=test_results[1])
 
+    def test_inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids):
+        colnames = cnsm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return ismbatch, osmbatch[:, 0], gwidsbatch, colnames, None
     dev_sql_acc, test_sql_acc = evaluate_model(test_m, devdata, testdata, rev_osm_D, rev_gwids_D,
-                                               inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
+                                               inp_bt=test_inp_bt, batsize=batsize, cuda=cuda,
                                                savedir=logger.p, test=test)
     tt.tock("evaluated")
     # endregion
@@ -2034,19 +2042,27 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=row2tree))
+    finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
+                              TreeAccuracy(ignore_index=0, treeparser=row2tree))
 
-    valid_results = q.test(test_m).on(validloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+    valid_results = q.test(test_m).on(validloader, finalvalidlosses)\
+        .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
     print("DEV RESULTS:")
     print(valid_results)
     logger.update_settings(valid_seq_acc=valid_results[0], valid_tree_acc=valid_results[1])
     if not test:
-        test_results = q.test(test_m).on(testloader, testlosses).set_batch_transformer(valid_inp_bt).cuda(cuda).run()
+        test_results = q.test(test_m).on(testloader, testlosses)\
+            .set_batch_transformer(valid_inp_bt).cuda(cuda).run()
         print("TEST RESULTS:")
         print(test_results)
         logger.update_settings(test_seq_acc=test_results[0], test_tree_acc=test_results[1])
 
+    def test_inp_bt(ismbatch, osmbatch, gwidsbatch, colnameids):
+        colnames = cnsm.matrix[colnameids.cpu().data.numpy()]
+        colnames = q.var(colnames).cuda(colnameids).v
+        return ismbatch, osmbatch[:, 0], gwidsbatch, colnames, None
     dev_sql_acc, test_sql_acc = evaluate_model(test_m, devdata, testdata, rev_osm_D, rev_gwids_D,
-                                               inp_bt=valid_inp_bt, batsize=batsize, cuda=cuda,
+                                               inp_bt=test_inp_bt, batsize=batsize, cuda=cuda,
                                                savedir=logger.p, test=test)
     tt.tock("evaluated")
     # endregion
