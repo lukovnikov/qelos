@@ -1900,7 +1900,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     print("{} doing rare".format("NOT" if not dorare else ""))
     if not dorare:
         rare_gwids_after_glove = None
-    cnsm = do_rare_in_colnames(cnsm, traindata[-1], gdic, replace=dorare)
+    cnsm = do_rare_in_colnames(cnsm, traindata[-2], gdic, replace=dorare)
 
     # oracle:
     tracker = make_tracker_df(osm)
