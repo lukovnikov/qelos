@@ -419,7 +419,7 @@ def reconstruct_query(osmrow, gwidrow, rod, rgd):
 
 
 # region test
-def test_matrices(p=DATA_PATH):
+def test_matrices(p=DATA_PATH, writeout=False):
     ism, osm, csm, gwids, splits, e2cn = load_matrices()
     devlines = load_lines(p+"dev.lines")
     print("{} dev lines".format(len(devlines)))
@@ -447,6 +447,7 @@ def test_matrices(p=DATA_PATH):
     print("test questions reconstruction matches")
 
     # test query reconstruction
+    dev_reco_queries = []
     for i in range(len(devlines)):
         orig_query = devlines[i][1].strip()
         reco_query = reconstruct_query(dev_osm[i], dev_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
@@ -454,12 +455,24 @@ def test_matrices(p=DATA_PATH):
             assert (orig_query == reco_query)
         except Exception as e:
             print(u"FAILED: {} \n - {}".format(orig_query, reco_query))
+        dev_reco_queries.append(reco_query)
     print("dev queries reconstruction matches")
+    test_reco_queries = []
     for i in range(len(testlines)):
         orig_query = testlines[i][1].strip()
         reco_query = reconstruct_query(test_osm[i], test_gwids[i], rod, rgd).replace("<START>", "").replace("<END>", "").strip()
         assert (orig_query == reco_query)
+        test_reco_queries.append(reco_query)
     print("test queries reconstruction matches")
+
+    if writeout:
+        with codecs.open(DATA_PATH+"dev.gold.outlines", "w", encoding="utf-8") as f:
+            for query in dev_reco_queries:
+                f.write(u"{}\n".format(query))
+        with codecs.open(DATA_PATH+"test.gold.outlines", "w", encoding="utf-8") as f:
+            for query in test_reco_queries:
+                f.write(u"{}\n".format(query))
+
 # endregion
 # endregion
 
@@ -2073,10 +2086,10 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
 
 if __name__ == "__main__":
-    # test_matrices()
+    test_matrices(writeout=True)
     # test_querylin2json()
     # test_sqlnode_and_sqls()
     # test_grouptracker()
     # test_save()
     # q.argprun(run_seq2seq_tf)
-    q.argprun(run_seq2seq_oracle_df)
+    # q.argprun(run_seq2seq_oracle_df)
