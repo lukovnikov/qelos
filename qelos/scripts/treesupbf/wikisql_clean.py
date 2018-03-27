@@ -2100,6 +2100,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         select_acc = 0.
         select_agg_c = 0.
         select_col_c = 0.
+        select_colagg_c = 0.
         select_c_norm = 0.
         where_acc = 0.
         both_wrong_c = 0.
@@ -2120,14 +2121,23 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                     select_wrong = True
 
                 if len(x_select_node) == 1 and select_wrong:
+                    select_agg_wrong = False
+                    select_col_wrong = False
                     x_select_agg = list(get_children_by_name(x_select_node[0], "AGG\d"))
                     g_select_agg = list(get_children_by_name(g_select_node[0], "AGG\d"))
                     if len(x_select_agg) != 1 or not x_select_agg[0].equals(g_select_agg[0]):
-                        select_agg_c += 1
+                        select_agg_wrong = True
                     x_select_col = list(get_children_by_name(x_select_node[0], "COL\d+"))
                     g_select_col = list(get_children_by_name(g_select_node[0], "COL\d+"))
                     if len(x_select_col) != 1 or not x_select_col[0].equals(g_select_col[0]):
+                        select_col_wrong = True
+
+                    if select_col_wrong:
                         select_col_c += 1
+                    if select_agg_wrong:
+                        select_agg_c += 1
+                    if select_col_wrong and select_agg_wrong:
+                        select_colagg_c += 1
                     select_c_norm += 1
 
                 x_where_node, g_where_node = list(get_children_by_name(xtree, "<WHERE>")), list(get_children_by_name(gtree, "<WHERE>"))
@@ -2148,10 +2158,11 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
             # break
             i += 1
         print("{} lines different".format(c))
-        print("{} select acc".format(1.+select_acc/i))
-        print("{} ({}/{}) select agg wrong".format(select_agg_c / (-select_c_norm), select_agg_c, -select_c_norm))
-        print("{} ({}/{}) select col wrong".format(select_col_c / (-select_c_norm), select_col_c, -select_c_norm))
-        print("{} where acc".format(1.+where_acc/i))
+        print("{} ({}/{}) select acc".format(1.+select_acc/i, -select_acc, i))
+        print("\t{} ({}/{}) select agg wrong".format(select_agg_c / (select_c_norm), select_agg_c, -select_c_norm))
+        print("\t{} ({}/{}) select col wrong".format(select_col_c / (select_c_norm), select_col_c, -select_c_norm))
+        print("\t{} ({}/{}) select both agg and col are wrong".format(select_colagg_c / (select_c_norm), select_colagg_c, -select_c_norm))
+        print("{} ({}/{}) where acc".format(1.+where_acc/i, -where_acc, i))
         print("{} both select and where are wrong".format(both_wrong_c/i))
 # endregion
 
