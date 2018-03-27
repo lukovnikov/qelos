@@ -2088,8 +2088,25 @@ def compare_lines(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         i = 0
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             if xline != gline:
-                print(u"PREDICTION: {} \nGOLD:       {}\n\n".format(xline.strip(), gline.strip()))
+                print(u"PREDICTION: {} \nGOLD:       {}\n".format(xline.strip(), gline.strip()))
                 i += 1
+        print("{} lines different".format(i))
+
+
+def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
+    with codecs.open(xpath, encoding="utf-8") as xf, codecs.open(goldpath, encoding="utf-8") as gf:
+        i = 0
+        c = 0
+        for xline, gline in zip(xf.readlines(), gf.readlines()):
+            xtree = SqlNode.parse_sql(xline)
+            gtree = SqlNode.parse_sql(gline)
+            print(xtree.pptree())
+            print(gtree.pptree())
+            break
+            if xtree != gtree:
+                print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
+                c += 1
+            i += 1
         print("{} lines different".format(i))
 # endregion
 
@@ -2102,4 +2119,4 @@ if __name__ == "__main__":
     # test_save()
     # q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_oracle_df)
-    q.argprun(compare_lines)
+    q.argprun(compare_trees)
