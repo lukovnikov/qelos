@@ -2100,14 +2100,14 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             xtree = SqlNode.parse_sql(xline)
             gtree = SqlNode.parse_sql(gline)
-            print(xtree.pptree())
-            print(gtree.pptree())
+            # print(xtree.pptree())
+            # print(gtree.pptree())
             if not (gtree.equals(xtree)):
                 print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
                 c += 1
-            break
+            # break
             i += 1
-        print("{} lines different".format(i))
+        print("{} lines different".format(c))
 # endregion
 
 
