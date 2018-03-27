@@ -2113,7 +2113,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
             # break
             i += 1
         print("{} lines different".format(c))
-        print("{} select acc".format(1.+select_acc/c))
+        print("{} select acc".format(1.+select_acc/i))
 # endregion
 
 
