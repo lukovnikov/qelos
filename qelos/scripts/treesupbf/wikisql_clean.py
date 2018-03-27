@@ -2099,33 +2099,44 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         c = 0
         select_acc = 0.
         where_acc = 0.
+        both_wrong_c = 0.
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             xtree = SqlNode.parse_sql(xline)
             gtree = SqlNode.parse_sql(gline)
             # print(xtree.pptree())
             # print(gtree.pptree())
             if not (gtree.equals(xtree)):
+                select_wrong = False
+                where_wrong = False
+                both_wrong = False
                 print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
                 c += 1
 
                 x_select_node, g_select_node = list(get_children_by_name(xtree, "<SELECT>")), list(get_children_by_name(gtree, "<SELECT>"))
                 if len(x_select_node) != 1 or not x_select_node[0].equals(g_select_node[0]):
-                    select_acc -= 1
+                    select_wrong = True
 
                 x_where_node, g_where_node = list(get_children_by_name(xtree, "<WHERE>")), list(get_children_by_name(gtree, "<WHERE>"))
                 if len(x_where_node) != len(g_where_node):
-                    where_acc -= 1
+                    where_wrong = True
                 elif len(g_where_node) == 0:
                     if len(x_where_node) > 0:
-                        where_acc -= 1
+                        where_wrong = True
                 else:
                     if not x_where_node[0].equals(g_where_node[0]):
-                        where_acc -= 1
+                        where_wrong = True
+                if select_wrong:
+                    select_acc -= 1
+                if where_wrong:
+                    where_acc -= 1
+                if select_wrong and where_wrong:
+                    both_wrong_c += 1
             # break
             i += 1
         print("{} lines different".format(c))
         print("{} select acc".format(1.+select_acc/i))
         print("{} where acc".format(1.+where_acc/i))
+        print("{} both select and where are wrong".format(both_wrong_c/i))
 # endregion
 
 
