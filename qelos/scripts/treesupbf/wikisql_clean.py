@@ -2088,7 +2088,7 @@ def compare_lines(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         i = 0
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             if xline != gline:
-                print(u"PREDICTION: {} \nGOLD:       {}".format(xline, gline))
+                print(u"PREDICTION: {} \nGOLD:       {}\n\n".format(xline.strip(), gline.strip()))
                 i += 1
         print("{} lines different".format(i))
 # endregion
