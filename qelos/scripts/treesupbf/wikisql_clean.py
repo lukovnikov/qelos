@@ -2082,14 +2082,21 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
 # endregion
 
+# region ERROR ANALYSIS
+def compare_lines(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
+    with codecs.open(xpath, encoding="utf-8") as xf, codecs.open(goldpath, encoding="utf-8") as gf:
+        for xline, gline in zip(xf.readlines(), gf.readlines()):
+            if xline != gline:
+                print(u"PREDICTION: {} \nGOLD:       {}".format(xline, gline))
 # endregion
 
 
 if __name__ == "__main__":
-    test_matrices(writeout=True)
+    # test_matrices(writeout=True)
     # test_querylin2json()
     # test_sqlnode_and_sqls()
     # test_grouptracker()
     # test_save()
     # q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_oracle_df)
+    q.argprun(compare_lines)
