@@ -2085,9 +2085,12 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 # region ERROR ANALYSIS
 def compare_lines(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
     with codecs.open(xpath, encoding="utf-8") as xf, codecs.open(goldpath, encoding="utf-8") as gf:
+        i = 0
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             if xline != gline:
                 print(u"PREDICTION: {} \nGOLD:       {}".format(xline, gline))
+                i += 1
+        print("{} lines different".format(i))
 # endregion
 
 
