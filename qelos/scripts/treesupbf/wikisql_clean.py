@@ -2097,6 +2097,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
     with codecs.open(xpath, encoding="utf-8") as xf, codecs.open(goldpath, encoding="utf-8") as gf:
         i = 0
         c = 0
+        select_acc = 0.
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             xtree = SqlNode.parse_sql(xline)
             gtree = SqlNode.parse_sql(gline)
@@ -2105,9 +2106,14 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
             if not (gtree.equals(xtree)):
                 print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
                 c += 1
+
+                x_select_node, g_select_node = get_children_by_name(xtree, "<SELECT>"), get_children_by_name(gtre, "<SELECT>")
+                if not x_select_node.equals(g_select_node):
+                    select_acc += 1
             # break
             i += 1
         print("{} lines different".format(c))
+        print("{} select acc".format((1-select_acc)/c))
 # endregion
 
 
