@@ -2098,6 +2098,9 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         i = 0
         c = 0
         select_acc = 0.
+        select_agg_c = 0.
+        select_col_c = 0.
+        select_c_norm = 0.
         where_acc = 0.
         both_wrong_c = 0.
         for xline, gline in zip(xf.readlines(), gf.readlines()):
@@ -2115,6 +2118,17 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                 x_select_node, g_select_node = list(get_children_by_name(xtree, "<SELECT>")), list(get_children_by_name(gtree, "<SELECT>"))
                 if len(x_select_node) != 1 or not x_select_node[0].equals(g_select_node[0]):
                     select_wrong = True
+
+                if len(x_select_node) == 1 and select_wrong:
+                    x_select_agg = list(get_children_by_name(x_select_node[0], "AGG\d"))
+                    g_select_agg = list(get_children_by_name(g_select_node[0], "AGG\d"))
+                    if len(x_select_agg) != 1 or not x_select_agg[0].equals(g_select_agg[0]):
+                        select_agg_c += 1
+                    x_select_col = list(get_children_by_name(x_select_node[0], "COL\d+"))
+                    g_select_col = list(get_children_by_name(g_select_node[0], "COL\d+"))
+                    if len(x_select_col) != 1 or not x_select_col[0].equals(g_select_col[0]):
+                        select_col_c += 1
+                    select_c_norm += 1
 
                 x_where_node, g_where_node = list(get_children_by_name(xtree, "<WHERE>")), list(get_children_by_name(gtree, "<WHERE>"))
                 if len(x_where_node) != len(g_where_node):
@@ -2135,6 +2149,8 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
             i += 1
         print("{} lines different".format(c))
         print("{} select acc".format(1.+select_acc/i))
+        print("{} ({}/{}) select agg wrong".format(select_agg_c / (-select_c_norm), select_agg_c, -select_c_norm))
+        print("{} ({}/{}) select col wrong".format(select_col_c / (-select_c_norm), select_col_c, -select_c_norm))
         print("{} where acc".format(1.+where_acc/i))
         print("{} both select and where are wrong".format(both_wrong_c/i))
 # endregion
