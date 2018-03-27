@@ -2107,7 +2107,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                 print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
                 c += 1
 
-                x_select_node, g_select_node = get_children_by_name(xtree, "<SELECT>"), get_children_by_name(gtre, "<SELECT>")
+                x_select_node, g_select_node = get_children_by_name(xtree, "<SELECT>"), get_children_by_name(gtree, "<SELECT>")
                 if len(x_select_node) != 1 or not x_select_node[0].equals(g_select_node[0]):
                     select_acc -= 1
             # break
