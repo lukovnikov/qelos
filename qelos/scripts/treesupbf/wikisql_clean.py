@@ -2113,8 +2113,14 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                     select_acc -= 1
 
                 x_where_node, g_where_node = list(get_children_by_name(xtree, "<WHERE>")), list(get_children_by_name(gtree, "<WHERE>"))
-                if len(x_where_node) != len(g_where_node) or not x_where_node[0].equals(g_where_node[0]):
+                if len(x_where_node) != len(g_where_node):
                     where_acc -= 1
+                elif len(g_where_node) == 0:
+                    if len(x_where_node) > 0:
+                        where_acc -= 1
+                else:
+                    if not x_where_node[0].equals(g_where_node[0]):
+                        where_acc -= 1
             # break
             i += 1
         print("{} lines different".format(c))
