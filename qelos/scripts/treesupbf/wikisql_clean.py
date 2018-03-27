@@ -2108,12 +2108,12 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                 c += 1
 
                 x_select_node, g_select_node = get_children_by_name(xtree, "<SELECT>"), get_children_by_name(gtre, "<SELECT>")
-                if not x_select_node.equals(g_select_node):
-                    select_acc += 1
+                if len(x_select_node) != 1 or not x_select_node[0].equals(g_select_node[0]):
+                    select_acc -= 1
             # break
             i += 1
         print("{} lines different".format(c))
-        print("{} select acc".format((1-select_acc)/c))
+        print("{} select acc".format((1.+select_acc)/c))
 # endregion
 
 
