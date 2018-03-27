@@ -2102,7 +2102,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
             gtree = SqlNode.parse_sql(gline)
             # print(xtree.pptree())
             # print(gtree.pptree())
-            if xtree != gtree:
+            if not (gtree.equals(xtree)):
                 print(u"{} \nPREDICTION: {} \nGOLD:       {}\n".format(i, xline.strip(), gline.strip()))
                 c += 1
             i += 1
