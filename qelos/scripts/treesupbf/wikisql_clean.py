@@ -2098,6 +2098,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
         i = 0
         c = 0
         select_acc = 0.
+        where_acc = 0.
         for xline, gline in zip(xf.readlines(), gf.readlines()):
             xtree = SqlNode.parse_sql(xline)
             gtree = SqlNode.parse_sql(gline)
@@ -2110,10 +2111,15 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                 x_select_node, g_select_node = list(get_children_by_name(xtree, "<SELECT>")), list(get_children_by_name(gtree, "<SELECT>"))
                 if len(x_select_node) != 1 or not x_select_node[0].equals(g_select_node[0]):
                     select_acc -= 1
+
+                x_where_node, g_where_node = list(get_children_by_name(xtree, "<WHERE>")), list(get_children_by_name(gtree, "<WHERE>"))
+                if len(x_where_node) != 1 or not x_where_node[0].equals(g_where_node[0]):
+                    where_acc -= 1
             # break
             i += 1
         print("{} lines different".format(c))
         print("{} select acc".format(1.+select_acc/i))
+        print("{} where acc".format(1.+where_acc/i))
 # endregion
 
 
