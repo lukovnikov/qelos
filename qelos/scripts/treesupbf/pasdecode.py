@@ -8,7 +8,7 @@ from qelos.furnn import ParentStackCell
 import re
 
 # region defaults
-OPT_LR = 0.1
+OPT_LR = 0.001
 OPT_BATSIZE = 128
 OPT_GRADNORM = 5.
 OPT_EPOCHS = 50
@@ -17,13 +17,13 @@ OPT_INPEMBDIM = 50
 OPT_OUTEMBDIM = 50
 OPT_LINOUTDIM = 50
 OPT_JOINT_LINOUT_MODE = "sum"
-OPT_ORACLE_MODE = "esample"
+OPT_ORACLE_MODE = "zerocost"
 OPT_EXPLORE = 0.
 OPT_DROPOUT = 0.3
 OPT_ENCDIM = 100
 OPT_DECDIM = 100
-OPT_USEATTENTION = False
-OPT_INPLINMODE = "bf"       # "df" or "bf" or "dfpar"
+OPT_USEATTENTION = True
+OPT_INPLINMODE = "dfpar"       # "df" or "bf" or "dfpar"
 OPT_REMOVE_ANNOTATION = False
 OPT_TREEDECODER_MODE = "double"     # double or single
 # endregion
@@ -78,9 +78,9 @@ def load_synth_trees(n=1000, inplin="bf"):      # inplin: "df" or "bf" or "dfpar
     tracker = GroupTracker(trees)
     for tree in trees:
         if inplin == "df":
-            treestring = tree.ppdf(mode="ann", arbitrary=True)
+            treestring = tree.ppdf(mode="ann", arbitrary=False)
         elif inplin == "dfpar":
-            treestring = tree.ppdf(mode="par", arbitrary=True)
+            treestring = tree.ppdf(mode="par", arbitrary=False)
         elif inplin == "bf":
             treestring = tree.pp(arbitrary=True)
         else:
@@ -549,7 +549,7 @@ def run_seq2seq_teacher_forced(
     trackerDbackup = {k: v for k, v in tracker.D.items()}
     # psm.protectedwords = "<MASK> <RARE> <START> <STOP>".split()
     for tree in trees:
-        treestring = tree.pp(arbitrary=True)
+        treestring = tree.pp(arbitrary=False)
         treestring_in = treestring      #.replace("*LS", "").replace("*NC", "")
         if removeannotation:
             # tt.msg("removing annotation")
@@ -664,7 +664,7 @@ def run_seq2seq_teacher_forced(
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
-    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
+    optimizer = torch.optim.Adam(q.params_of(encdec), lr=lr)
 
     # starts = np.ones((len(ism.matrix, )), dtype="int64") * startid
 
@@ -1185,9 +1185,9 @@ if __name__ == "__main__":
     print("pytorch version: {}".format(torch.version.__version__))
     ### q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_teacher_forced_structured_output_tokens)
-    # q.argprun(run_seq2seq_teacher_forced)
+    q.argprun(run_seq2seq_teacher_forced)
     # q.argprun(run_seq2seq_oracle)
-    q.argprun(run_seq2tree_teacher_forced)
+    # q.argprun(run_seq2tree_teacher_forced)
     # q.argprun(run)
     # q.argprun(test_make_computed_linout)
     # q.argprun(test_make_oracle)
