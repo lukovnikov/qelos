@@ -1125,7 +1125,8 @@ def run_seq2seq_oracle(lr=OPT_LR,
     losses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                          q.SeqElemAccuracy(ignore_index=0),
                          q.SeqAccuracy(ignore_index=0),
-                         TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
+                         # TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x)))
+                         )
 
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
