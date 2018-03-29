@@ -370,8 +370,8 @@ def make_oracle(tracker, symbols2cores, symbols2ctrl, explore, cuda=False, mode=
             goldtree = Node.parse(tracker.pp(golds[i].cpu().data.numpy()))
             predtree = Node.parse(tracker.pp(seqs[i].cpu().data.numpy()))
             exptree = trees[i]
-            assert (exptree == goldtree)
-            assert (exptree == predtree)
+            assert (exptree.equals(goldtree))
+            assert (exptree.equals(predtree))
 
         # try loss
         loss = q.SeqCrossEntropyLoss(ignore_index=0)
