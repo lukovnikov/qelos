@@ -1131,7 +1131,7 @@ def run_seq2seq_oracle(lr=OPT_LR,
     validlosses = q.lossarray(q.SeqCrossEntropyLoss(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=lambda x: Node.parse(tracker.pp(x))))
 
-    optimizer = torch.optim.Adadelta(q.params_of(encdec), lr=lr)
+    optimizer = torch.optim.Adam(q.params_of(encdec), lr=lr)
 
     out_btf = lambda _out: _out[:, :-1, :]
     gold_btf = lambda _eids: torch.stack(oracle.goldacc, 1)
