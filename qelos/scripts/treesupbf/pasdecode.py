@@ -549,7 +549,7 @@ def run_seq2seq_teacher_forced(
     trackerDbackup = {k: v for k, v in tracker.D.items()}
     # psm.protectedwords = "<MASK> <RARE> <START> <STOP>".split()
     for tree in trees:
-        treestring = tree.pp(arbitrary=True)
+        treestring = tree.pp(arbitrary=False)
         treestring_in = treestring      #.replace("*LS", "").replace("*NC", "")
         if removeannotation:
             # tt.msg("removing annotation")
