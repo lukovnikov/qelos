@@ -2157,7 +2157,7 @@ def compare_trees(xpath="", goldpath=DATA_PATH+"dev.gold.outlines"):
                     both_wrong_c += 1
             # break
             i += 1
-        print("{} lines different".format(c))
+        print("{} trees different".format(c))
         print("{} ({}/{}) select acc".format(1.+select_acc/i, -select_acc, i))
         print("\t{} ({}/{}) select agg wrong".format(select_agg_c / (select_c_norm), select_agg_c, select_c_norm))
         print("\t{} ({}/{}) select col wrong".format(select_col_c / (select_c_norm), select_col_c, select_c_norm))

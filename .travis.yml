@@ -13,7 +13,7 @@ before_install:
 install:
   - travis_wait travis_retry pip install -r requirements.txt
   - travis_retry pip install codecov
-  - travis_retry pip install --quiet http://download.pytorch.org/whl/cu80/torch-0.2.0.post3-cp27-cp27mu-manylinux1_x86_64.whl
+  - travis_retry pip install --quiet http://download.pytorch.org/whl/cu80/torch-0.3.0.post4-cp36-cp36m-linux_x86_64.whl
   - travis_retry python setup.py develop
 script: nosetests --with-coverage --cover-package=qelos
 after_success:
