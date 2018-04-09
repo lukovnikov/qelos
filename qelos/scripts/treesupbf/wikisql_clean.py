@@ -1731,7 +1731,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     eids = np.arange(0, len(ism), dtype="int64")
 
     osm = reorder_tf(osm, reordermode=reorder)
-    q.embed()
+    # q.embed()
     # splits
     if test:    devstart, teststart, batsize = 200, 250, 50
     datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn]
