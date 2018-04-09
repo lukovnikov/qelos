@@ -2,6 +2,7 @@
 import codecs
 import json
 import os
+import torch
 import pickle as pkl
 import re
 from collections import OrderedDict, Counter
@@ -9,7 +10,6 @@ from collections import OrderedDict, Counter
 import nltk
 import numpy as np
 import requests
-import torch
 
 import qelos as q
 from qelos.scripts.treesupbf.trees import Node, NodeTrackerDF
@@ -609,6 +609,29 @@ class SqlNode(Node):
             return parse
         else:
             return super(SqlNode, cls).parse_df(inp, _toprec)
+
+    def pp_sql(self, arbitrary=False):
+        children = list(self.children)
+
+        if arbitrary is True:
+            # randomly shuffle children while keeping children with order in positions they were in
+            fillthis = [child if child._order is not None else None for child in children]
+            if None in fillthis:
+                pass
+            children_without_order = [child for child in children if child._order is None]
+            random.shuffle(children_without_order)
+            for i in range(len(fillthis)):
+                if fillthis[i] is None:
+                    fillthis[i] = children_without_order[0]
+                    children_without_order = children_without_order[1:]
+            children = fillthis
+
+        children = [child.pp_sql(arbitrary=arbitrary)
+                    for child, _is_last_child
+                    in zip(children, [False] * (len(children) - 1) + [True])]
+        ret = self.symbol(with_label=True, with_annotation=False, with_order=False)
+        ret += "" if len(children) == 0 else " " + " ".join(children)
+        return ret
 
 
 def get_children_by_name(node, cre):
@@ -1483,6 +1506,31 @@ def do_rare_in_colnames(cnsm, traincolids, gdic, rarefreq=3, replace=False):
     return cnsm
 
 
+def reorder_tf(osm, reordermode="no"):
+    tt = q.ticktock("reorderer")
+    if reordermode == "no":
+        return osm
+    elif reordermode in ("reverse", "arbitrary"):
+        tt.tick("reordering")
+        for i in range(len(osm.matrix)):
+            lin = osm[i]
+            tree = SqlNode.parse_sql(lin)
+            if reordermode == "reverse":
+                # get WHERE node
+                wherenodes = list(get_children_by_name(tree, "<WHERE>"))
+                assert(len(wherenodes) < 2)
+                if len(wherenodes) == 1 and len(wherenodes[0].children) > 1:
+                    wherenodes[0].children = wherenodes[0].children[::-1]
+            relin = "<START> " + tree.pp_sql(arbitrary=reordermode == "arbitrary") + " <END>"
+            relinids = [osm.D[x] for x in relin.split()]
+            osm.matrix[i, :] = 0
+            osm.matrix[i, :len(relinids)] = relinids
+            newtree = SqlNode.parse_sql(osm[i])
+            assert(newtree.equals(tree))
+        tt.tock("reordered")
+        return osm
+
+
 def make_oracle_df(tracker, mode=None):
     ttt = q.ticktock("oracle maker")
     print("oracle mode: {}".format(mode))
@@ -1640,7 +1688,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
-                   tieembeddings=False, dorare=False):
+                   tieembeddings=False, dorare=False, reorder="no"):
+                    # reorder: "no", "reverse", "arbitrary"
     # region init
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_clean")
@@ -1680,6 +1729,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     gwids._matrix = gwids.matrix * (gwids.matrix != gwids.D["<RARE>"])
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")
+
+    osm = reorder_tf(osm, reordermode=reorder)
+    q.embed()
     # splits
     if test:    devstart, teststart, batsize = 200, 250, 50
     datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn]
@@ -2173,6 +2225,6 @@ if __name__ == "__main__":
     # test_sqlnode_and_sqls()
     # test_grouptracker()
     # test_save()
-    # q.argprun(run_seq2seq_tf)
+    q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_oracle_df)
     q.argprun(compare_trees)

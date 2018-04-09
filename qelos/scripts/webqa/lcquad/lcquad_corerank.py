@@ -136,7 +136,6 @@ class StupidScoreModelRank(StupidScoreModel):
         return score
 
 
-
 class InpFeeder(object):
     def __init__(self, ldata, rdata, eid2lid, eid2rids, eid2rid_gold=None, scores=None):
         """ if eid2rid_gold is specified, doing "gold" mode
