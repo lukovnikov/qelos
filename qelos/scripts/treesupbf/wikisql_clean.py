@@ -1531,6 +1531,31 @@ def reorder_tf(osm, reordermode="no"):
         return osm
 
 
+def reorder_select(osm):
+    tt = q.ticktock("select-reorder")
+    tt.tick("putting col before agg in select")
+    for i in range(len(osm.matrix)):
+        lin = osm[i]
+        tree = SqlNode.parse_sql(lin)
+        selectnode = list(get_children_by_name(tree, "<SELECT>"))
+        assert(len(selectnode) == 1)
+        selectnode = selectnode[0]
+        selectchildren = selectnode.children[::-1]
+        for j, selectchild in enumerate(selectchildren):
+            selectchild.order = j
+        selectnode.children = selectchildren
+        relin = "<START> " + tree.pp_sql() + " <END>"
+        relinids = [osm.D[x] for x in relin.split()]
+        osm.matrix[i, :] = 0
+        osm.matrix[i, :len(relinids)] = relinids
+        newtree = SqlNode.parse_sql(osm[i])
+        assert(newtree.equals(tree))
+
+    tt.tock("reordered")
+    return osm
+
+
+
 def make_oracle_df(tracker, mode=None):
     ttt = q.ticktock("oracle maker")
     print("oracle mode: {}".format(mode))
@@ -1688,7 +1713,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
                    dropout=0.2, rdropout=0.1, edropout=0., idropout=0., irdropout=0.,
                    wreg=0.000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                    cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
-                   tieembeddings=False, dorare=False, reorder="no"):
+                   tieembeddings=False, dorare=False, reorder="no", selectcolfirst=False):
                     # reorder: "no", "reverse", "arbitrary"
     # region init
     settings = locals().copy()
@@ -1731,7 +1756,9 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     eids = np.arange(0, len(ism), dtype="int64")
 
     osm = reorder_tf(osm, reordermode=reorder)
-    # q.embed()
+    if selectcolfirst:
+        osm = reorder_select(osm)
+    q.embed()
     # splits
     if test:    devstart, teststart, batsize = 200, 250, 50
     datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn]
