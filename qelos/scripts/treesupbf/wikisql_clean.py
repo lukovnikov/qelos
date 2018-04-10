@@ -1937,7 +1937,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                           wreg=0.0000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                           cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
                           tieembeddings=False, dorare=False,
-                          oraclemode="zerocost"):
+                          oraclemode="zerocost", selectcolfirst=False):
     # region init
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_oracle_df_clean")
@@ -1977,6 +1977,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     gwids._matrix = gwids.matrix * (gwids.matrix != gwids.D["<RARE>"])
     devstart, teststart = splits
     eids = np.arange(0, len(ism), dtype="int64")
+    if selectcolfirst:
+        osm = reorder_select(osm)
     # splits
     if test:    devstart, teststart, batsize = 200, 250, 50
     datamats = [ism.matrix, osm.matrix, gwids.matrix, e2cn, eids]
