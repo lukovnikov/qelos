@@ -1904,7 +1904,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     tt.msg("setting weights from best model")
     test_m.load_state_dict(torch.load(model_save_path))
 
-    assert(all([(list(test_m.parameters())[i] - list(valid_m.parameters())[i]).float().norm() == 0 for i in range(42)]))
+    assert(all([(list(test_m.parameters())[i] - list(valid_m.parameters())[i].cpu()).float().norm() == 0 for i in range(42)]))
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=row2tree))
