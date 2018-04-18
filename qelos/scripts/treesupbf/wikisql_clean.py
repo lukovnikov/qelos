@@ -1794,7 +1794,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
         _encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
         return _inpemb, _outemb, _outlin, _encoder
-    inpemb, outemb, outlin, encoder = create_submodules()
+    # inpemb, outemb, outlin, encoder = create_submodules()
     # endregion
 
     # region encoder-decoder definition
@@ -1827,7 +1827,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region decoders and model, for train and test
-    def create_train_and_test_models(_inpemb, _outemb, _outlin, _encoder):
+    def create_train_and_test_models():
+        _inpemb, _outemb, _outlin, _encoder = create_submodules()
         layers = [q.LSTMCell(decdims[i-1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
                   for i in range(1, len(decdims))]
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
@@ -1846,7 +1847,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
 
         _valid_m = EncDec(_inpemb, _outemb, _outlin, _encoder, valid_decoder)     # use for valid
         return _m, _valid_m
-    m, valid_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+    m, valid_m = create_train_and_test_models()
     # TODO: verify that valid_m doesn't get something wrong !
     # endregion
 
@@ -1897,8 +1898,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     tt.tick("evaluating")
 
     tt.msg("generating model from scratch")
-    inpemb, outemb, outlin, encoder = create_submodules()
-    _, test_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+    _, test_m = create_train_and_test_models()
 
     tt.msg("setting weights from best model")
     test_m.load_state_dict(torch.load(model_save_path))
@@ -2018,7 +2018,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
 
         _encoder = q.FastestLSTMEncoder(*encdims, dropout_in=idropout, dropout_rec=irdropout, bidir=True)
         return _inpemb, _outemb, _outlin, _encoder
-    inpemb, outemb, outlin, encoder = create_submodules()
+    # inpemb, outemb, outlin, encoder = create_submodules()
     # endregion
 
     # region encoder decoder definitions
@@ -2051,7 +2051,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     # endregion
 
     # region decoders and model, for train and test
-    def create_train_and_test_models(_inpemb, _outemb, _outlin, _encoder):
+    def create_train_and_test_models():
+        _inpemb, _outemb, _outlin, _encoder = create_submodules()
         layers = [q.LSTMCell(decdims[i - 1], decdims[i], dropout_in=dropout, dropout_rec=rdropout)
                   for i in range(1, len(decdims))]
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
@@ -2072,7 +2073,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                           valid_decoder, maxtime=osm.matrix.shape[1]-1)  # use for valid -- change from TF script
                     # change from original oracle script: added -1 to have same maxtime as TF script --> don't need out_bt
         return _m, _valid_m
-    m, valid_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+    m, valid_m = create_train_and_test_models()
     # TODO: verify that valid_m doesn't get something wrong !
     # endregion
 
@@ -2128,8 +2129,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
     tt.tick("evaluating")
 
     tt.msg("generating model from scratch")
-    inpemb, outemb, outlin, encoder = create_submodules()
-    _, test_m = create_train_and_test_models(inpemb, outemb, outlin, encoder)
+    _, test_m = create_train_and_test_models()
 
     tt.msg("setting weights from best model")
     test_m.load_state_dict(torch.load(model_save_path))
