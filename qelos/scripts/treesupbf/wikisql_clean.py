@@ -1406,6 +1406,7 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1,
         def __init__(self):
             super(Computer, self).__init__()
             self.baseemb = baseemb
+            self.rare_gwids = rare_gwids
             self.rare_vec = torch.nn.Parameter(baseemb.embedding.weight[baseemb.D["<RARE>"]].data)
             if embdim != dim:
                 print("USING LIN ADAPTER")
@@ -1419,7 +1420,7 @@ def make_inp_emb(dim, ism, psm, useglove=True, gdim=None, gfrac=0.1,
             _embs, mask = self.baseemb(transids)        # baseemb embedds gwids
             if self.trans is not None:
                 _embs = self.trans(_embs)
-            _embs = replace_rare_gwids_with_rare_vec(_embs, transids, rare_gwids, self.rare_vec)
+            _embs = replace_rare_gwids_with_rare_vec(_embs, transids, self.rare_gwids, self.rare_vec)
             return _embs
 
     emb = DynamicWordEmb(computer=Computer(), worddic=ism.D)
@@ -1903,6 +1904,8 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     tt.msg("setting weights from best model")
     test_m.load_state_dict(torch.load(model_save_path))
 
+    assert(all([(list(test_m.parameters())[i] - list(valid_m.parameters())[i]).float().norm() == 0 for i in range(42)]))
+
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=row2tree))
     finalvalidlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
@@ -1937,7 +1940,7 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                           wreg=0.0000000000001, gradnorm=5., useglove=True, gfrac=0.01,
                           cuda=False, gpu=0, tag="none", ablatecopy=False, test=False,
                           tieembeddings=False, dorare=False,
-                          oraclemode="zerocost", selectcolfirst=False):
+                          oraclemode="zerocost", selectcolfirst=False): # oraclemode: "zerocost" or "sample"
     # region init
     settings = locals().copy()
     logger = q.Logger(prefix="wikisql_s2s_oracle_df_clean")
@@ -2057,8 +2060,8 @@ def run_seq2seq_oracle_df(lr=0.001, batsize=100, epochs=100,
                   for i in range(1, len(decdims))]
         decoder_top = q.AttentionContextDecoderTop(q.Attention().dot_gen(),
                                                    q.Dropout(edropout),
-                                                   outlin, ctx2out=False)
-        decoder_core = q.DecoderCore(outemb, *layers)
+                                                   _outlin, ctx2out=False)
+        decoder_core = q.DecoderCore(_outemb, *layers)
         decoder_cell = q.ModularDecoderCell(decoder_core, decoder_top)
         decoder_cell.set_runner(oracle)                 # change from TF script
         decoder = decoder_cell.to_decoder()
