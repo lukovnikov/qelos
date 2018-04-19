@@ -1367,12 +1367,12 @@ def build_subdics(osm):
 
 def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, colenc=None,
                           useglove=True, gdim=None, gfrac=0.1,
-                          rare_gwids=None):
+                          rare_gwids=None, nogloveforinp=False):
     # base embedder for input tokens
     embdim = gdim if gdim is not None else dim
-    if inpbaseemb is None:
+    if inpbaseemb is None :
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
-        if useglove:
+        if useglove and not nogloveforinp:
             inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
 
     # base embedder for column names
@@ -1445,7 +1445,7 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
                                 colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                                rare_gwids=rare_gwids)
+                                rare_gwids=rare_gwids, nogloveforinp=True)
     inp_trans = comp.inp_trans  # to index
     out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, nocopy=nocopy)
     return out, inpbaseemb, colbaseemb, colenc
@@ -1904,7 +1904,7 @@ def run_seq2seq_tf(lr=0.001, batsize=100, epochs=100,
     tt.msg("setting weights from best model")
     test_m.load_state_dict(torch.load(model_save_path))
 
-    assert(all([(list(test_m.parameters())[i] - list(valid_m.parameters())[i].cpu()).float().norm() == 0 for i in range(42)]))
+    # assert(all([(list(test_m.parameters())[i] - list(valid_m.parameters())[i].cpu()).float().norm()[0] == 0 for i in range(42)]))
 
     testlosses = q.lossarray(q.SeqAccuracy(ignore_index=0),
                               TreeAccuracy(ignore_index=0, treeparser=row2tree))
