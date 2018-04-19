@@ -1370,7 +1370,7 @@ def make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=None, colbaseemb=None, 
                           rare_gwids=None, nogloveforinp=False):
     # base embedder for input tokens
     embdim = gdim if gdim is not None else dim
-    if inpbaseemb is None :
+    if inpbaseemb is None:
         inpbaseemb = q.WordEmb(dim=embdim, worddic=psm.D)
         if useglove and not nogloveforinp:
             inpbaseemb = q.PartiallyPretrainedWordEmb(dim=embdim, worddic=psm.D, gradfracs=(1., gfrac))
@@ -1554,7 +1554,6 @@ def reorder_select(osm):
 
     tt.tock("reordered")
     return osm
-
 
 
 def make_oracle_df(tracker, mode=None):
