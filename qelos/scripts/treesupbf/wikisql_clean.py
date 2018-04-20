@@ -1445,7 +1445,7 @@ def make_out_lin(dim, ism, osm, psm, csm, inpbaseemb=None, colbaseemb=None,
     comp, inpbaseemb, colbaseemb, colenc \
         = make_out_vec_computer(dim, osm, psm, csm, inpbaseemb=inpbaseemb, colbaseemb=colbaseemb,
                                 colenc=colenc, useglove=useglove, gdim=gdim, gfrac=gfrac,
-                                rare_gwids=rare_gwids, nogloveforinp=True)
+                                rare_gwids=rare_gwids, nogloveforinp=False)
     inp_trans = comp.inp_trans  # to index
     out = BFOL(computer=comp, worddic=osm.D, ismD=ism.D, inp_trans=inp_trans, nocopy=nocopy)
     return out, inpbaseemb, colbaseemb, colenc
