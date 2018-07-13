@@ -1462,15 +1462,16 @@ def get_rare_stats(trainism, traingwids, gwidsD, gdic, rarefreq=2):
     rD = {v: k for k, v in gwidsD.items()}
     # count all unique ids in traingwids
     uniquegwids, gwid_counts = np.unique(traingwids, return_counts=True)
+    numunique = len(uniquegwids)
     rare_gwids = gwid_counts <= rarefreq
     number_rare = np.sum(rare_gwids.astype("int32"))
-    print("{} gwids with freq <= {} (counted in train)".format(number_rare, rarefreq))
+    print("{}/{} gwids with freq <= {} (counted in train)".format(number_rare, numunique, rarefreq))
     unique_nonrare_ids = uniquegwids * (~rare_gwids).astype("int32")
     unique_nonrare_ids = set(unique_nonrare_ids)
     unique_nonrare_words = set([rD[unrid] for unrid in unique_nonrare_ids])
     rare_words = set(gwidsD.keys()) - unique_nonrare_words - set(gdic.keys())
     rare_gwids_after_glove = set([gwidsD[rare_word] for rare_word in rare_words])
-    print("{} gwids with freq <= {} (counted in train) and not in used glove".format(len(rare_gwids_after_glove), rarefreq))
+    print("{}/{} gwids with freq <= {} (counted in train) and not in used glove".format(len(rare_gwids_after_glove), numunique, rarefreq))
     return rare_gwids_after_glove
 
 
@@ -2258,4 +2259,4 @@ if __name__ == "__main__":
     # test_save()
     q.argprun(run_seq2seq_tf)
     # q.argprun(run_seq2seq_oracle_df)
-    q.argprun(compare_trees)
+    # q.argprun(compare_trees)
